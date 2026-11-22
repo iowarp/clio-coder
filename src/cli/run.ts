@@ -800,7 +800,6 @@ async function runDispatch(
 	const { ensureClioState } = await import("../domains/lifecycle/index.js");
 	const { buildDispatchMemorySection } = await import("../domains/memory/index.js");
 	const { createPromptsDomainModule } = await import("../domains/prompts/index.js");
-	const { prepareListedModelCapabilities } = await import("../domains/providers/background-model-metadata.js");
 	const { resolveEffectivePricing } = await import("../domains/providers/catalog.js");
 	const { ProvidersDomainModule } = await import("../domains/providers/index.js");
 	const { ResourcesDomainModule } = await import("../domains/resources/index.js");
@@ -961,16 +960,13 @@ async function runDispatch(
 	}
 	if (memorySection.length > 0) dispatchReq.memorySection = memorySection;
 
-	// A worker resolves its model's thinking levels and budgets from the provider
-	// status, which a fresh process builds from the listing cache. A runtime that
-	// lists per-model capabilities lists live first when that cache has none.
+	// --require-priced (SPEC 6.9): refuse before the worker starts. Dispatch lists a cold
+	// Copilot cache itself, as it does for every worker route.
 	const runProviders = loaded.getContract("providers");
 	if (runProviders) {
-		let workerTargetId = dispatchReq.target;
 		try {
 			const preview = dispatch.preview?.(dispatchReq);
-			workerTargetId = preview?.targetId ?? workerTargetId;
-			// --require-priced (SPEC 6.9): the one previewed route; admission rechecks the route it resolves.
+			// The one previewed route; admission rechecks the route it resolves.
 			const target = preview !== undefined ? runProviders.getTarget(preview.targetId) : null;
 			const runtime = target ? runProviders.getRuntime(target.runtime) : null;
 			const refusal =
@@ -988,7 +984,6 @@ async function runDispatch(
 		} catch {
 			// Admission reports the refusal itself when the run starts.
 		}
-		if (workerTargetId !== undefined) await prepareListedModelCapabilities(runProviders, workerTargetId);
 	}
 
 	// Narrower than the writer's parameter so a frame built here is checked

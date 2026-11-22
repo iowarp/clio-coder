@@ -1,6 +1,12 @@
-import type { ProvidersContract } from "../providers/contract.js";
+import { prepareListedModelCapabilities } from "../providers/background-model-metadata.js";
+import { PROVIDER_PROBE_TIMEOUT_MS, type ProvidersContract } from "../providers/contract.js";
 
-/** Preparation owns its wait; a late HTTP body cannot start an expired worker. */
+/**
+ * Preparation owns its wait; a late HTTP body cannot start an expired worker.
+ * Every worker route passes here, so a runtime whose listing carries per-model
+ * capabilities (Copilot) lists once from a cold cache whichever surface
+ * dispatched it: a tool call, `run --agent` or a playbook step.
+ */
 export async function prepareWorkerModelMetadata(
 	providers: ProvidersContract,
 	targetId: string,
@@ -10,6 +16,15 @@ export async function prepareWorkerModelMetadata(
 ): Promise<void> {
 	signal?.throwIfAborted();
 	const status = providers.list().find((entry) => entry.target.id === targetId);
+	if (status !== undefined && providers.getRuntime(status.target.runtime)?.listsModelCapabilities === true) {
+		// A failed or slow listing keeps resolution's fallback instead of refusing the worker.
+		const remainingMs = deadlineAt - now();
+		if (remainingMs > 0) {
+			await prepareListedModelCapabilities(providers, targetId, Math.min(remainingMs, PROVIDER_PROBE_TIMEOUT_MS), signal);
+		}
+		signal?.throwIfAborted();
+		return;
+	}
 	if (status?.target.runtime !== "litellm" || status.health.lastCheckAt !== null) return;
 	const remainingMs = deadlineAt - now();
 	const deadlineError = new Error("dispatch: admission deadline expired during worker model metadata preparation");

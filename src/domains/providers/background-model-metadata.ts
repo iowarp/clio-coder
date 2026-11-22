@@ -27,24 +27,27 @@ export async function prepareListedModelCapabilities(
 	providers: ProvidersContract,
 	targetId: string,
 	timeoutMs: number = PROVIDER_PROBE_TIMEOUT_MS,
+	signal?: AbortSignal,
 ): Promise<void> {
 	const status = providers.list().find((entry) => entry.target.id === targetId);
 	if (!status || providers.getRuntime(status.target.runtime)?.listsModelCapabilities !== true) return;
 	if (Object.keys(status.probeModelCapabilities ?? {}).length > 0) return;
+	if (signal?.aborted) return;
 	const controller = new AbortController();
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	const expired = new Promise<void>((resolve) => {
-		timer = setTimeout(() => {
-			controller.abort(new Error(`model listing exceeded ${timeoutMs}ms`));
-			resolve();
-		}, timeoutMs);
-	});
+	const cancel = (): void => controller.abort(signal?.reason);
+	signal?.addEventListener("abort", cancel, { once: true });
+	const timer = setTimeout(() => controller.abort(new Error(`model listing exceeded ${timeoutMs}ms`)), timeoutMs);
+	// A timeout or the caller's cancellation ends the wait even if the listing never answers.
+	const stopped = new Promise<void>((resolve) =>
+		controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+	);
 	try {
 		await Promise.race([
 			providers.probeTarget(targetId, { reasoning: false, signal: controller.signal }).catch(() => null),
-			expired,
+			stopped,
 		]);
 	} finally {
 		clearTimeout(timer);
+		signal?.removeEventListener("abort", cancel);
 	}
 }

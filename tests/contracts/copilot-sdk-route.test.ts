@@ -22,6 +22,7 @@ import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir, resolveClioDirs } from "../../src/core/xdg.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
+import { prepareWorkerModelMetadata } from "../../src/domains/dispatch/worker-model-metadata.js";
 import { createBackgroundMemoryModelClient } from "../../src/domains/memory/background-route.js";
 import type { MemoryRouteText } from "../../src/domains/memory/secret-text.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
@@ -955,7 +956,7 @@ test("ACP on a cold listing cache offers the account's live models, their listed
 	}
 });
 
-test("a Copilot worker resolves the main agent's thinking levels and budgets from a live or persisted listing", async () => {
+test("every Copilot worker path resolves the main agent's thinking levels, budgets and window from a live or persisted listing (row 357)", async () => {
 	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
 	const original = [...models];
 	models.push({
@@ -993,7 +994,8 @@ test("a Copilot worker resolves the main agent's thinking levels and budgets fro
 		const cold = await freshProcess();
 		bundles.push(cold);
 		strictEqual(resolve(cold.contract, "dispatch").capabilities.reasoning, false, "nothing listed yet");
-		await prepareListedModelCapabilities(cold.contract, target.id);
+		// Dispatch's own preparation, which every worker (dispatch, run --agent, a playbook step) passes.
+		await prepareWorkerModelMetadata(cold.contract, target.id, Date.now() + 60_000);
 		const listedLive = resolve(cold.contract, "dispatch");
 
 		const persisted = await freshProcess();
