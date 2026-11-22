@@ -30,15 +30,19 @@ export function outsideWorkspaceHint(args: unknown, cwd: string): string {
 }
 
 /**
- * Name what was refused. Bash and verify carry the command the policy
- * evaluated (verify's resolved argv); other execute tools fall back to the
- * call's allowlisted target preview.
+ * The command a call carries, scrubbed of credentials and clipped to 200 characters: what a refusal and an ACP
+ * permission title name. Bash and verify carry the command the policy evaluated (verify's resolved argv); other
+ * tools fall back to the call's allowlisted target preview. Empty when the call names nothing.
  */
-export function describeWorkerRefusal(call: ClassifierCall, decision: SafetyDecision): WorkerRefusal {
+export function clippedCallCommand(call: ClassifierCall, decision: SafetyDecision): string {
 	const raw = decision.policy?.command ?? describeCallTarget(call.tool, call.args);
 	const scrubbed = redactCommandOutputSecrets(redactSecretString(raw.trim()));
-	const command =
-		scrubbed.length <= REFUSED_COMMAND_MAX_CHARS ? scrubbed : `${scrubbed.slice(0, REFUSED_COMMAND_MAX_CHARS)}…`;
+	return scrubbed.length <= REFUSED_COMMAND_MAX_CHARS ? scrubbed : `${scrubbed.slice(0, REFUSED_COMMAND_MAX_CHARS)}…`;
+}
+
+/** Name what was refused, as {@link clippedCallCommand} words the command. */
+export function describeWorkerRefusal(call: ClassifierCall, decision: SafetyDecision): WorkerRefusal {
+	const command = clippedCallCommand(call, decision);
 	const rule =
 		(decision.kind === "ask" ? decision.confirmationRuleId : undefined) ??
 		decision.policy?.ruleId ??

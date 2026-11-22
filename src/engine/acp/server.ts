@@ -153,6 +153,7 @@ import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import { effectiveToolCall } from "../../tools/surface.js";
 import type { AgentMessage, ImageContent } from "../types.js";
+import { clippedCallCommand } from "../worker-refusals.js";
 import {
 	ACP_ARTIFACT_CATEGORIES,
 	ACP_ARTIFACTS_LIST_METHOD,
@@ -1557,6 +1558,15 @@ function boundRawRecord(value: unknown): Record<string, unknown> {
 	// The bounded size is the fallback: an unserializable original has no size of
 	// its own, and reporting the copy's is closer than reporting nothing.
 	return { truncated: true, bytes: originalRawRecordBytes(value) ?? boundedBytes };
+}
+
+/**
+ * The title of a main-session permission ask: a shell call reads as its command, any other call as its tool and
+ * target, and a call that names nothing as its tool.
+ */
+function permissionTitle(tool: string, command: string): string {
+	if (command.length === 0) return tool;
+	return tool === ToolNames.Bash ? command : `${tool}: ${command}`;
 }
 
 /** Built-in tools whose first positional argument names a workspace path. */
@@ -3722,11 +3732,13 @@ function installPermissionBridge(input: {
 								sessionId,
 								toolCall: {
 									toolCallId,
+									// A generic client shows only the title, so it names the call: the clipped, scrubbed command for a
+									// shell call as refusals word it, the tool and its target otherwise.
 									title: boundString(
 										redactUrlCredentials(
 											decision.kind === "ask" && decision.confirmationRuleId === "dispatch-external-read"
 												? `Scout read-only root: ${describeCallTarget(call.tool, call.args)}`
-												: call.tool,
+												: permissionTitle(call.tool, clippedCallCommand(call, decision)),
 										),
 										ACP_MAX_TOOL_TITLE_BYTES,
 									),

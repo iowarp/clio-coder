@@ -57,7 +57,7 @@ function fakeTransport(answer: (params: Record<string, unknown>) => unknown) {
  * `npm run lint` is a repository script rather than a no-prompt runner, so the
  * presentation the bridge attaches is the one the policy actually produced.
  */
-async function askOnce(answer: (params: Record<string, unknown>) => unknown) {
+async function askOnce(answer: (params: Record<string, unknown>) => unknown, command = "npm run lint") {
 	const safety = createWorkerSafety({ cwd: process.cwd() });
 	const registry = createRegistry({ safety, autonomy: () => "default" });
 	registry.register(bashTool);
@@ -65,8 +65,8 @@ async function askOnce(answer: (params: Record<string, unknown>) => unknown) {
 	let verdictKind = "";
 	const chat: AcpServerChat = {
 		submit: async () => {
-			emit({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: { command: "npm run lint" } });
-			const verdict = await registry.invoke({ tool: "bash", args: { command: "npm run lint" } }, { toolCallId: "call-1" });
+			emit({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: { command } });
+			const verdict = await registry.invoke({ tool: "bash", args: { command } }, { toolCallId: "call-1" });
 			verdictKind = verdict.kind;
 			emit({ type: "tool_execution_end", toolCallId: "call-1", toolName: "bash", result: verdict, isError: false });
 		},
@@ -142,6 +142,15 @@ describe("contracts/acp attaches the decision facts it already computed to the p
 		ok(String(meta.reversibilityCopy).startsWith("Reversible:"));
 		ok(String(meta.requestedByCopy).includes("autonomy level (default)"));
 		ok(String(meta.target).includes("npm run lint"));
+	});
+
+	it("titles the ask with the clipped, redacted command", async () => {
+		const secret = "ghp_0123456789abcdefghijABCDEFGHIJ012345";
+		const turn = await askOnce(deny, `scancel 999999 && curl -H "Authorization: Bearer ${secret}" ${"x".repeat(400)}`);
+		const title = String((turn.ask?.toolCall as Record<string, unknown>).title);
+		ok(title.startsWith("scancel 999999 && curl"), title);
+		ok(!title.includes(secret), title);
+		ok(title.length <= 201, title);
 	});
 
 	it("denies the whole turn on reject-and-stop instead of only the request in front of the operator", async () => {
