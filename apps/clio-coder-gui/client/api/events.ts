@@ -18,6 +18,11 @@ type OperationEntry = { resource: string; revision: number; operation?: Operatio
 export type ConnectionState = "Connecting…" | "Connected" | "Reconnecting…" | "Not connected";
 /** A launch older than this was meant for a moment that has passed, such as one replayed after a reconnect. */
 const LAUNCH_FRESH_MS = 10_000;
+/**
+ * A task start reaches the browser as several control events, and each flushes its own frame. Reading the overview
+ * per frame cancelled the read the previous frame had just started, so the burst shares one trailing read.
+ */
+const OVERVIEW_COALESCE_MS = 150;
 
 /** The monotonic clock and the one-shot timer behind the telemetry refresh throttle. */
 interface RefreshTimers {
@@ -128,7 +133,24 @@ export function subscribe(
 			}, delayMs),
 		);
 	};
+	let overviewTimer: (() => void) | null = null;
+	const refreshOverview = () => {
+		overviewTimer?.();
+		overviewTimer = null;
+		// Invalidation alone reuses a pending first read, which may have captured an older attention state.
+		void queries.cancelQueries({ queryKey: ["session-overview"] });
+		void queries.invalidateQueries({ queryKey: ["session-overview"] });
+	};
+	const deferOverview = () => {
+		if (overviewTimer) return;
+		overviewTimer = timers.schedule(() => {
+			overviewTimer = null;
+			if (!disposed) refreshOverview();
+		}, OVERVIEW_COALESCE_MS);
+	};
 	const stopTelemetry = () => {
+		overviewTimer?.();
+		overviewTimer = null;
 		for (const cancel of telemetryTimers.values()) cancel();
 		telemetryTimers.clear();
 		telemetryPending.clear();
@@ -386,13 +408,15 @@ export function subscribe(
 					event.type === "fleet.completed" ||
 					event.type === "fleet.failed" ||
 					event.type === "job.changed" ||
-					event.type === "job.listed" ||
-					event.type === "hello",
+					event.type === "job.listed",
 			)
 		)
 			invalidate.add("session-overview");
-		// Invalidation alone reuses a pending first read, which may have captured an older attention state.
-		if (invalidate.has("session-overview")) void queries.cancelQueries({ queryKey: ["session-overview"] });
+		// The first read waits for hello, so hello refreshes at once: the held read is retired before it goes out.
+		if (events.some((event) => event.type === "hello")) {
+			invalidate.delete("session-overview");
+			refreshOverview();
+		} else if (invalidate.delete("session-overview")) deferOverview();
 		for (const key of invalidate) void queries.invalidateQueries({ queryKey: [key] });
 		if (launched !== null) launch(launched);
 	});

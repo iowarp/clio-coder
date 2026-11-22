@@ -302,6 +302,42 @@ test("a burst of telemetry pushes refreshes a session's reads at most once per i
 	assert.equal(reads("session-usage", cancelled.mock.calls), 0, "a throttled read is never cancelled and restarted");
 });
 
+test("a task start's control events, each in its own frame, read the session overview once", async (t) => {
+	const scheduled: { run: () => void; cancelled: boolean }[] = [];
+	const timers = {
+		now: () => 0,
+		schedule(run: () => void) {
+			const entry = { run, cancelled: false };
+			scheduled.push(entry);
+			return () => {
+				entry.cancelled = true;
+			};
+		},
+	};
+	const queries = new QueryClient();
+	t.after(() => queries.clear());
+	queries.setQueryData(["session-overview"], { sessions: [] });
+	const stream = await liveStream(t, queries, timers);
+	const overview = (calls: readonly { arguments: readonly unknown[] }[]) =>
+		calls.filter(
+			(call) => JSON.stringify((call.arguments[0] as { queryKey?: unknown })?.queryKey) === '["session-overview"]',
+		).length;
+	const invalidated = t.mock.method(queries, "invalidateQueries");
+	const cancelled = t.mock.method(queries, "cancelQueries");
+	stream.deliver({
+		type: "session.changed",
+		payload: { resource: "started", revision: 1, state: "open", recoveredOrphan: false },
+	});
+	stream.deliver({ type: "session.labelled", payload: { resource: "started", revision: 2, label: "Started" } });
+	stream.deliver(finishedTurn("started", 3));
+	assert.equal(overview(cancelled.mock.calls), 0, "no read is started only to be aborted by the next frame");
+	assert.equal(overview(invalidated.mock.calls), 0);
+	const pending = scheduled.filter((entry) => !entry.cancelled);
+	assert.equal(pending.length, 1, "the burst shares one trailing overview read");
+	pending[0]?.run();
+	assert.equal(overview(invalidated.mock.calls), 1);
+});
+
 test("a malformed event frame is skipped and the stream carries on", async (t) => {
 	const queries = new QueryClient();
 	t.after(() => queries.clear());
