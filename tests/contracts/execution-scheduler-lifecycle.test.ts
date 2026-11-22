@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { parsePlaybook, renderPlaybookPrompt } from "../../src/domains/agents/playbook.js";
@@ -504,6 +504,48 @@ describe("execution scheduler lifecycle", () => {
 			ok(brief.includes(authors), brief);
 			ok(task(id).includes("`review-verdict`"));
 		}
+	});
+
+	it("names every allowed value when a playbook refuses a scope or another literal", () => {
+		const raw = (scope: string, onFailure = "stop") =>
+			[
+				"---",
+				"version: 3",
+				"name: wt",
+				"steps:",
+				`  - {kind: agent, id: build, agent: coder, scope: ${scope}, dependencies: []}`,
+				"maxWorkers: 1",
+				`onFailure: ${onFailure}`,
+				"---",
+				"{{task}}",
+			].join("\n");
+		throws(
+			() => parsePlaybook(raw("isolated"), "wt.md"),
+			/: \/steps\/0\/scope: must be one of 'readonly', 'workspace', 'worktree'$/,
+		);
+		throws(() => parsePlaybook(raw("worktree", "halt"), "wt.md"), /: \/onFailure: must be one of 'stop', 'continue'$/);
+		// A code step is judged as a code step, not as the agent shape the union lists first.
+		throws(
+			() =>
+				parsePlaybook(
+					raw("isolated").replace("kind: agent, id: build, agent: coder", "kind: code, id: build, command: test"),
+					"wt.md",
+				),
+			/: \/steps\/0\/scope: must be one of 'readonly', 'workspace', 'worktree'$/,
+		);
+		throws(
+			() =>
+				parsePlaybook(
+					raw("worktree")
+						.replace("agent: coder, scope: worktree", "agent: coder, scope: workspace")
+						.replace(
+							"\nmaxWorkers",
+							"\n  - {kind: agent, id: other, agent: coder, scope: worktree, dependencies: []}\nmaxWorkers",
+						),
+					"wt.md",
+				),
+			/step 'other' has scope 'worktree' but step 'build' has scope 'workspace'/,
+		);
 	});
 
 	it("admission failure launches no work, and invalid replay releases the reservation", async () => {

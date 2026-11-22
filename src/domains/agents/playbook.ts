@@ -23,6 +23,7 @@ import { parseFrontmatter } from "./frontmatter.js";
 import {
 	loadPlaybookCommands,
 	type PlaybookCommandRegistry,
+	playbookSchemaErrorText,
 	resolvePlaybookCommandArgs,
 	validatePlaybookCommandArgs,
 } from "./playbook-commands.js";
@@ -420,8 +421,7 @@ function playbookVersion(frontmatter: Record<string, unknown>): PlaybookVersion 
 function firstSchemaError(frontmatter: Record<string, unknown>, version: PlaybookVersion): string | null {
 	const schema = SCHEMAS[version];
 	if (Value.Check(schema, frontmatter)) return null;
-	const first = [...Value.Errors(schema, frontmatter)][0];
-	return first ? `${first.instancePath || "(root)"}: ${first.message}` : "front matter failed validation";
+	return playbookSchemaErrorText(schema, Value.Errors(schema, frontmatter), "front matter failed validation");
 }
 
 function projectPlaybooksDir(cwd: string): string {
