@@ -20,6 +20,7 @@ import type {
 import {
 	createToolCallIdMinter,
 	RUN_RESULT_SCHEMA_VERSION,
+	type RunBudgetRefusalV2,
 	type RunCauseCode,
 	type RunCompletionV2,
 	type RunDispatchedRunV2,
@@ -239,6 +240,8 @@ interface MainRunNoteV2 {
 	sessionReadyMs?: number;
 	/** Routes the run can reach whose cost `--max-cost-usd` cannot bound. */
 	unpricedRoutes?: string[];
+	/** `safety.limits.sessionCostUsd` as the run read it (0 is no ceiling), for a session-ceiling refusal's basis. */
+	sessionCeilingUsd?: number;
 	/** The answer text mode prints, from the headless main agent's own turn entries (CLI-P43). */
 	answer?: () => string;
 }
@@ -393,11 +396,13 @@ export function noteMainRunV2(note: {
 	sessionReady?: true;
 	parentSessionId?: string;
 	unpricedRoutes?: string[];
+	sessionCeilingUsd?: number;
 	answer?: () => string;
 }): void {
 	if (v2Started === null) return;
 	if (note.answer !== undefined) mainRunNote.answer = note.answer;
 	if (note.unpricedRoutes !== undefined) mainRunNote.unpricedRoutes = [...note.unpricedRoutes];
+	if (note.sessionCeilingUsd !== undefined) mainRunNote.sessionCeilingUsd = note.sessionCeilingUsd;
 	if (note.runId !== undefined) mainRunNote.runId = note.runId;
 	if (note.parentSessionId !== undefined) mainRunNote.parentSessionId = note.parentSessionId;
 	if (note.usage !== undefined) mainRunNote.usage = note.usage;
@@ -556,6 +561,30 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
  * The facts behind a run's exit, read from the exit code the run returned and the frames it wrote. Under v2 a
  * `--agent` worker that started (a receipt exists) and exited 2 is a failed run, not a refused one.
  */
+/**
+ * A budget ceiling's refusal in fields: the limit it applied, this run's route-price spend from the folded usage, the
+ * calls and routes that spend could not price, and the knob that moves the limit. The ceiling's own prose stays the
+ * cause's `message`; nothing here is read back from it.
+ */
+function budgetRefusal(run: boolean, request: RunResultV2Request): RunBudgetRefusalV2 {
+	const usage = mainRunNote.usage?.total ?? mainRunNote.usage?.main;
+	const ceiling = mainRunNote.sessionCeilingUsd;
+	return {
+		reason: run ? "run_cost_ceiling" : "session_cost_ceiling",
+		basis: {
+			metric: "route-price-usd",
+			scope: run ? "run" : "session",
+			limitUsd: run ? (request.limits?.maxCostUsd ?? null) : ceiling !== undefined && ceiling > 0 ? ceiling : null,
+			runSpent: usage?.sums.usd ?? null,
+		},
+		unknowns: {
+			unpricedCalls: usage?.sums.usd.coverage.unknown ?? 0,
+			unpricedRoutes: mainRunNote.unpricedRoutes?.length ?? 0,
+		},
+		remedy: run ? { flag: "--max-cost-usd" } : { setting: "safety.limits.sessionCostUsd" },
+	};
+}
+
 function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, request: RunResultV2Request): RunExitFact[] {
 	const diagnostic = state.diagnostic;
 	const text = seen.runEnd?.error ?? diagnostic;
@@ -607,8 +636,10 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 				const payload = counts ? { limit: Number(counts[1]), observed: Number(counts[2]) } : {};
 				return [{ code: limit, ...payload, ...message }];
 			}
-			if (text?.startsWith("budget_ceiling:"))
-				return [{ code: /--max-cost-usd/.test(text) ? "max_cost_usd" : "session_cost_ceiling", ...message }];
+			if (text?.startsWith("budget_ceiling:")) {
+				const run = /--max-cost-usd/.test(text);
+				return [{ code: run ? "max_cost_usd" : "session_cost_ceiling", refusal: budgetRefusal(run, request), ...message }];
+			}
 			return unnamed;
 		}
 		case 1: {

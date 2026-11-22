@@ -1,8 +1,16 @@
 import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
-import { FundingPeriodKind, FundingSchemeKind, FundingSchemeSource, NativeUnit, PayerKind } from "./enums.js";
+import type { FundingPayer } from "../funding-config.js";
+import {
+	FundingPeriodKind,
+	FundingSchemeKind,
+	FundingSchemeSource,
+	NativeUnit,
+	PayerKind,
+	vocabulary,
+} from "./enums.js";
 import type { Fact, FactSum } from "./fact.js";
-import { AbsentFactSchema, EstimateMethod, FactSumSchema, UnknownFactSchema } from "./fact.js";
+import { AbsentFactSchema, EstimateMethod, FactSumSchema, factSchema, UnknownFactSchema } from "./fact.js";
 
 /**
  * The economics of a sent attempt and of a run, beside its route price (token economy S1, rulings R1 and R2).
@@ -237,9 +245,11 @@ export type UnitTotal = Static<typeof UnitTotalSchema>;
 /** One contribution to a total: a known fact in its unit, or a missing fact that has none. */
 export type UnitQuantity = { unit: EconomyUnit; fact: Fact<number> } | { fact: Missing };
 /** Why a total was refused: contributions in two units, a unit that never adds, or a value outside its unit's range. */
-export type UnitTotalRefusal =
-	| { refused: "mixed-unit"; units: string[] }
-	| { refused: "non-additive-unit" | "out-of-range"; unit: string };
+export const UnitTotalRefusalSchema = Type.Union([
+	Type.Object({ refused: Type.Literal("mixed-unit"), units: Type.Array(Type.String()) }, closed),
+	Type.Object({ refused: vocabulary(["non-additive-unit", "out-of-range"]), unit: Type.String() }, closed),
+]);
+export type UnitTotalRefusal = Static<typeof UnitTotalRefusalSchema>;
 
 /** Units whose values are whole counts, so their totals must stay safe integers. */
 const INTEGRAL_UNITS: ReadonlySet<string> = new Set(["nano-aiu", "tokens", "requests"]);
@@ -292,3 +302,106 @@ export function moneyQuantities(facts: Iterable<MoneyFact>): UnitQuantity[] {
 		"currency" in fact ? { unit: fact.currency, fact: fact.amount } : { fact: fact.amount },
 	);
 }
+
+// ---- the folded projection (token economy S10), as every surface receives it (S11) ----
+
+const EconomyTotalSchema = Type.Union([UnitTotalSchema, UnitTotalRefusalSchema]);
+const EconomyQuantitiesSchema = Type.Object(
+	{
+		contributions: SafeCountSchema,
+		providerCharge: EconomyTotalSchema,
+		marginalCharge: EconomyTotalSchema,
+		/** The seat's estimated debit, in nano-AIU. */
+		seatCredits: EconomyTotalSchema,
+		energyKwh: FactSumSchema,
+		energyCost: EconomyTotalSchema,
+		apiEquivalent: EconomyTotalSchema,
+		display: Type.Object(
+			{
+				extra: Type.String(),
+				providerCharge: Type.String(),
+				seatCredits: Type.String(),
+				energy: Type.String(),
+				apiEquivalent: Type.String(),
+			},
+			closed,
+		),
+	},
+	closed,
+);
+/**
+ * A fee's payer: the declared pool's, spelled here so this producer-path module imports no config code; the fold
+ * assigns a `FundingPayer` into it, so a payer added there and not here fails the build.
+ */
+const FEE_PAYERS = ["personal", "sponsor", "employer", "none", "unknown"] as const satisfies ReadonlyArray<
+	FundingPayer | "unknown"
+>;
+const EconomyFeeSchema = Type.Object(
+	{
+		poolId: Type.String(),
+		payer: vocabulary(FEE_PAYERS),
+		period: Type.Object(
+			{ kind: vocabulary(["day", "week", "month", "year"]), start: Type.String(), end: Type.String() },
+			closed,
+		),
+		amount: factSchema(Type.Number()),
+		currency: Type.String(),
+		evidence: Type.Literal("declared"),
+		/** The window covers only part of the period. */
+		partial: Type.Boolean(),
+		display: Type.String(),
+	},
+	closed,
+);
+const EconomyGroupSchema = Type.Object({ ...EconomyQuantitiesSchema.properties, key: Type.String() }, closed);
+const EconomyPeriodRowSchema = Type.Object(
+	{ ...EconomyQuantitiesSchema.properties, key: Type.String(), fees: Type.Array(EconomyFeeSchema) },
+	closed,
+);
+const EconomyPoolRowSchema = Type.Object(
+	{ ...EconomyQuantitiesSchema.properties, key: Type.String(), periods: Type.Array(EconomyPeriodRowSchema) },
+	closed,
+);
+const EconomyReferenceSchema = Type.Object(
+	{
+		referenceRowId: Type.String(),
+		asOf: Type.String(),
+		basis: vocabulary(["served-model", "requested-model"]),
+		contributions: SafeCountSchema,
+	},
+	closed,
+);
+/**
+ * One scope's economics folded once: totals, declared fees once per pool and period, period cash per currency, the
+ * role, model, target and pool cuts (alternate partitions, not addends) and the API-equivalent rows they were priced from.
+ */
+export const EconomyProjectionSchema = Type.Object(
+	{
+		version: Type.Literal(1),
+		total: EconomyQuantitiesSchema,
+		fees: Type.Array(EconomyFeeSchema),
+		cash: Type.Object(
+			{ currencies: Type.Array(UnitTotalSchema), unknownCount: SafeCountSchema, display: Type.String() },
+			closed,
+		),
+		groups: Type.Object(
+			{
+				role: Type.Array(EconomyGroupSchema),
+				model: Type.Array(EconomyGroupSchema),
+				target: Type.Array(EconomyGroupSchema),
+				pool: Type.Array(EconomyPoolRowSchema),
+			},
+			closed,
+		),
+		references: Type.Array(EconomyReferenceSchema),
+		sources: Type.Object({ attempts: SafeCountSchema, runs: SafeCountSchema, gaps: SafeCountSchema }, closed),
+	},
+	closed,
+);
+export type EconomyQuantities = Static<typeof EconomyQuantitiesSchema>;
+export type EconomyFee = Static<typeof EconomyFeeSchema>;
+export type EconomyGroup = Static<typeof EconomyGroupSchema>;
+export type EconomyPeriodRow = Static<typeof EconomyPeriodRowSchema>;
+export type EconomyPoolRow = Static<typeof EconomyPoolRowSchema>;
+export type EconomyReference = Static<typeof EconomyReferenceSchema>;
+export type EconomyProjection = Static<typeof EconomyProjectionSchema>;

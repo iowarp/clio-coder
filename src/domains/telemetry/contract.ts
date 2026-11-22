@@ -19,6 +19,7 @@ import type {
 	TimelineV1,
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
+import type { EconomyProjection } from "../../core/telemetry/economy.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { PreimageData, PreimageEventName } from "../../core/telemetry/events.js";
 import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
@@ -154,7 +155,13 @@ export interface TelemetryView {
 	calls(filter?: CallFilter): CallsReportV1;
 	/** The journal records behind the session's own attempts the filter matches, for a fold that keeps provenance. */
 	callRecords(filter?: CallFilter): TelemetryRecord[];
+	/** A session's report carries no pool fees: a period fee belongs to its pool's period, not to one session. */
 	cost(groupBy?: CostReportV1["groupBy"]): CostReportV1;
+	/**
+	 * The session's economics, folded once (token economy S10): with no filter its own attempts and referenced runs, as
+	 * `cost` reports them; with one, the own attempts it matches, as `callRecords` returns them.
+	 */
+	economy(filter?: CallFilter): EconomyProjection;
 	cache(): CacheReportV1;
 	timeline(range?: { from: string; to: string } | null): TimelineV1;
 	runs(): RunRowV1[];

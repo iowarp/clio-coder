@@ -1,9 +1,11 @@
 import { resolve } from "node:path";
+import { validateSettingsFile } from "../core/config.js";
 import { cwdHash } from "../core/cwd-hash.js";
 import { clioStateDir } from "../core/xdg.js";
 import { usageReport } from "../domains/telemetry/read-model.js";
 import { emptyUsageDiagnostics, usageWindow } from "../domains/telemetry/usage-window.js";
 import { printError } from "./shared.js";
+import { economyLines } from "./telemetry-read.js";
 
 const HELP = `clio-coder usage report [--repo <path>] [--days <n>] [--json]
 
@@ -93,7 +95,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		now,
 		diagnostics,
 	);
-	const report = usageReport(repo, from, now);
+	const report = usageReport(repo, from, now, validateSettingsFile().settings.funding);
 	for (const note of diagnostics.notes) process.stderr.write(`clio-coder usage: ${note}\n`);
 	if (parsed.json) {
 		process.stdout.write(`${JSON.stringify(report)}\n`);
@@ -121,6 +123,9 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		out(`spend by ${cost.groupBy}: ${cost.total.usd.display}`);
 		for (const group of cost.groups) out(`  ${group.key}: ${group.usd.display}`);
 	}
+	// Every cost cut folds the same window, so one economy stands for all of them.
+	const economy = report.cost[0]?.economy;
+	if (economy !== undefined) for (const line of economyLines(economy)) out(line);
 	for (const tool of report.decisions.tools) out(`tool ${tool.tool}: ${tool.count.display} decisions`);
 	return 0;
 }

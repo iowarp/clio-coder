@@ -24,6 +24,8 @@ import {
 	TimelineSchema,
 	WhyStoppedSchema,
 } from "../../src/core/telemetry/dto.js";
+import type { CallEconomics, EconomyGroup } from "../../src/core/telemetry/economy.js";
+import { callEconomicsOf } from "../../src/core/telemetry/economy.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { FactSum } from "../../src/core/telemetry/fact.js";
@@ -33,6 +35,7 @@ import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.
 import { ToolNames } from "../../src/core/tool-names.js";
 import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { foldEconomy } from "../../src/domains/telemetry/economy-fold.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import type { RepoSource, SessionSource } from "../../src/domains/telemetry/read-model.js";
 import {
@@ -40,6 +43,7 @@ import {
 	callsReport,
 	continueSource,
 	costReport,
+	economyReport,
 	explain,
 	repoCostReport,
 	repoOwner,
@@ -53,6 +57,7 @@ import {
 	whyStopped,
 	withSettledCalls,
 } from "../../src/domains/telemetry/read-model.js";
+import { conformingAnonymous, shareEconomy } from "../../src/domains/telemetry/share-projection.js";
 import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
 import {
 	absentRenderedOtherwise,
@@ -1014,6 +1019,225 @@ test("a model's cost splits into the sessions' own calls and the worker runs, in
 	check(costReport(session, "model", now), 0.5, 0.25, { session });
 	check(repoCostReport(repo, { repo: "all", days: 30 }, "model", now), 0.5, 0.375, { repo });
 	ok(repoCostReport(repo, { repo: "all", days: 30 }, "role", now).groups.every((group) => group.audience === null));
+});
+
+test("economics fold once: unknown history survives, cuts reconcile, a run's aggregate never repeats its calls, a fee stands once per pool and period, and a share keeps no pool (token economy S10)", () => {
+	const journal = (records: readonly TelemetryRecord[]) => ({
+		present: true,
+		records,
+		modes: ["standard" as const],
+		skipped: 0,
+		damaged: 0,
+	});
+	const economics = (charge: number, kwh: number): CallEconomics => ({
+		additive: {
+			providerCharge: { currency: "USD", amount: { kind: "measured", value: charge, source: "provider" } },
+			marginalCharge: { currency: "USD", amount: { kind: "measured", value: charge, source: "provider" } },
+			seatCredits: {
+				nanoAiu: { kind: "estimated", value: 3_000_000_000, method: "seat-listing-tariff" },
+				listingAsOf: "2026-10-01",
+			},
+			energy: {
+				kwh: { kind: "estimated", value: kwh, method: "power-time" },
+				cost: { currency: "USD", amount: { kind: "estimated", value: kwh / 2, method: "power-time" } },
+			},
+		},
+		comparison: {
+			apiEquivalent: {
+				currency: "USD",
+				amount: { kind: "estimated", value: charge * 2, method: "public-retail-tariff" },
+				referenceRowId: "openai/gpt-6-luna",
+				asOf: "2026-10-01",
+				basis: "served-model",
+			},
+		},
+		funding: {
+			kind: "snapshot",
+			poolId: "team-plan",
+			scheme: { source: "declared", kind: "subscription" },
+			payer: "personal",
+			unit: "USD",
+			period: { kind: "month", start: "2026-10-01T00:00:00.000Z", end: "2026-11-01T00:00:00.000Z" },
+		},
+	});
+	// The seat reported its debit; that wins over the listing estimate at read.
+	const billing = {
+		provider: "github-copilot",
+		premiumRequests: { kind: "measured", value: 1, source: "provider" },
+		nanoAiu: { kind: "measured", value: 2_000_000_000, source: "provider" },
+		modelCalls: { kind: "measured", value: 1, source: "provider" },
+	} as const;
+	const priced = (records: TelemetryRecord[], value: CallEconomics) =>
+		records.map((record) =>
+			record.k === "call.settled"
+				? ({ ...record, data: { ...record.data, economics: value, billing } } as TelemetryRecord)
+				: record,
+		);
+	const settledRun = (runId: string, at: string, callIds: string[], value: CallEconomics) => {
+		const unknown = { kind: "unknown", reason: "not-captured" } as const;
+		return {
+			...makeTelemetryRecord(
+				"run.linked",
+				{ runId },
+				{ sessionId: "economy", agent: { role: "main", id: "economy" } },
+				{ t: at, mono: 0 },
+			),
+			k: "run.settled",
+			ctx: { sessionId: "economy", runId, agent: { role: "main", id: "economy" } },
+			data: {
+				callIds,
+				endedAt: at,
+				usage: Object.fromEntries(
+					["input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "reasoning"].map((field) => [field, unknown]),
+				),
+				totalTokens: unknown,
+				apiCalls: unknown,
+				repairRounds: unknown,
+				pricing: { usd: unknown, pricedBy: "none" },
+				economics: { ...value, funding: [value.funding] },
+			},
+		} as unknown as TelemetryRecord;
+	};
+	const alpha = priced(
+		telemetryCall("economy", { model: "alpha", at: "2026-10-05T10:00:00.000Z" }),
+		economics(0.25, 0.25),
+	);
+	// A call settled before economics were captured: unknown, never zero.
+	const beta = telemetryCall("economy", { model: "beta", at: "2026-10-06T10:00:00.000Z" });
+	const alphaCall = alpha.flatMap((record) => (record.k === "call.started" ? [record.data.callId] : []));
+	const link = makeTelemetryRecord(
+		"run.linked",
+		{ runId: "main-run" },
+		{ sessionId: "economy", agent: { role: "main", id: "economy" } },
+		{ t: "2026-10-05T10:00:01.000Z", mono: 0 },
+	);
+	const session: SessionSource = {
+		...source,
+		sessionId: "economy",
+		journal: journal([...alpha, ...beta, link]),
+		// A main run's settlement repeats its session call's economics; the call already counted it.
+		runs: new Map([
+			["main-run", journal([settledRun("main-run", "2026-10-05T10:00:02.000Z", alphaCall, economics(0.25, 0.25))])],
+		]),
+	};
+	const repo: RepoSource = {
+		owner: repoOwner(null, 30),
+		sessions: [session],
+		// A worker run whose calls this home never journaled: its settled aggregate is one contribution.
+		runs: new Map([
+			[
+				"worker-run",
+				journal([settledRun("worker-run", "2026-10-07T10:00:00.000Z", ["call_worker-unseen"], economics(0.5, 0.5))]),
+			],
+		]),
+	};
+	const pools = {
+		"team-plan": {
+			scheme: "declared" as const,
+			payer: "personal" as const,
+			fee: { amount: 20, currency: "USD", period: "month" as const },
+		},
+		"idle-grant": {
+			scheme: "declared" as const,
+			payer: "sponsor" as const,
+			fee: { amount: 5, currency: "USD", period: "month" as const },
+		},
+		// No payer declared: the fee may be the user's, so cash counts it unknown rather than leaving it out.
+		"open-plan": { scheme: "declared" as const, fee: { amount: 7, currency: "USD", period: "month" as const } },
+	};
+	const from = Date.parse("2026-10-01T00:00:00.000Z");
+	const to = Date.parse("2026-11-01T00:00:00.000Z") - 1;
+	const reports = usageReport(repo, from, to, pools).cost;
+	const economy = reports[0]?.economy;
+	ok(economy);
+	for (const report of reports) deepStrictEqual(report.economy, economy, "every cost cut carries the one projection");
+	deepStrictEqual(usageReport(repo, from, to, pools).cost[0]?.economy, economy, "two reads fold identically");
+	deepStrictEqual(economy.sources, { attempts: 2, runs: 1, gaps: 0 });
+	const { total } = economy;
+	const sum = (value: unknown) => {
+		ok(value && typeof value === "object" && "sum" in value, JSON.stringify(value));
+		return (value as { sum: FactSum }).sum;
+	};
+	deepStrictEqual([sum(total.marginalCharge).measured, sum(total.marginalCharge).unknownCount], [0.75, 1]);
+	deepStrictEqual(
+		[total.energyKwh.estimated, total.energyKwh.unknownCount],
+		[0.75, 1],
+		"the main run's energy is not repeated",
+	);
+	ok(total.display.extra.endsWith("extra +?"), total.display.extra);
+	deepStrictEqual([sum(total.seatCredits).measured, sum(total.seatCredits).estimated], [2_000_000_000, 3_000_000_000]);
+	const betaRow = economy.groups.model.find((row) => row.key === "fixture/beta");
+	strictEqual(betaRow?.display.extra, "extra unknown");
+	strictEqual(betaRow?.display.apiEquivalent, "API equiv unknown");
+	for (const cut of ["role", "model", "target", "pool"] as const) {
+		const rows: ReadonlyArray<EconomyGroup> = economy.groups[cut];
+		strictEqual(
+			rows.reduce((n, row) => n + row.contributions, 0),
+			total.contributions,
+			cut,
+		);
+		strictEqual(
+			rows.reduce((n, row) => n + sum(row.marginalCharge).measured, 0),
+			0.75,
+			cut,
+		);
+		strictEqual(
+			rows.reduce((n, row) => n + row.energyKwh.estimated, 0),
+			0.75,
+			cut,
+		);
+	}
+	deepStrictEqual(
+		economy.fees.map((fee) => [fee.poolId, fee.period.start, fee.partial]),
+		[
+			["idle-grant", "2026-10-01T00:00:00.000Z", false],
+			["open-plan", "2026-10-01T00:00:00.000Z", false],
+			["team-plan", "2026-10-01T00:00:00.000Z", false],
+		],
+	);
+	const idle = economy.groups.pool.find((row) => row.key === "idle-grant");
+	deepStrictEqual(
+		[idle?.contributions, idle?.periods.map((period) => [period.key, period.fees.length])],
+		[0, [["month:2026-10-01T00:00:00.000Z", 1]]],
+		"a fee stands alone with no calls",
+	);
+	const team = economy.groups.pool.find((row) => row.key === "team-plan");
+	deepStrictEqual(
+		team?.periods.map((period) => [period.key, period.contributions, period.fees.length]),
+		[["month:2026-10-01T00:00:00.000Z", 2, 1]],
+	);
+	// Personal fee, marginal charges and electricity in one currency; the sponsor's fee is not the user's cash.
+	const [cash] = economy.cash.currencies;
+	deepStrictEqual(
+		[cash && sum(cash).estimated, cash && sum(cash).measured, economy.cash.unknownCount],
+		[20.375, 0.75, 3],
+	);
+	const own = economyReport(session);
+	deepStrictEqual([own.sources, own.total.energyKwh.estimated], [{ attempts: 2, runs: 0, gaps: 0 }, 0.25]);
+	const shared = JSON.stringify(shareEconomy(economy, conformingAnonymous));
+	for (const leak of ["team-plan", "idle-grant", "personal", "marginalCharge", "providerCharge", "fees", "cash"])
+		ok(!shared.includes(leak), leak);
+	ok(shared.includes("openai/gpt-6-luna"), "the API equivalent keeps the public row it was priced from");
+	// One attempt seen unsettled through one part and settled through another counts as its settlement. A plan-covered
+	// zero beside an unknown keeps its known part; electricity in two currencies is not summed, not unknown.
+	const covered = economics(0, 0.25);
+	const euro = economics(0, 0.25);
+	const zero = { kind: "estimated", value: 0, method: "plan-coverage" } as const;
+	covered.additive.marginalCharge = { currency: "USD", amount: zero };
+	euro.additive.marginalCharge = { currency: "USD", amount: zero };
+	euro.additive.energy.cost = { currency: "EUR", amount: { kind: "estimated", value: 0.1, method: "power-time" } };
+	const cut = { role: "worker", model: "fixture/alpha", target: "fixture" };
+	const attempt = (attemptId: string) => ({ kind: "attempt" as const, attemptId, callId: `call_${attemptId}` });
+	const folded = foldEconomy([
+		{ ref: attempt("a"), at: "2026-10-05T10:00:00.000Z", settled: false, economics: callEconomicsOf(null), cut },
+		{ ref: attempt("a"), at: "2026-10-05T10:00:01.000Z", settled: true, economics: covered, cut },
+		{ ref: attempt("b"), at: "2026-10-05T10:00:02.000Z", settled: true, economics: euro, cut },
+		{ ref: attempt("c"), at: null, settled: false, economics: callEconomicsOf(null), cut },
+	]);
+	deepStrictEqual(
+		[folded.sources.attempts, folded.total.display.extra, folded.total.display.energy],
+		[3, "included (estimate) +?", "~0.5 kWh +?, not summed (EUR, USD)"],
+	);
 });
 
 test("a cache break re-prefills past the shared band, or an unknown amount on a missed cache, never a boundary loss (#423, #434 §13.2)", () => {

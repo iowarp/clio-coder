@@ -3911,6 +3911,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				scratchRoots: getCurrentSettings().safety.scratchRoots,
 				autonomy: () => autonomyWindow.report(true),
 				scopeNotices: (listener) => bus.subscribe("run.scope_notice_raised", listener),
+				sessionCostCeilingUsd: () => getCurrentSettings().safety.limits.sessionCostUsd,
 				...(telemetry
 					? {
 							runUsage: async (from: string, roles = ["main", "compaction"]) => {
@@ -3919,6 +3920,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								const view = telemetry.read?.live();
 								// The run's own turn calls and the compactions it ran, folded as the read model folds them.
 								return view ? runUsageFromCallRecords(view.callRecords({ roles, from }), READ_MODEL_FOLD) : null;
+							},
+							// The same calls, folded by the economy projection; a run carries no period fees (S11).
+							runEconomy: async (from: string, roles) => {
+								await telemetry.settledSessionSpend();
+								return telemetry.read?.live()?.economy(roles ? { roles, from } : { from }) ?? null;
 							},
 							segmentUsage: async (messages) => {
 								// The segment's calls are journaled and the live fold seeded before they are read (#434).

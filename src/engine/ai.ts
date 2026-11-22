@@ -70,6 +70,18 @@ export async function listCopilotSdkModels() {
 	return client.listCopilotModels();
 }
 
+/** The held Copilot runtime's model listing, or `null` when no runtime is connected; never starts one. */
+export async function listHeldCopilotSdkModels() {
+	const client = await import("./copilot/client.js");
+	return client.listHeldCopilotModels();
+}
+
+/** Calls `listener` once a Copilot runtime is connected, now or when the next one starts; never starts one. */
+export async function onceCopilotSdkClientHeld(listener: () => void): Promise<void> {
+	const client = await import("./copilot/client.js");
+	client.onceCopilotClientHeld(listener);
+}
+
 /** Whether a short-lived Copilot runtime with the keychain open or closed is signed in; for doctor. */
 export async function copilotSdkSignInProbe(keychain: boolean) {
 	const client = await import("./copilot/client.js");

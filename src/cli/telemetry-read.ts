@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { validateSettingsFile } from "../core/config.js";
 import { cwdHash } from "../core/cwd-hash.js";
 import type {
 	CacheReportV1,
@@ -13,6 +14,7 @@ import type {
 	WhyStoppedV1,
 } from "../core/telemetry/dto.js";
 import { parseFactRef } from "../core/telemetry/dto.js";
+import type { EconomyProjection } from "../core/telemetry/economy.js";
 import { AgentRole, Disposition } from "../core/telemetry/enums.js";
 import { renderCount, renderUpperBound, unreportedCacheReadWords } from "../core/telemetry/render.js";
 import { clioStateDir } from "../core/xdg.js";
@@ -281,6 +283,23 @@ function printCalls(dto: CallsReportV1): string {
 	return rows.length === 0 ? "no matching attempts\n" : `${formatColumns([header, ...rows])}${shown}`;
 }
 
+/**
+ * A cost report's economy as text: the headline extra user cost beside the API equivalent, seat credits, energy and
+ * period cash, then each funding pool, each declared fee once per period and the reference rows the comparison used.
+ * Every figure is the projection's own display; nothing here adds or converts.
+ */
+export function economyLines(economy: EconomyProjection): string[] {
+	const { display } = economy.total;
+	return [
+		`economy: ${display.extra} · ${display.apiEquivalent} · seat ${display.seatCredits} · energy ${display.energy} · cash ${economy.cash.display}`,
+		...economy.groups.pool.map((pool) => `  pool ${pool.key}: ${pool.display.extra} · ${pool.display.apiEquivalent}`),
+		...economy.fees.map((fee) => `  fee ${fee.poolId} ${fee.period.kind} from ${fee.period.start}: ${fee.display}`),
+		...economy.references.map(
+			(row) => `  reference ${row.referenceRowId} as of ${row.asOf} (${row.basis}, ${row.contributions} calls)`,
+		),
+	];
+}
+
 function printCost(dto: CostReportV1): string {
 	const scope =
 		"sessionId" in dto.scope
@@ -293,7 +312,7 @@ function printCost(dto: CostReportV1): string {
 			[dto.groupBy, "calls", "tokens", "cost"],
 			...dto.groups.map((group) => [group.key, show(group.calls), show(group.tokens), show(group.usd)]),
 		],
-	)}`;
+	)}\n${economyLines(dto.economy).join("\n")}\n`;
 }
 
 function printCache(dto: CacheReportV1): string {
@@ -499,6 +518,9 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 		return 1;
 	}
 	const target = selected?.id ?? selector;
+	// A window report lists the operator's declared pools' fees once per period; one run or session carries none, and
+	// an imported install's scopes were never funded by them.
+	const pools = imported === undefined ? { pools: validateSettingsFile().settings.funding } : {};
 	try {
 		if (args.command === "explain") {
 			const ref = target === undefined ? null : parseFactRef(target);
@@ -562,13 +584,16 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 			// The window usage report folds, attributed the same way, so the two print the same spend (#434 §11.1).
 			const repoArg = args.values.get("repo");
 			const repoPath = repoArg === undefined ? undefined : resolve(repoArg);
+			const now = Date.now();
 			const { repo } = await usageWindow(
 				stateDir,
 				repoPath === undefined ? null : { hash: cwdHash(repoPath), inRepo: (cwd) => cwd === repoPath },
 				days,
-				Date.now(),
+				now,
 			);
-			return emit(repoCostReport(repo, { repo: repoPath ?? "all", days }, by), args.json, printCost);
+			// The same window `usage report` folds, so its fees and economy match this report's.
+			const window = { from: now - days * 24 * 60 * 60 * 1000, to: now };
+			return emit(repoCostReport(repo, { repo: repoPath ?? "all", days }, by, { ...pools, window }), args.json, printCost);
 		}
 		if (target === undefined && args.command !== "calls") {
 			printError(`${args.command} needs a session id or directory`);

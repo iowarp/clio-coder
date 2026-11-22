@@ -18,7 +18,7 @@ import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from 
 import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createHostPolicyMessage } from "../../src/core/host-policy-message.js";
-import type { CallSettled } from "../../src/core/telemetry/schemas.js";
+import type { CallSettled, CallStarted } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir, resolveClioDirs } from "../../src/core/xdg.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
@@ -45,6 +45,7 @@ import type { SessionContract } from "../../src/domains/session/contract.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { noteCallStarted, stampCallEconomics } from "../../src/domains/telemetry/economy-settlement.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
@@ -789,6 +790,50 @@ test("the listing's full billing reaches the seam as stated, with the time it wa
 			!("billing" in (rows.find((entry) => entry.id === "fake-model") ?? {})),
 			"a model listed without billing has none",
 		);
+	} finally {
+		models.splice(0, models.length, ...original);
+	}
+});
+
+test("a seat call started before its runtime connects settles at the listing read once it does (S8)", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "seat-billed",
+		billing: { tokenPrices: { inputPrice: 100, outputPrice: 800, batchSize: 1_000_000 } },
+	});
+	const target = { targetId: "seat", runtimeId: "copilot-sdk", api: undefined, requestedModel: "seat-billed" };
+	const measured = (value: number) => ({ kind: "measured", value, source: "provider" }) as const;
+	try {
+		await copilotSdkRestartIdle();
+		noteCallStarted({ attemptId: "attempt-seat", target } as unknown as CallStarted);
+		await listCopilotSdkModels();
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		const settled = stampCallEconomics(
+			{
+				callId: "call-seat",
+				attemptId: "attempt-seat",
+				disposition: "settled",
+				stages: { send: null, settle: null },
+				usage: {
+					input: measured(1_000),
+					output: measured(100),
+					cacheRead: measured(0),
+					cacheWrite: measured(0),
+					cacheWrite1h: { kind: "unknown", reason: "provider-omitted" },
+					reasoning: measured(0),
+				},
+				pricing: { usd: { kind: "unknown", reason: "not-observed" }, pricedBy: "none" },
+				target: { ...target, reportedModel: { kind: "unknown", reason: "provider-omitted" } },
+			} as unknown as CallSettled,
+			Date.now(),
+		);
+		deepStrictEqual(settled.economics?.additive.seatCredits.nanoAiu, {
+			kind: "estimated",
+			value: 180_000_000,
+			method: "seat-listing-tariff",
+		});
 	} finally {
 		models.splice(0, models.length, ...original);
 	}

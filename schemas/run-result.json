@@ -1,7 +1,7 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
-	"$id": "urn:clio-coder:schema:run-result:2",
-	"title": "clio-coder run result (schema v2)",
+	"$id": "urn:clio-coder:schema:run-result:3",
+	"title": "clio-coder run result (schema v3)",
 	"description": "The one document `run --output-format json` prints, and the last line (`run_end`) of `run --output-format stream-json`. Source of truth: RunResultEnvelopeV2 in src/cli/modes/run-json-schema-v2.ts.",
 	"type": "object",
 	"required": [
@@ -24,7 +24,7 @@
 	],
 	"properties": {
 		"type": { "const": "run_end" },
-		"schemaVersion": { "const": 2 },
+		"schemaVersion": { "const": 3 },
 		"mode": { "enum": ["main", "agent"] },
 		"runId": { "type": "string" },
 		"sessionId": { "type": "string" },
@@ -91,13 +91,13 @@
 		"route": { "$ref": "#/$defs/route" },
 		"usage": {
 			"type": "object",
-			"description": "RunCallUsage folds (src/domains/dispatch/run-call-usage.ts): every quantity a FactSum, cost a PricingSum.",
+			"description": "RunCallUsage folds (src/domains/dispatch/run-call-usage.ts): every quantity a FactSum, cost a PricingSum. Each scope's `economics`, when a read model folded its calls, is the economy projection of the same calls (EconomyProjectionSchema in src/core/telemetry/economy.ts, version 1): extra user cost, API equivalent, seat credits and energy, without period fees.",
 			"required": ["main"],
 			"properties": {
-				"main": { "type": "object" },
-				"children": { "type": "object" },
-				"side": { "type": "object" },
-				"total": { "type": "object" }
+				"main": { "$ref": "#/$defs/usageScope" },
+				"children": { "$ref": "#/$defs/usageScope" },
+				"side": { "$ref": "#/$defs/usageScope" },
+				"total": { "$ref": "#/$defs/usageScope" }
 			}
 		},
 		"tools": {
@@ -229,7 +229,48 @@
 			"required": ["code"],
 			"properties": {
 				"code": { "$ref": "#/$defs/causeCode" },
-				"message": { "type": "string" }
+				"message": { "type": "string" },
+				"refusal": { "$ref": "#/$defs/budgetRefusal" }
+			}
+		},
+		"usageScope": {
+			"type": "object",
+			"properties": {
+				"economics": {
+					"type": "object",
+					"required": ["version", "total", "fees", "cash", "groups", "references", "sources"],
+					"properties": { "version": { "const": 1 } }
+				}
+			}
+		},
+		"budgetRefusal": {
+			"description": "On a max_cost_usd or session_cost_ceiling cause: the ceiling's limit and the route-price spend it was measured against, the calls and routes that spend could not price, and the knob that moves the limit.",
+			"type": "object",
+			"required": ["reason", "basis", "unknowns", "remedy"],
+			"properties": {
+				"reason": { "enum": ["run_cost_ceiling", "session_cost_ceiling"] },
+				"basis": {
+					"type": "object",
+					"required": ["metric", "scope", "limitUsd", "runSpent"],
+					"properties": {
+						"metric": { "const": "route-price-usd" },
+						"scope": { "enum": ["run", "session"] },
+						"limitUsd": { "type": ["number", "null"] },
+						"runSpent": { "type": ["object", "null"], "description": "This run's FactSum of route-price USD." }
+					}
+				},
+				"unknowns": {
+					"type": "object",
+					"required": ["unpricedCalls", "unpricedRoutes"],
+					"properties": {
+						"unpricedCalls": { "type": "integer", "minimum": 0 },
+						"unpricedRoutes": { "type": "integer", "minimum": 0 }
+					}
+				},
+				"remedy": {
+					"type": "object",
+					"properties": { "flag": { "const": "--max-cost-usd" }, "setting": { "const": "safety.limits.sessionCostUsd" } }
+				}
 			}
 		},
 		"route": {

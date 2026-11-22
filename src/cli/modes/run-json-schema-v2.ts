@@ -1,5 +1,5 @@
 /**
- * Headless run output, schema v2 (`run --output-format text|json|stream-json`).
+ * Headless run output, schema v3 (`run --output-format text|json|stream-json`).
  *
  * v1, the internal frames v2 reframes, stays in `run-json-schema.ts` (its `--json` and `--json-events` spellings were
  * removed in 0.8.5). v2 adds a
@@ -7,8 +7,14 @@
  * failure string, per-check verify states, and an exit code chosen by one
  * precedence function. An absent value is an absent key: v2 never sends `null`
  * for an optional field.
+ *
+ * Schema version 3 (token economy S11) gives each usage scope its `economics` and a budget-ceiling cause its
+ * `refusal` (reason, basis, unknowns, remedy); version 2 is gone. The file and its `*V2` names keep the frame family's
+ * name, not the version number.
  */
 
+import type { EconomyProjection } from "../../core/telemetry/economy.js";
+import type { FactSum } from "../../core/telemetry/fact.js";
 import type { RunSettled } from "../../core/telemetry/schemas.js";
 import { failsTheSameOnBase } from "../../domains/dispatch/host-verification-note.js";
 import type { RunCallUsage } from "../../domains/dispatch/run-call-usage.js";
@@ -16,7 +22,7 @@ import type { RunResult } from "../../domains/dispatch/types.js";
 import { EXIT_CODES, EXPLORATION_STALLED_EXIT_CODE } from "../kit/exit-codes.js";
 import type { RunJsonDispatchedRunOutcome, RunJsonVerifyResult } from "./run-json-schema.js";
 
-export const RUN_RESULT_SCHEMA_VERSION = 2;
+export const RUN_RESULT_SCHEMA_VERSION = 3;
 
 /**
  * Every cause code, in precedence order. The first fact present sets the exit code; `causes[]` lists every fact,
@@ -340,11 +346,31 @@ export interface AgentRunSettlementV2 {
  * workers' calls (each absent when none were recorded), `total` all of them.
  */
 export interface RunUsageV2 {
-	main: RunCallUsage;
-	side?: RunCallUsage;
-	children?: RunCallUsage;
+	main: RunScopeUsageV2;
+	side?: RunScopeUsageV2;
+	children?: RunScopeUsageV2;
 	/** Absent only when a fold over every part could not be read beside the side or children's own. */
-	total?: RunCallUsage;
+	total?: RunScopeUsageV2;
+}
+
+/**
+ * One usage scope with its economics: the same calls folded once by the economy projection (S10), the extra user
+ * cost beside the API equivalent, seat credits and energy. Declared period fees stay out, since a period's fee belongs
+ * to its pool and period, not to any one run; absent when no read model folded the calls.
+ */
+export type RunScopeUsageV2 = RunCallUsage & { economics?: EconomyProjection };
+
+/**
+ * Why a budget ceiling refused further work, in fields rather than prose: the limit and the spend it was measured
+ * against (route-price USD, the only currency a ceiling is set in), the calls the spend could not price, and the knob
+ * that moves the limit. `limitUsd` is null when the run could not read it.
+ */
+export interface RunBudgetRefusalV2 {
+	reason: "run_cost_ceiling" | "session_cost_ceiling";
+	/** `runSpent` is this run's spend; a session ceiling also counts the session's earlier runs. */
+	basis: { metric: "route-price-usd"; scope: "run" | "session"; limitUsd: number | null; runSpent: FactSum | null };
+	unknowns: { unpricedCalls: number; unpricedRoutes: number };
+	remedy: { flag: "--max-cost-usd" } | { setting: "safety.limits.sessionCostUsd" };
 }
 
 /**

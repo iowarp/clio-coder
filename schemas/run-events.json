@@ -1,7 +1,7 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
-	"$id": "urn:clio-coder:schema:run-events:2",
-	"title": "clio-coder run event line (schema v2)",
+	"$id": "urn:clio-coder:schema:run-events:3",
+	"title": "clio-coder run event line (schema v3)",
 	"description": "One line of `run --output-format stream-json`: NDJSON, one compact object per line, each with a `type`. The first line is `session` for a main run, `steer` acknowledges a steer-channel line, and the last line is always `run_end` (schema run-result). Agent event frames between them keep their engine shape and are open objects.",
 	"type": "object",
 	"required": ["type"],
@@ -20,7 +20,7 @@
 			"required": ["type"],
 			"properties": {
 				"type": { "const": "session" },
-				"schemaVersion": { "const": 2 }
+				"schemaVersion": { "const": 3 }
 			}
 		},
 		"steer": {
@@ -39,7 +39,7 @@
 			"description": "The closing document; its full shape is `clio-coder schema run-result`.",
 			"properties": {
 				"type": { "const": "run_end" },
-				"schemaVersion": { "const": 2 }
+				"schemaVersion": { "const": 3 }
 			}
 		},
 		"event": {

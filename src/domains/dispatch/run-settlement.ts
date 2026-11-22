@@ -19,6 +19,7 @@ import { type RunAssuranceFacts, runResultAssurance, type TrustVerdict } from ".
 import { runContextProvenance } from "../evidence/trust-status.js";
 import { runtimeResolutionWarnings } from "../providers/runtime-resolution.js";
 import { redactSecretString } from "../safety/redaction.js";
+import { settledRunEconomics } from "../telemetry/economy-settlement.js";
 import { telemetryObjectRef } from "../telemetry/objects.js";
 import { runSettledDigest } from "../telemetry/run-digest.js";
 import {
@@ -391,6 +392,11 @@ export function settleFinishedRun(
 			repairRounds: repairRounds(input.terminal, input.repairRounds),
 			frameType: input.frameType,
 			...usage,
+			economics: settledRunEconomics(receipt.callIds ?? null, {
+				facts: usage,
+				route: routeOf(receipt),
+				endedAt: receipt.endedAt,
+			}),
 			toolCalls: receipt.toolCalls,
 			tools: receipt.toolStats.slice(0, 256).map((stat) => {
 				const refusedAsks = Math.min(stat.blocked, asked.get(stat.tool) ?? 0);
@@ -600,6 +606,11 @@ export function settleUnfinishedRun(
 			repairRounds: repairRounds(input.terminal),
 			frameType: null,
 			...(input.usage?.facts ?? unobservedRunUsageFacts()),
+			economics: settledRunEconomics(input.usage ? input.usage.callIds : null, {
+				facts: input.usage?.facts ?? unobservedRunUsageFacts(),
+				route: routeOf(run),
+				endedAt: input.endedAt,
+			}),
 			toolCalls: 0,
 			tools: [],
 			skills: [],

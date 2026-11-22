@@ -15,6 +15,7 @@ import {
 import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import { mainAgent } from "../../core/telemetry/context.js";
 import type { CallFilter } from "../../core/telemetry/dto.js";
+import type { EconomyProjection } from "../../core/telemetry/economy.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { isUnreportedUsageNotice } from "../../core/telemetry/pricing.js";
 import { renderCompactCount, renderUsdSum } from "../../core/telemetry/render.js";
@@ -142,7 +143,7 @@ import type {
 	RunJsonVerifyResult,
 } from "./run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./run-json-schema.js";
-import { verifyNotImplicated } from "./run-json-schema-v2.js";
+import { type RunScopeUsageV2, verifyNotImplicated } from "./run-json-schema-v2.js";
 import {
 	acceptanceHostVerification,
 	formatHeadlessVerifyResult,
@@ -239,6 +240,13 @@ export interface HeadlessMainAgentOptions {
 	 * `roles` widens the fold past the run's own main and compaction calls, for a schema v2 envelope's children.
 	 */
 	runUsage?: (from: string, roles?: CallFilter["roles"]) => Promise<RunCallUsage | null>;
+	/**
+	 * The same calls `runUsage` folds, folded by the economy projection (token economy S10): what the envelope's usage
+	 * scopes carry as `economics`; null when no read model is bound.
+	 */
+	runEconomy?: (from: string, roles: CallFilter["roles"]) => Promise<EconomyProjection | null>;
+	/** `safety.limits.sessionCostUsd` as this run reads it, for a session-ceiling refusal's basis. */
+	sessionCostCeilingUsd?: () => number;
 	/**
 	 * One agent segment's usage as the read model folds its calls once they are journaled, an interrupted call's
 	 * estimate included; null when the read model has none, and the message fold stands (#434).
@@ -1249,6 +1257,9 @@ function defaultShutdownHooks(): HeadlessShutdownHooks {
 	};
 }
 
+/** The run's own turn calls and the compactions it ran: what `runUsage` folds with no roles. */
+const MAIN_CALL_ROLES: CallFilter["roles"] = ["main", "compaction"];
+
 /** Dispatched workers' calls, which the main run's own fold leaves out. */
 const CHILD_CALL_ROLES: CallFilter["roles"] = ["worker"];
 
@@ -1284,21 +1295,31 @@ function runTextSummaryLine(
  * over the side agents' and the dispatched workers' calls, each absent when none was recorded; `total` folds all three.
  */
 async function noteRunUsageV2(options: HeadlessMainAgentOptions, from: string, main: RunCallUsage): Promise<void> {
-	const recorded = async (roles: CallFilter["roles"]): Promise<RunCallUsage | null> => {
-		const usage = (await options.runUsage?.(from, roles).catch(() => null)) ?? null;
-		return usage !== null && usage.callIds.length > 0 ? usage : null;
+	// Each scope's economics folds the very calls its usage folds, by the same role filter.
+	const scoped = async (usage: RunCallUsage, roles: CallFilter["roles"]): Promise<RunScopeUsageV2> => {
+		const economics = (await options.runEconomy?.(from, roles).catch(() => null)) ?? null;
+		return economics !== null ? { ...usage, economics } : usage;
 	};
+	const recorded = async (roles: CallFilter["roles"]): Promise<RunScopeUsageV2 | null> => {
+		const usage = (await options.runUsage?.(from, roles).catch(() => null)) ?? null;
+		return usage !== null && usage.callIds.length > 0 ? scoped(usage, roles) : null;
+	};
+	const mainScope = await scoped(main, MAIN_CALL_ROLES);
 	const side = await recorded(SIDE_CALL_ROLES);
 	const children = await recorded(CHILD_CALL_ROLES);
 	if (side === null && children === null) {
-		noteMainRunV2({ usage: { main, total: main } });
+		noteMainRunV2({ usage: { main: mainScope, total: mainScope } });
 		return;
 	}
-	const total = await options
-		.runUsage?.(from, ["main", "compaction", ...(SIDE_CALL_ROLES ?? []), ...(CHILD_CALL_ROLES ?? [])])
-		.catch(() => null);
+	const allRoles = [...(MAIN_CALL_ROLES ?? []), ...(SIDE_CALL_ROLES ?? []), ...(CHILD_CALL_ROLES ?? [])];
+	const total = await options.runUsage?.(from, allRoles).catch(() => null);
 	noteMainRunV2({
-		usage: { main, ...(side ? { side } : {}), ...(children ? { children } : {}), ...(total ? { total } : {}) },
+		usage: {
+			main: mainScope,
+			...(side ? { side } : {}),
+			...(children ? { children } : {}),
+			...(total ? { total: await scoped(total, allRoles) } : {}),
+		},
 	});
 }
 
@@ -1322,7 +1343,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// Children need the authoritative parent before submit can invoke dispatch.
 	// The terminal writer reuses this identity whichever settlement path wins.
 	const runId = newRunId();
-	noteMainRunV2({ runId, sessionReady: true });
+	noteMainRunV2({
+		runId,
+		sessionReady: true,
+		...(options.sessionCostCeilingUsd ? { sessionCeilingUsd: options.sessionCostCeilingUsd() } : {}),
+	});
 	if (options.costCap !== undefined) noteMainRunV2({ unpricedRoutes: options.costCap.unpricedRoutes });
 	const mode = options.mode ?? "text";
 	const startedAt = new Date().toISOString();

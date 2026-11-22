@@ -14,8 +14,10 @@ import {
 	withRunResultV2,
 } from "../../src/cli/run-failure.js";
 import { agentRunCompletion, dispatchAnswerText } from "../../src/cli/run-output.js";
+import { runUsageFromCalls } from "../../src/domains/dispatch/run-call-usage.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-grounding.js";
+import { foldEconomy } from "../../src/domains/telemetry/economy-fold.js";
 import type { ChatLoopRunSnapshot } from "../../src/session-control/chat-loop.js";
 import { CONTEXT_OVERFLOW_STOP_NOTICE_KEY } from "../../src/session-control/chat-loop-messages.js";
 import { formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
@@ -293,6 +295,10 @@ async function writtenCallRun(
 		terminating?: { toolName: string; text: string };
 		/** The run's messages as agent_end carries them, when more than the reply. */
 		ended?: object[];
+		/** More headless options, such as the read model's usage and economy folds. */
+		options?: Record<string, unknown>;
+		/** The v2 request's limits. */
+		limits?: { maxCostUsd?: number };
 	} = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	let handler: (event: unknown) => void = () => {};
@@ -379,13 +385,20 @@ async function writtenCallRun(
 							},
 						}
 					: {}),
+				...extra.options,
 			} as never,
 		);
 	try {
 		const code =
 			format !== undefined
 				? await withRunResultV2(
-						{ format, mode: "main", verify: [], ...(extra.exitCode ? { exitCode: true as const } : {}) },
+						{
+							format,
+							mode: "main",
+							verify: [],
+							...(extra.exitCode ? { exitCode: true as const } : {}),
+							...(extra.limits ? { limits: extra.limits } : {}),
+						},
 						run,
 					)
 				: output !== undefined
@@ -755,6 +768,53 @@ test("a v2 run_end lists every child run the main agent dispatched, a steer canc
 	// No children: an empty list, as before.
 	const alone = await writtenCallRun("json", pong);
 	deepStrictEqual((JSON.parse(alone.stdout.trim()) as { dispatch?: { runs?: unknown[] } }).dispatch?.runs, []);
+});
+
+test("a cost-capped run's stream and final JSON carry one usage with its economics and a refusal with reason and basis (S11)", async (t) => {
+	const env = await isolateClioEnv("headless-economics-");
+	t.after(() => env.restore());
+	const refused = {
+		...answerMessage(""),
+		content: [],
+		stopReason: "error",
+		errorMessage: "budget_ceiling: this run's priced spend $0.0007 reached its --max-cost-usd $0.0006 cap.",
+	};
+	const calls = { ...runUsageFromCalls([]), callIds: [], coverageUnknown: false };
+	const economics = foldEconomy([]);
+	const folds: string[] = [];
+	const options = {
+		runUsage: async () => calls,
+		runEconomy: async (_from: string, roles: readonly string[]) => {
+			folds.push(roles.join(","));
+			return economics;
+		},
+	};
+	const ends = [];
+	for (const format of ["stream-json", "json"] as const) {
+		const run = await writtenCallRun(format, refused, undefined, { options, limits: { maxCostUsd: 0.0006 } });
+		strictEqual(run.code, 4, run.stderr);
+		ends.push(JSON.parse(run.stdout.trim().split("\n").at(-1) ?? "{}") as Record<string, unknown>);
+	}
+	const [stream, json] = ends;
+	const pick = (end: Record<string, unknown> | undefined) => ({
+		schemaVersion: end?.schemaVersion,
+		exitCode: end?.exitCode,
+		causes: end?.causes,
+		usage: end?.usage,
+	});
+	deepStrictEqual(pick(stream), pick(json));
+	// The economics folds the very calls the usage folds, by the main scope's roles.
+	deepStrictEqual(folds, ["main,compaction", "main,compaction"]);
+	const usage = json?.usage as { main: { economics?: unknown; sums: { usd: unknown } }; total: { economics?: unknown } };
+	deepStrictEqual([usage.main.economics, usage.total.economics], [economics, economics]);
+	const [cause] = json?.causes as Array<{ code: string; message?: string; refusal?: Record<string, unknown> }>;
+	strictEqual(cause?.code, "max_cost_usd");
+	deepStrictEqual(cause?.refusal, {
+		reason: "run_cost_ceiling",
+		basis: { metric: "route-price-usd", scope: "run", limitUsd: 0.0006, runSpent: usage.main.sums.usd },
+		unknowns: { unpricedCalls: 0, unpricedRoutes: 0 },
+		remedy: { flag: "--max-cost-usd" },
+	});
 });
 
 test("v2 stream-json tool frames carry Clio's tc_<turn>_<n> id and the provider's beside it (CLI-8)", async (t) => {

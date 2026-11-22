@@ -490,7 +490,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 				ok(types.includes(type), turn.stdout);
 			const settled = events.at(-1);
 			strictEqual(settled?.type, "run_end");
-			strictEqual(settled?.schemaVersion, 2);
+			strictEqual(settled?.schemaVersion, 3);
 			strictEqual(settled?.exitCode, 0);
 			strictEqual((settled?.result as { text?: string } | undefined)?.text, "core reply");
 			ok(typeof settled?.endedAt === "string");

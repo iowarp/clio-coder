@@ -257,8 +257,8 @@ test("a long turn streams usage_update per model response with the meter rising 
 	);
 	assert.equal(session.totals.usd.display, "~$2.50 +?");
 	assert.ok(session.totals.tokens.display.includes("910"));
-	assert.deepEqual(frames[0]?.cost, { amount: 1.25, currency: "USD" });
-	assert.equal(last?.cost, undefined);
+	// A route-price estimate is not money the user paid: without a confirmed personal charge ACP `cost` stays absent.
+	assert.ok(frames.every((frame) => frame.cost === undefined));
 	close();
 	await served;
 });
