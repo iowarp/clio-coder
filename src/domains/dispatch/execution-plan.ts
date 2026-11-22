@@ -128,6 +128,11 @@ export interface ExecutionPlan {
 	maxWorkers: number;
 	/** Serialize writer admission when set. The only supported value in this cut is one. */
 	writers?: 1;
+	/**
+	 * `worktree`: the whole run executes in one task worktree the fleet cuts from HEAD and keeps for `fleet land`,
+	 * never in the operator's checkout. Sealed in the hash, so a resume cannot switch where the work lands.
+	 */
+	isolation?: "worktree";
 	onFailure: ExecutionPlanFailurePolicy;
 	steps: ReadonlyArray<ExecutionPlanStep>;
 	loops: ReadonlyArray<ExecutionPlanLoop>;
@@ -355,6 +360,7 @@ export function compileExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
 		rootTask: input.rootTask,
 		maxWorkers: input.maxWorkers,
 		...(input.writers === 1 ? { writers: 1 as const } : {}),
+		...(input.isolation === "worktree" ? { isolation: "worktree" as const } : {}),
 		onFailure: input.onFailure,
 		steps,
 		loops,
@@ -373,6 +379,7 @@ export function bindExecutionPlanEndpoints(
 		rootTask: plan.rootTask,
 		maxWorkers: plan.maxWorkers,
 		...(plan.writers === 1 ? { writers: 1 as const } : {}),
+		...(plan.isolation === "worktree" ? { isolation: "worktree" as const } : {}),
 		onFailure: plan.onFailure,
 		steps: plan.steps.map((step) => {
 			if (step.kind === "code") return step;
@@ -394,6 +401,7 @@ export function executionPlanIdentityHash(plan: ExecutionPlan): string {
 		rootTask: plan.rootTask,
 		maxWorkers: plan.maxWorkers,
 		...(plan.writers === 1 ? { writers: 1 as const } : {}),
+		...(plan.isolation === "worktree" ? { isolation: "worktree" as const } : {}),
 		onFailure: plan.onFailure,
 		steps: plan.steps.map((step) => withoutEndpoint(step)),
 		loops: plan.loops,
@@ -474,6 +482,7 @@ export function spliceExecutionPlan(
 		rootTask: plan.rootTask,
 		maxWorkers: plan.maxWorkers,
 		...(plan.writers === 1 ? { writers: 1 as const } : {}),
+		...(plan.isolation === "worktree" ? { isolation: "worktree" as const } : {}),
 		onFailure: plan.onFailure,
 		steps: [...rewired, ...inserted],
 		loops: plan.loops,

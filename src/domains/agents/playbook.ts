@@ -28,7 +28,12 @@ import {
 } from "./playbook-commands.js";
 import { normalizeWriteBoundary, WRITE_BOUNDARY_MAX_ENTRIES } from "./write-boundary.js";
 
-export type PlaybookStepScope = "readonly" | "workspace";
+/**
+ * Where a step may change things. `readonly` changes nothing; `workspace` edits the operator's checkout; `worktree`
+ * edits like `workspace`, but the whole run (every step, checks and code steps included) runs in one task worktree
+ * cut from HEAD on `clio-coder/task/<fleet root id>` and kept, so the operator lands it with `fleet land <root>`.
+ */
+export type PlaybookStepScope = "readonly" | "workspace" | "worktree";
 export type PlaybookOnFailure = "stop" | "continue";
 
 /**
@@ -235,7 +240,7 @@ export interface PlaybookListing {
 	needsCommands: ReadonlyArray<string> | null;
 }
 
-const PlaybookScopeSchema = Type.Union([Type.Literal("readonly"), Type.Literal("workspace")]);
+const PlaybookScopeSchema = Type.Union([Type.Literal("readonly"), Type.Literal("workspace"), Type.Literal("worktree")]);
 
 /** The `writes` allowlist exists only from `PLAYBOOK_WRITE_BOUNDARY_VERSION`. */
 function writesSchema(version: PlaybookVersion) {
@@ -273,7 +278,7 @@ function gateStepSchema() {
 			agent: Type.String({ minLength: 1 }),
 			path: Type.String({ minLength: 1 }),
 			run: Type.String({ minLength: 1 }),
-			scope: Type.Optional(Type.Literal("workspace")),
+			scope: Type.Optional(Type.Union([Type.Literal("workspace"), Type.Literal("worktree")])),
 			dependencies: Type.Array(Type.String({ minLength: 1 })),
 			...routeSchema(5),
 		},
@@ -720,9 +725,9 @@ export function playbookStepBoundaries(playbook: Pick<Playbook, "steps" | "versi
 function validateWriteBoundaries(playbook: Pick<Playbook, "steps" | "version" | "path">): void {
 	if (playbook.version < PLAYBOOK_WRITE_BOUNDARY_VERSION) return;
 	for (const position of playbookStepBoundaries(playbook)) {
-		if (position.scope === "workspace" && (position.writes?.length ?? 0) === 0) {
+		if (position.scope !== "readonly" && (position.writes?.length ?? 0) === 0) {
 			throw new Error(
-				`playbook ${playbook.path}: step '${position.id}' has scope 'workspace' and must declare a non-empty 'writes' allowlist at version ${PLAYBOOK_WRITE_BOUNDARY_VERSION}`,
+				`playbook ${playbook.path}: step '${position.id}' has scope '${position.scope}' and must declare a non-empty 'writes' allowlist at version ${PLAYBOOK_WRITE_BOUNDARY_VERSION}`,
 			);
 		}
 	}
@@ -741,7 +746,7 @@ function validateWriteBoundaries(playbook: Pick<Playbook, "steps" | "version" | 
 		for (const position of declared) {
 			if (position.scope === "readonly" && position.writes !== undefined) {
 				throw new Error(
-					`playbook ${playbook.path}: step '${position.id}' is 'readonly', which is the empty allowlist; remove its 'writes' or give it scope 'workspace'`,
+					`playbook ${playbook.path}: step '${position.id}' is 'readonly', which is the empty allowlist; remove its 'writes' or give it scope 'workspace' or 'worktree'`,
 				);
 			}
 		}
@@ -817,9 +822,43 @@ export function parsePlaybook(raw: string, sourcePath: string): Playbook {
 		path: sourcePath,
 	};
 	validatePlaybookGraph(playbook);
+	validateWorktreeScope(playbook);
 	validateWriteBoundaries(playbook);
 	validateV5Declarations(playbook);
 	return playbook;
+}
+
+/** The scope each declared position asked for, gate steps included (a gate's scope is optional). */
+function declaredScopes(steps: ReadonlyArray<PlaybookStep>): Array<{ id: string; scope: PlaybookStepScope }> {
+	return steps.flatMap((step) => {
+		if (step.kind !== "loop") return [{ id: step.id, scope: step.scope }];
+		return [
+			...(step.check.kind === "gate" ? [] : [{ id: `${step.id}.check`, scope: step.check.scope }]),
+			{ id: `${step.id}.repair`, scope: step.repair.scope },
+		];
+	});
+}
+
+/** True when any step asks for `worktree`: the whole run then executes in one kept task worktree. */
+export function playbookRunsInTaskWorktree(playbook: Pick<Playbook, "steps">): boolean {
+	return declaredScopes(playbook.steps).some((position) => position.scope === "worktree");
+}
+
+/**
+ * A run has one place it writes. `worktree` moves every step into the task worktree, so a `workspace` step beside it
+ * would be read as "edit the operator's checkout" and silently edit the worktree instead.
+ */
+function validateWorktreeScope(playbook: Pick<Playbook, "steps" | "path">): void {
+	const positions = declaredScopes(playbook.steps);
+	const isolated = positions.find((position) => position.scope === "worktree");
+	if (isolated === undefined) return;
+	// A gate step's scope is optional and normalizes to `workspace`; it runs wherever the run runs.
+	const gates = new Set(playbook.steps.filter((step) => step.kind === "gate").map((step) => step.id));
+	const shared = positions.find((position) => position.scope === "workspace" && !gates.has(position.id));
+	if (shared === undefined) return;
+	throw new Error(
+		`playbook ${playbook.path}: step '${isolated.id}' has scope 'worktree' but step '${shared.id}' has scope 'workspace'; one run writes in one place, so give every writing step scope 'worktree' or none`,
+	);
 }
 
 function validateV5Declarations(playbook: Playbook): void {

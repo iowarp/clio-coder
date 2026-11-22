@@ -51,6 +51,8 @@ export interface FleetRunRecord {
 	startedAt: string;
 	endedAt: string | null;
 	resumedFrom: string | null;
+	/** Run id of the kept task worktree an isolated (`worktree`-scoped) run executes in; a resume continues there. */
+	worktree?: string;
 	steps: Array<{ stepId: string; result: ExecutionStepResult }>;
 }
 

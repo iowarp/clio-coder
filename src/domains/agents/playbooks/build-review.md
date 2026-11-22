@@ -6,14 +6,14 @@ steps:
   - kind: agent
     id: build
     agent: coder
-    scope: workspace
+    scope: worktree
     dependencies: []
   - kind: loop
     id: review
     maxAttempts: 2
     dependencies: [build]
     check: {kind: agent, agent: verifier, scope: readonly}
-    repair: {kind: agent, agent: coder, scope: workspace}
+    repair: {kind: agent, agent: coder, scope: worktree}
 maxWorkers: 1
 onFailure: stop
 ---

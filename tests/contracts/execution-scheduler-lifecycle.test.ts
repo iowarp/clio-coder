@@ -488,6 +488,8 @@ describe("execution scheduler lifecycle", () => {
 			return found?.kind === "agent" ? found.task : "";
 		};
 		ok(task("build").startsWith("Implement this change"));
+		// The whole chain runs in one kept task worktree, so `fleet land <root>` lands it.
+		strictEqual(p.isolation, "worktree");
 		ok(task("review.repair.1").startsWith("Implement this change"));
 		for (const [id, authors] of [
 			["review.check.1", "`build` (coder)"],
