@@ -3,6 +3,13 @@ import { Type } from "typebox";
 import { SURFACE_IDS } from "../side-surfaces.js";
 import { REQUESTED_THINKING_LEVELS, WIRE_EFFORT_PATTERN } from "./call-effort.js";
 import {
+	CallEconomicsSchema,
+	EconomyUnitSchema,
+	OpaqueIdSchema,
+	RunEconomicsSchema,
+	SafeCountSchema,
+} from "./economy.js";
+import {
 	ConfigChangeScope,
 	ConfigChangeSource,
 	Disposition,
@@ -43,7 +50,7 @@ import {
 const closed = { additionalProperties: false };
 /** Who bills a seat-billed call; a harness word, which a report bundle carries verbatim. */
 export const BILLING_PROVIDERS = ["github-copilot"] as const;
-const count = Type.Integer({ minimum: 0 });
+const count = SafeCountSchema;
 const estimatedCount = Type.Object({ kind: Type.Literal("estimated"), value: count, method: EstimateMethod }, closed);
 const duration = Type.Number({ minimum: 0 });
 const text = Type.String({ maxLength: 4096 });
@@ -214,6 +221,10 @@ const QuotaWindowSchema = Type.Object(
 		scope: Type.Optional(text),
 		usedPct: factSchema(Type.Number({ minimum: 0, maximum: 100 })),
 		resetsAt: Type.Optional(utc),
+		/** The native unit the window's limit counts, as the provider reported it; absent when it named none. */
+		unit: Type.Optional(EconomyUnitSchema),
+		/** The window's length as the provider reported it, such as Codex `limit_window_seconds`; never inferred. */
+		durationSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
 	},
 	closed,
 );
@@ -236,6 +247,11 @@ export const CallSettledSchema = Type.Object(
 		stop,
 		usage: Type.Union([UsageSchema, Type.Null()]),
 		pricing: PricingSchema,
+		/**
+		 * The attempt's economics beside its route price: provider charge, marginal charge, seat credit estimate, energy,
+		 * API equivalent and funding (`economy.ts`). Absent on a record that predates them, which reads as not captured.
+		 */
+		economics: Type.Optional(CallEconomicsSchema),
 		// Offsets from the attempt's start. TTFT is firstToken minus send.end; the legacy ledger ttftMs counts from
 		// send.start and so includes Clio's request shaping (#434).
 		stages: Type.Object(
@@ -1113,6 +1129,8 @@ function runSettledSchema<const R extends readonly string[]>(roles: R) {
 			totalTokens: factSchema(count),
 			apiCalls: factSchema(count),
 			pricing: PricingSchema,
+			/** The run's economics beside its route price (`economy.ts`); absent on a record that predates them. */
+			economics: Type.Optional(RunEconomicsSchema),
 			toolCalls: count,
 			/**
 			 * Calls per tool and how they ended, by tool name; a tool's arguments and results are never kept here. `asked`
@@ -1864,7 +1882,15 @@ export const QuotaReadSchema = Type.Object(
 		status: vocabulary(["ok", "no_credentials", "expired", "error", "loading"]),
 		plan: Type.Optional(text),
 		credits: Type.Optional(
-			Type.Object({ display: text, usedPct: factSchema(Type.Number({ minimum: 0, maximum: 100 })) }, closed),
+			Type.Object(
+				{
+					display: text,
+					usedPct: factSchema(Type.Number({ minimum: 0, maximum: 100 })),
+					/** The native unit of the balance `display` states; absent when the provider named none. */
+					unit: Type.Optional(EconomyUnitSchema),
+				},
+				closed,
+			),
 		),
 		message: Type.Optional(text),
 		retryAfterSeconds: Type.Optional(duration),
@@ -1873,6 +1899,17 @@ export const QuotaReadSchema = Type.Object(
 		limitReached: Type.Optional(Type.Boolean()),
 		/** Opaque digest of the provider account a call's reading came from; never the account id itself. */
 		account: Type.Optional(Type.String({ pattern: "^[0-9a-f]{16}$" })),
+		/**
+		 * The local pseudonym of the provider's stable billing identity that keys a funding pool: a keyed hash under a
+		 * per-install key, never a raw account or selection id nor a rotating credential digest. Opaque here; who
+		 * derives it and how is the quota domain's. `account` above separates logins within one process journal.
+		 */
+		accountPseudonym: Type.Optional(OpaqueIdSchema),
+		/**
+		 * The reading carries only the provider's allow or deny status (`limitReached`) and no window, so it is kept
+		 * rather than dropped for having no percentage. Absent on readings with windows and on older records.
+		 */
+		limitOnly: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );

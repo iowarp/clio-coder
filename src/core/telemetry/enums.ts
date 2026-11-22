@@ -114,3 +114,41 @@ export const ConfigChangeSource = vocabulary(["file", "settings-ui", "slash-comm
 /** The layer a settings change landed in (#434). */
 export const ConfigChangeScope = vocabulary(["session", "project", "user"]);
 export type RunBoundKind = Static<typeof RunBoundKind>;
+/**
+ * A non-currency unit an economics quantity or a quota window counts in (token economy S1). A currency amount is named
+ * by its ISO 4217 code instead (`EconomyUnitSchema`). `percent` is a provider's opaque percentage with no native unit
+ * behind it, and `unknown` a unit nobody reported; neither is additive.
+ */
+export const NATIVE_UNITS = [
+	"nano-aiu",
+	"premium-requests",
+	"tokens",
+	"requests",
+	"compute-hours",
+	"provider-credits",
+	"percent",
+	"unknown",
+] as const;
+export const NativeUnit = vocabulary(NATIVE_UNITS);
+export type NativeUnit = Static<typeof NativeUnit>;
+/** How a funding scheme became known: the signed-in provider reported it, the user declared it, or neither. */
+export const FundingSchemeSource = vocabulary(["detected", "declared", "unknown"]);
+export type FundingSchemeSource = Static<typeof FundingSchemeSource>;
+/** What kind of funding pays a call; a hint for display and grouping, never a price or a payer. */
+export const FundingSchemeKind = vocabulary([
+	"subscription",
+	"seat",
+	"pay-per-token",
+	"prepaid",
+	"grant",
+	"free-tier",
+	"local",
+	"unknown",
+]);
+export type FundingSchemeKind = Static<typeof FundingSchemeKind>;
+/** Who pays a pool's charges: the user, their organization, a sponsor, nobody (a free or local route), or unknown. */
+export const PayerKind = vocabulary(["personal", "organization", "sponsor", "none", "unknown"]);
+export type PayerKind = Static<typeof PayerKind>;
+/** The billing period a pool's fee or allowance renews on; `one-time` for a grant or a prepaid purchase. */
+export const FundingPeriodKind = vocabulary(["day", "week", "month", "year", "one-time", "none", "unknown"]);
+export type FundingPeriodKind = Static<typeof FundingPeriodKind>;

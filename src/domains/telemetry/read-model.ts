@@ -29,6 +29,7 @@ import type {
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
 import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
+import { callEconomicsOf, runEconomicsOf } from "../../core/telemetry/economy.js";
 import type { AgentRole, TurnNoAnswerCause } from "../../core/telemetry/enums.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
@@ -2280,6 +2281,7 @@ function callRow(view: View, scope: "own" | "run", owner: string, attempt: Attem
 					modelCalls: seatUnit(settled.billing.modelCalls),
 				}
 			: null,
+		economics: callEconomicsOf(settled),
 	};
 }
 
@@ -3666,6 +3668,7 @@ export function runTelemetry(
 					digest: runSettledDigest(settled.data),
 					boundKind: settled.data.boundKind ?? null,
 					repairRounds: quantity(view, { ...base, metric: "repairRounds" }),
+					economics: runEconomicsOf(settled.data),
 				}
 			: null,
 		seal: sealVerdict,
