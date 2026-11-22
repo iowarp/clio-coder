@@ -259,6 +259,15 @@ class FakeSession {
 		}
 		if (prompt.includes("op:late-namespace")) { await this.lateUsageTool("call_ns", "copilot-A", "msg_A", "msg_B"); return; }
 		if (prompt.includes("op:late-idless-tagged")) { await this.lateUsageTool("call_tag", null, "msg_A", "msg_B"); return; }
+		if (prompt.includes("op:channel-marker")) {
+			// The wave-61 wire frame (M-47): gpt-6-luna wrote its finish call as a channel marker in the reply text.
+			this.usage({ model: "fake-model", inputTokens: 20, outputTokens: 2, cost: 1 });
+			const deltas = ["r", "esum", "ed-", "ok", "\n\n ", "t", "o=functio", "ns.fini", "s", "h, commenta", "r", "y \u0abe", "\u0a9c\u0aaa ", '{"sta', 'te"', ':"do', "ne", '"', "}"];
+			for (const deltaContent of deltas) this.emit("assistant.message_delta", { messageId: "m47", deltaContent });
+			this.emit("assistant.message", { messageId: "m47", content: deltas.join(""), toolRequests: [] });
+			this.emit("session.idle", {});
+			return;
+		}
 		if (prompt.includes("op:hang")) { this.emit("assistant.message_delta", { messageId: "h1", deltaContent: "partial" }); return; }
 		if (prompt.includes("op:usage-wait")) {
 			this.usage({ model: "fake-model", inputTokens: 100, outputTokens: 10, cacheReadTokens: 0 });
@@ -1927,6 +1936,29 @@ test("a thinking block whose signature names it narration is the reply text befo
 		],
 	);
 	disposeCopilotConversations(key);
+});
+
+test("a tool-call channel marker Copilot returns as reply text never reaches the reply when it names a declared tool (M-47)", async () => {
+	const finishTool = { name: "finish", description: "Declare the turn's end", parameters: { type: "object" } };
+	const run = async (tools: Array<typeof readTool | typeof finishTool>, key: string) => {
+		const stream = engineStreamSimple(model, normalizeContext({ tools, messages: [user("op:channel-marker")] }), {
+			sessionId: key,
+		});
+		let streamed = "";
+		for await (const event of stream) if (event.type === "text_delta") streamed += event.delta;
+		const message = await stream.result();
+		disposeCopilotConversations(key);
+		return { streamed, message };
+	};
+	const declared = await run([readTool, finishTool], "channel-marker-session");
+	strictEqual(declared.streamed, "resumed-ok");
+	strictEqual(declared.message.stopReason, "stop");
+	deepStrictEqual(declared.message.content, [{ type: "text", text: "resumed-ok" }]);
+	deepStrictEqual((declared.message as { copilotDroppedToolMarkers?: unknown }).copilotDroppedToolMarkers, ["finish"]);
+	// A marker naming a tool the step never declared is prose, kept as the model wrote it.
+	const undeclared = await run([readTool], "channel-marker-undeclared");
+	strictEqual(undeclared.streamed, 'resumed-ok\n\n to=functions.finish, commentary \u0abe\u0a9c\u0aaa {"state":"done"}');
+	strictEqual((undeclared.message as { copilotDroppedToolMarkers?: unknown }).copilotDroppedToolMarkers, undefined);
 });
 
 test("a reply that is only a tool call streams its first token before the call settles, so a held follower can start", async () => {
