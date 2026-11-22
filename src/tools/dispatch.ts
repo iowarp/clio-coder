@@ -189,7 +189,7 @@ export function createDispatchTool(
 		name: ToolNames.Dispatch,
 		// The job table leads as the selection cue; detailed coordination and
 		// evidence discipline live in the role prompt.
-		description: `${DISPATCH_JOB_TABLE_TEXT} Delegate work to Clio workers; configured profiles select their models. task sends one assignment; tasks sends a batch and leaves task empty. Waits for run results unless detach:true, which returns ids to collect with monitor before synthesis. Declare intent on every dispatch. The host commits task worktrees; workers edit and report even when the task says 'and commit'. expected_outputs are repository-relative file paths such as src/duration.js, never commit, prose, or '.'.`,
+		description: `${DISPATCH_JOB_TABLE_TEXT} Delegate work to Clio workers; configured profiles select their models. tasks sends a batch. Waits for run results unless detach:true, which returns ids to collect with monitor before synthesis. Declare intent on every dispatch. The host commits task worktrees; workers edit and report even when the task says 'and commit'. expected_outputs are repository-relative file paths such as src/duration.js, never commit, prose, or '.'.`,
 		// Composed once per session: council, compete, and adaptive-routing fields
 		// are advertised only when the fleet can exercise them (see dispatch-schema.ts).
 		parameters: buildDispatchParameters(deps.getSchemaComposition?.() ?? FULL_DISPATCH_SCHEMA_COMPOSITION),

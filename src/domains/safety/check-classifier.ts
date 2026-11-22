@@ -1,5 +1,6 @@
 import path from "node:path";
 import { withoutLeadingCdTo } from "../../core/leading-cd.js";
+import { shellJoin } from "../../core/shell-quote.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { shellExitSpeaksForCommand } from "../../tools/shell-exit-scope.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
@@ -202,7 +203,8 @@ function gitPathOperands(command: string): string[] {
 function verifyCommandOf(toolName: string, args: Record<string, unknown> | undefined, base: string): string | null {
 	if (toolName !== ToolNames.Verify || args === undefined) return null;
 	try {
-		return verifyResolutionArgv(resolveVerifyCall(base, args), args, base)?.join(" ") ?? null;
+		const argv = verifyResolutionArgv(resolveVerifyCall(base, args), args, base);
+		return argv === null ? null : shellJoin(argv);
 	} catch {
 		return null;
 	}

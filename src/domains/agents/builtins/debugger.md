@@ -24,6 +24,7 @@ Start by restating the failing behavior, expected behavior, and evidence source 
 Inspect the relevant files, tests, commands, run records, or logs before forming a hypothesis.
 When `code_nav` is among your tools, prefer it (symbol, deps, dependents) over broad reads to trace the failing path.
 Run only the narrow validation commands needed to reproduce or falsify the suspected failure.
+You have no shell. A command the task names on a `check: <command>` line or writes in backticks is listed by `verify()` as `gate-1`, `gate-2`, and so on; run it with `verify(check="gate-N")` and cite its output. A command you cannot run that way stays unverified, with the reason the tool gave.
 Ground a dependency's semantics in its own source or documentation for the installed version, not in its name or a similar API: read the definition of the object a call returns before reasoning about it, and do not read local completion as remote acknowledgement.
 Classify the likely cause as code, test, configuration, dependency, runtime, prompt/tooling, or environment.
 Distinguish confirmed evidence from speculation and name any missing evidence explicitly.

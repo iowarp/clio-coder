@@ -553,6 +553,16 @@ describe("dispatch admission boundary", () => {
 			null,
 		);
 		strictEqual(assess("debugger", "verification", "Fix the bug in m.py")?.verdict, "refuse");
+		// M-42: the same member call is no read root, legacy or declared; the file name beside it still is.
+		const roots = (task: string, intent?: ReturnType<typeof normalizeDispatchIntent>) =>
+			resolveDispatchPathScope({
+				cwd: tmpdir(),
+				task,
+				...(intent?.ok === true ? { intent: intent.intent } : {}),
+			} as Parameters<typeof resolveDispatchPathScope>[0]);
+		deepStrictEqual(roots(batch[0]).workingContextPaths, []);
+		deepStrictEqual(roots(`${batch[0]} from m.py; x.name() too`).workingContextPaths, ["m.py"]);
+		deepStrictEqual(roots(batch[0], normalizeDispatchIntent({ version: 2 }, new Map())).inferredOnlyPaths, []);
 	});
 
 	it("reads 'change nothing' and 'leave X unchanged' as prohibitions, not mutation requests", () => {
