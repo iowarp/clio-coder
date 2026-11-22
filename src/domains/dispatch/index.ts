@@ -23,6 +23,7 @@ export type {
 	FleetRunPreviewStep,
 } from "./fleet-run-preview.js";
 export { compileFleetRunPreview, fleetRouteResolver } from "./fleet-run-preview.js";
+export type { FleetKeptWorktree } from "./fleet-task-worktree.js";
 export {
 	describeFleetToolInstall,
 	executeFleetToolInstall,

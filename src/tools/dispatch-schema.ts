@@ -96,7 +96,7 @@ export function coordinatorDispatchParameters() {
 		// dynamo sent 5 of 12 dispatches with none, and none recovered from the refusal.
 		task: Type.String({
 			description:
-				"One self-contained assignment with outcome and constraints, never the operator's words; empty only with list or tasks.",
+				"One self-contained assignment with outcome and constraints, never the operator's words; empty only with list or tasks. A checker runs task lines `check: <command>`.",
 		}),
 		intent: Type.Optional(intent),
 		// No `tags`: store grants are taught on demand (gateway describe dispatch); the canonical schema admits them.

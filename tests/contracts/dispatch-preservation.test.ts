@@ -1,4 +1,4 @@
-import { match, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
@@ -608,8 +608,12 @@ test("a worktree-scoped fleet runs every step in one kept task worktree that fle
 			notices.some((text) => text.includes("clio-coder fleet land fleet-worktree-contract")),
 			notices.join("\n"),
 		);
+		// The branch holds the run's work as a commit, so removing the worktree by hand loses nothing.
+		strictEqual(git(root, "rev-list", "--count", "HEAD..clio-coder/task/fleet-worktree-contract"), "1");
+		strictEqual(git(root, "show", "clio-coder/task/fleet-worktree-contract:base.txt"), "built");
 		const landing = planTaskLand({ root, ref: "fleet-worktree-contract", mode: "merge" });
 		strictEqual(landing.refusal, null);
+		deepStrictEqual([landing.commits.length, landing.uncommitted], [1, 0]);
 		executeTaskLand(landing);
 		strictEqual(readFileSync(join(root, "base.txt"), "utf8"), "built");
 		strictEqual(git(root, "branch", "--list", "clio-coder/task/fleet-worktree-contract"), "");

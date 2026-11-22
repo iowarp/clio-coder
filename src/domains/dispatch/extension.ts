@@ -165,7 +165,7 @@ import {
 	WORKTREE_CHANGED_SINCE_PREVIEW,
 	withStrayWrites,
 } from "../../tools/task-worktree.js";
-import { extractTaskGates } from "../../tools/verify/task-gates.js";
+import { contractDeclaresTaskGates, extractTaskGates } from "../../tools/verify/task-gates.js";
 import { diskWorktreeParent, prepareWorktreeParent, resolveWorktreeRoot } from "../../tools/worktree-root.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
@@ -10513,7 +10513,7 @@ export function createDispatchBundle(
 					executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
 					toolLaneObserved: gradeContract.toolLaneObserved,
 					// The worker derived the same gates from the same task text.
-					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
+					...(contractDeclaresTaskGates(appliedResultContract?.kind) ? { taskGates: extractTaskGates(req.task).gates } : {}),
 				});
 				const activity = summarizeToolActivity(toolStats, classifyTool);
 				// A limitation the run recorded is a typed declaration whether or not the finish contract kept its words: an
