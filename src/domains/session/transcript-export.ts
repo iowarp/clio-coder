@@ -89,6 +89,9 @@ export function transcriptBlocks(input: TranscriptExportInput): { blocks: Transc
 	// A refused capability's result carries no capability name of its own, so
 	// a result takes the name its call was shown under.
 	const shownCalls = new Map<string, { name: string; viaGateway: boolean }>();
+	// The last block of each shown call, so a parallel call's result lands under its own call rather than in the
+	// order the results completed (row 362).
+	const callTail = new Map<string, TranscriptBlock>();
 	const branch = filterEntriesToActivePath(input.entries, input.leafTurnId ?? undefined);
 	const recorded = new Set<SessionEntry>(branch);
 	for (const entry of expandChainMessages(branch)) {
@@ -147,12 +150,16 @@ export function transcriptBlocks(input: TranscriptExportInput): { blocks: Transc
 						: "tool";
 			const call = displayToolCall(wireName, payload?.args);
 			const shown = { name: call.toolName, viaGateway: call.viaGateway || chainStep };
-			if (toolCallId !== null) shownCalls.set(toolCallId, shown);
-			blocks.push({
+			const block: TranscriptBlock = {
 				kind: "tool",
 				...shown,
 				args: clip(JSON.stringify((call.viaGateway ? call.args : payload?.args) ?? {}, null, 2), MAX_ARGS_CHARS),
-			});
+			};
+			if (toolCallId !== null) {
+				shownCalls.set(toolCallId, shown);
+				callTail.set(toolCallId, block);
+			}
+			blocks.push(block);
 			continue;
 		}
 		if (entry.role === "tool_result") {
@@ -164,7 +171,17 @@ export function transcriptBlocks(input: TranscriptExportInput): { blocks: Transc
 				viaGateway: call.viaGateway || chainStep,
 			};
 			const failed = payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked";
-			blocks.push({ kind: "result", ...shown, text: clip(resultText(payload?.result), MAX_RESULT_CHARS), failed });
+			const block: TranscriptBlock = {
+				kind: "result",
+				...shown,
+				text: clip(resultText(payload?.result), MAX_RESULT_CHARS),
+				failed,
+			};
+			const tail = toolCallId === null ? undefined : callTail.get(toolCallId);
+			const at = tail === undefined ? -1 : blocks.lastIndexOf(tail);
+			if (at < 0) blocks.push(block);
+			else blocks.splice(at + 1, 0, block);
+			if (toolCallId !== null) callTail.set(toolCallId, block);
 		}
 	}
 	return { blocks, turns };

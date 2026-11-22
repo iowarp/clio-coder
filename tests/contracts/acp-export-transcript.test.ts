@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
-import { writeTranscriptExport } from "../../src/domains/session/transcript-export.js";
+import { renderTranscriptMarkdown, writeTranscriptExport } from "../../src/domains/session/transcript-export.js";
 import { type AcpCommandHost, acpCommandControl } from "../../src/engine/acp/commands.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -176,4 +178,60 @@ test("Markdown and HTML exports retain each assistant model and the switch divid
 	} finally {
 		scratch.restore();
 	}
+});
+
+test("a transcript pairs parallel tool results with their calls by id, and a default jsonl export stays out of Git (row 362)", async () => {
+	await withSession(async (root, contract, sessionId) => {
+		contract.append({ id: "u4", parentId: "a3", at: at(8), kind: "user", payload: { text: "read both" } });
+		contract.append({
+			id: "c2",
+			parentId: "u4",
+			at: at(9),
+			kind: "tool_call",
+			payload: { toolCallId: "t2", name: "read", args: { path: "first.md" } },
+		});
+		contract.append({
+			id: "c3",
+			parentId: "c2",
+			at: at(9),
+			kind: "tool_call",
+			payload: { toolCallId: "t3", name: "read", args: { path: "second.md" } },
+		});
+		// The second call settles first, so the ledger holds its result first.
+		for (const [id, parentId, toolCallId, text] of [
+			["r3", "c3", "t3", "SECOND BODY"],
+			["r2", "r3", "t2", "FIRST BODY"],
+		] as const)
+			contract.append({
+				id,
+				parentId,
+				at: at(9),
+				kind: "tool_result",
+				payload: { toolCallId, toolName: "read", result: { content: [{ type: "text", text }] } },
+			});
+		await contract.checkpoint();
+		const md = renderTranscriptMarkdown({
+			sessionId,
+			exportedAt: at(9),
+			entries: readEntries(sessionId),
+			leafTurnId: contract.tree(sessionId).leafId,
+		}).text;
+		const order = ["first.md", "FIRST BODY", "second.md", "SECOND BODY"].map((needle) => md.indexOf(needle));
+		assert.ok(
+			order.every((index, i) => index >= 0 && (i === 0 || index > (order[i - 1] ?? 0))),
+			md,
+		);
+		const cli = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
+		const exported = spawnSync(process.execPath, [cli, "session", "export", sessionId, "--format", "jsonl", "--json"], {
+			cwd: root,
+			env: { ...process.env, CLIO_CODER_INTERACTIVE: "0" },
+			encoding: "utf8",
+			timeout: 20_000,
+		});
+		assert.equal(exported.status, 0, exported.stderr);
+		const path = (JSON.parse(exported.stdout) as { path: string }).path;
+		assert.ok(path.startsWith(join(root, ".clio-coder", "exports")), path);
+		assert.ok(existsSync(join(root, ".clio-coder", ".gitignore")), "a default export keeps .clio-coder/ out of Git");
+		if (process.platform !== "win32") assert.equal(statSync(path).mode & 0o077, 0);
+	});
 });
