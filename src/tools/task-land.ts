@@ -10,7 +10,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { attributeCommitMessage } from "../core/commit-attribution.js";
@@ -144,7 +144,10 @@ function runIdOf(ref: string): string {
  * The tree the kept worktree would commit, written through a copy of its index
  * so neither the worktree's index nor its HEAD changes while only previewing.
  * The copy keeps what the worker staged, and the adds take tracked changes and
- * `untracked`, what `commitWorktreePath` takes for the same list.
+ * `untracked`, what `commitWorktreePath` takes for the same list. Git trusts a
+ * cached stat only for an entry older than the index file, so the copy keeps the
+ * index's mtime, floored to the second: an entry edited in the second the index
+ * was written stays racily clean and is rehashed, not skipped.
  */
 function snapshotTree(path: string, tip: string, untracked: ReadonlyArray<string>): string {
 	const directory = mkdtempSync(join(tmpdir(), "clio-coder-land-index-"));
@@ -152,8 +155,11 @@ function snapshotTree(path: string, tip: string, untracked: ReadonlyArray<string
 		const env = { GIT_INDEX_FILE: join(directory, "index") };
 		const gitPathIndex = git(path, ["rev-parse", "--git-path", "index"]);
 		const index = isAbsolute(gitPathIndex) ? gitPathIndex : join(path, gitPathIndex);
-		if (existsSync(index)) copyFileSync(index, env.GIT_INDEX_FILE);
-		else git(path, ["read-tree", tip], env);
+		if (existsSync(index)) {
+			copyFileSync(index, env.GIT_INDEX_FILE);
+			const written = Math.floor(statSync(index).mtimeMs / 1000);
+			utimesSync(env.GIT_INDEX_FILE, written, written);
+		} else git(path, ["read-tree", tip], env);
 		git(path, ["add", "-u", "--", "."], env);
 		for (let index = 0; index < untracked.length; index += PATHSPEC_BATCH) {
 			const batch = untracked.slice(index, index + PATHSPEC_BATCH);
