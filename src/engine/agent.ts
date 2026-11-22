@@ -8,7 +8,8 @@ import {
 import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { createHostPolicyMessage, isHostPolicyMessage } from "../core/host-policy-message.js";
 import { ProviderCompactionError, providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
-import { type ModelRouteRefusal, modelRouteRefusalMessage, servedModelMismatch } from "../core/response-model-id.js";
+import type { ModelRouteRefusal } from "../core/response-model-id.js";
+import { modelRouteRefusalMessage, servedModelMismatch } from "../core/response-model-id.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { compactOpenAI, providerCheckpointCompatibility } from "./apis/openai-compaction.js";
 import { normalizeContext, resolvedRequestContext } from "./context.js";
@@ -442,6 +443,8 @@ function refuseOnServedModelMismatch(
 				stopReason: "error" as const,
 				errorMessage: modelRouteRefusalMessage(refusal),
 				modelRouteRefusal: refusal,
+				// The call itself completed: its settlement records this stop and the usage kept above, not an unsettled error.
+				settledStopReason: event.message.stopReason,
 			};
 			output.push({ type: "error", reason: "error", error });
 		}

@@ -4,7 +4,8 @@ import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { reminderGist } from "../../core/reminder-gist.js";
-import { type ModelRouteRefusal, modelRouteRefusalOf } from "../../core/response-model-id.js";
+import type { ModelRouteRefusal } from "../../core/response-model-id.js";
+import { modelRouteRefusalOf } from "../../core/response-model-id.js";
 import { runOverrides, withRunOverrides } from "../../core/run-overrides.js";
 import {
 	type PendingSkillRequest,

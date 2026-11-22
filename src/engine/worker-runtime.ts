@@ -16,7 +16,8 @@ import { snapshotModelInfo } from "../core/model-tier.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
 import { EXPLORATION_TOOL_NAMES } from "../core/read-only-calls.js";
 import { systemReminderBlock } from "../core/reminder-framing.js";
-import { modelRouteGuarded } from "../core/response-model-id.js";
+import type { ModelRouteRefusal } from "../core/response-model-id.js";
+import { modelRouteGuarded, modelRouteRefusalMessage } from "../core/response-model-id.js";
 import { requestedThinking } from "../core/telemetry/call-effort.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
 import { observedToolCallOrigin, withTelemetryContext } from "../core/telemetry/context.js";
@@ -99,6 +100,7 @@ import { createMiddlewareToolChoiceControl, createReadStreakRegistration } from 
 import { shouldRequestStalledTurnContinuation } from "../domains/middleware/stalled-turn.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
 import type { AuthResolution } from "../domains/providers/auth/storage.js";
+import { PROVIDER_PROBE_TIMEOUT_MS } from "../domains/providers/contract.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
 import type {
 	CapabilityFlags,
@@ -107,7 +109,11 @@ import type {
 	TargetDescriptor,
 	ThinkingLevel,
 } from "../domains/providers/index.js";
-import { applyModelCapabilityPatch, resolveModelRuntimeCapabilitiesForModel } from "../domains/providers/index.js";
+import {
+	applyModelCapabilityPatch,
+	probedModelOffer,
+	resolveModelRuntimeCapabilitiesForModel,
+} from "../domains/providers/index.js";
 import { createProfileKnowledgeBase } from "../domains/providers/profile-knowledge.js";
 import type { KnowledgeBase } from "../domains/providers/types/knowledge-base.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
@@ -1543,12 +1549,38 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// The helper protocol names its own terminal tool, so only a prose-parsed contract carries the reminder.
 	const contractReminder =
 		input.resultContract !== undefined && !helperToolAvailable ? resultContractReminder(input.resultContract) : null;
+	/**
+	 * Row 384 before the call: a worker holds no target status, so a guarded target that lists live is asked once per
+	 * run, and a requested model its answer lacks is refused before any request, as a main turn's is.
+	 */
+	let modelOffer: Promise<ModelRouteRefusal | null> | null = null;
+	const modelOfferRefusal = (signal: AbortSignal | undefined): Promise<ModelRouteRefusal | null> => {
+		modelOffer ??= probedModelOffer(input.target, input.runtime, input.wireModelId, {
+			credentialsPresent: new Set(),
+			httpTimeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
+			...(signal ? { signal } : {}),
+			...(input.apiKey ? { authToken: input.apiKey } : {}),
+		}).then((offer) =>
+			offer.kind === "not-offered"
+				? {
+						code: "model_unavailable",
+						target: input.target.id,
+						requested: input.wireModelId,
+						available: offer.available,
+					}
+				: null,
+		);
+		return modelOffer;
+	};
 	const options: EngineAgentOptions = {
 		// Row 384 backstop: a provider that accepts the id and serves another model is refused at its first response.
 		refuseServedModelMismatch: () => modelRouteGuarded(input.runtime),
 		// The run's restrictions are judged against the target as configured for
 		// this run before each request, the same verdict the parent would reach.
-		beforeStreamRequest: () => {
+		beforeStreamRequest: async ({ options: streamOptions }) => {
+			const unavailable = await modelOfferRefusal(streamOptions?.signal);
+			if (unavailable !== null)
+				return { block: true, reason: modelRouteRefusalMessage(unavailable), modelRouteRefusal: unavailable };
 			workerTelemetry?.stage("admission", "start");
 			const reason = flowTransferRefusal(
 				safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,

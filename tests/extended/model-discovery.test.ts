@@ -78,5 +78,12 @@ describe("contracts/model-discovery", () => {
 		deepStrictEqual(modelOfferForStatus(seat("cloud", "probe"), "claude-sonnet-4-0"), { kind: "offered" });
 		deepStrictEqual(modelOfferForStatus(seat("subscription", "cache"), "gpt-6.2-terra"), { kind: "unknown" });
 		deepStrictEqual(modelOfferForStatus(seat("local-native", "probe"), "gpt-6.2-terra"), { kind: "unknown" });
+		// Only aliases of one model match: another version or another pinned snapshot is another model.
+		const pinned = (id: string) =>
+			modelOfferForStatus({ ...seat("cloud", "probe"), discoveredModels: ["gpt-5.1", "gpt-4o-2024-05-13"] }, id).kind;
+		strictEqual(pinned("gpt-5"), "not-offered");
+		strictEqual(pinned("gpt-4o-2024-08-06"), "not-offered");
+		strictEqual(pinned("gpt-4o"), "offered");
+		strictEqual(pinned("gpt-5.1-latest"), "offered");
 	});
 });

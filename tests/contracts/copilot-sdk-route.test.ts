@@ -2461,6 +2461,35 @@ test("a locked Copilot worker round keeps the session's reasoning effort and too
 	}
 });
 
+// Row 384: a worker targeted at a model the seat does not list is refused before any request, naming what it offers.
+test("a Copilot worker asked for a model the seat does not list is refused before any request (row 384)", async () => {
+	const sessionsBefore = fake().sessions.length;
+	const worker = startWorkerRun(
+		{
+			agentId: "coder",
+			sessionId: "row384-worker",
+			systemPrompt: "Reply OK.",
+			task: "Reply OK.",
+			target: { id: "copilot-worker", runtime: "copilot-sdk" },
+			runtime: copilotSdkRuntime,
+			wireModelId: "gpt-6.2-terra",
+			allowedTools: [],
+			budget: { mode: "enforced", toolCalls: 1, synthesis: true, hardCap: 150 },
+			noSkills: true,
+			cwd: process.cwd(),
+			onPermission: "deny",
+		},
+		() => {},
+	);
+	const { messages } = await worker.promise;
+	const last = messages.at(-1) as AssistantMessage & { modelRouteRefusal?: { code?: string } };
+	strictEqual(last.stopReason, "error");
+	strictEqual(last.modelRouteRefusal?.code, "model_unavailable");
+	match(last.errorMessage ?? "", /^no model gpt-6\.2-terra on target copilot-worker; available: /);
+	strictEqual(fake().sessions.length, sessionsBefore, "no Copilot session opened");
+	disposeCopilotConversations("row384-worker");
+});
+
 // M-31: a scout's locked round on Copilot cannot name its result tool, so it keeps that tool declared rather than drop
 // it: the session's tool set never changes and the runtime keeps its cached prefix.
 test("a locked Copilot scout round keeps clio_submit_result declared, so the session's tools never change (M-31)", async () => {

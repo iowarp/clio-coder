@@ -99,6 +99,7 @@ export {
 	offeredAsChatModel,
 	type ProviderModelCandidate,
 	type ProviderModelSource,
+	probedModelOffer,
 	runtimeListsModelsLive,
 	type UnverifiedModelListOrigin,
 	unverifiedModelListNote,

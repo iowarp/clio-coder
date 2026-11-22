@@ -124,35 +124,57 @@ export function modelRouteGuarded(runtime: { tier?: string | undefined } | null 
 	return runtime?.tier === "cloud" || runtime?.tier === "subscription";
 }
 
-const DATED_SNAPSHOT = /-(?:\d{4}-\d{2}-\d{2}|\d{8}|\d{4})$/u;
+const DATED_SNAPSHOT = /-(?:\d{4}-\d{2}-\d{2}|\d{8}|\d{4}|0\d{2})$/u;
 
 /**
- * A model id as the guards compare it, after the aliasing providers apply to the same model: lower case; a provider or
- * path prefix dropped (`openai/gpt-4o`, `models/gemini-2.5-pro`); a Vertex `@version` and any `:tag` dropped
- * (`claude-sonnet-4@20250514`, `llama-3-8b:free`, `qwen3:latest`); a `-latest` suffix and then a dated snapshot
- * suffix dropped (`-20250514`, `-2024-08-06`, `-0613`); dots read as dashes (`claude-opus-4.5` is
- * `claude-opus-4-5`).
+ * A model id split into the model it names and the snapshot it pins, after the aliasing providers apply to one model:
+ * lower case; a provider or path prefix and any `:tag` dropped (`openai/gpt-4o`, `models/gemini-2.5-pro`,
+ * `llama-3-8b:free`); a `-latest` suffix dropped; dots read as dashes (`claude-opus-4.5` is `claude-opus-4-5`) and a
+ * trailing `-0` minor dropped (`claude-sonnet-4-0` is `claude-sonnet-4`). The snapshot is a Vertex `@version` or a
+ * dated or numbered suffix (`-20250514`, `-2024-08-06`, `-0613`, `-002`), dashes removed; null for a floating alias.
  */
-function canonicalModelId(id: string): string {
+function modelIdParts(id: string): { model: string; snapshot: string | null } {
 	let out = id.trim().toLowerCase();
-	out = out.slice(out.lastIndexOf("/") + 1);
-	out = out.replace(/@.*$/u, "").replace(/:.*$/u, "");
+	out = out.slice(out.lastIndexOf("/") + 1).replace(/:.*$/u, "");
+	let snapshot: string | null = null;
+	const at = out.indexOf("@");
+	if (at >= 0) {
+		const version = out.slice(at + 1).replace(/-/gu, "");
+		snapshot = version === "" || version === "latest" ? null : version;
+		out = out.slice(0, at);
+	}
 	out = out.replace(/-latest$/u, "");
-	out = out.replace(DATED_SNAPSHOT, "");
-	return out.replace(/\./gu, "-");
+	const dated = DATED_SNAPSHOT.exec(out);
+	if (dated) {
+		snapshot ??= dated[0].slice(1).replace(/-/gu, "");
+		out = out.slice(0, dated.index);
+	}
+	return { model: out.replace(/\./gu, "-").replace(/-0$/u, ""), snapshot };
 }
 
 /**
- * Whether a reported id names the requested model. Equal canonical ids match, and so does one that extends the other by
- * numeric segments only (`claude-sonnet-4-0` against `claude-sonnet-4-20250514`, `gemini-1.5-pro` against
- * `gemini-1.5-pro-002`). A word segment is another model (`gpt-4o-mini` is not `gpt-4o`).
+ * Whether a reported id names the requested model: the same model, and the same snapshot unless one side is a floating
+ * alias (`claude-sonnet-4` against `claude-sonnet-4-20250514`). Another version (`gpt-5.1` is not `gpt-5`), another
+ * variant (`gpt-4o-mini` is not `gpt-4o`) or another pinned snapshot (`gpt-4o-2024-05-13` is not
+ * `gpt-4o-2024-08-06`) is another model.
  */
 export function sameServedModel(requested: string, reported: string): boolean {
-	const a = canonicalModelId(requested);
-	const b = canonicalModelId(reported);
-	if (a.length === 0 || b.length === 0 || a === b) return true;
-	const [short, long] = a.length < b.length ? [a, b] : [b, a];
-	return long.startsWith(`${short}-`) && /^[\d-]+$/u.test(long.slice(short.length + 1));
+	const a = modelIdParts(requested);
+	const b = modelIdParts(reported);
+	if (a.model.length === 0 || b.model.length === 0) return true;
+	return a.model === b.model && (a.snapshot === null || b.snapshot === null || a.snapshot === b.snapshot);
+}
+
+/**
+ * Whether a listed id offers the requested model. A floating alias is offered by any snapshot of its model; a pinned
+ * snapshot only by that snapshot, since a list that names other snapshots of the model does not serve this one.
+ */
+export function listedModelOffers(listed: string, requested: string): boolean {
+	const want = modelIdParts(requested);
+	const have = modelIdParts(listed);
+	return (
+		want.model.length > 0 && want.model === have.model && (want.snapshot === null || want.snapshot === have.snapshot)
+	);
 }
 
 /**

@@ -1,9 +1,10 @@
-import { modelRouteGuarded, sameServedModel } from "../../core/response-model-id.js";
+import { listedModelOffers, modelRouteGuarded } from "../../core/response-model-id.js";
 import type { TargetStatus } from "./contract.js";
 import { listKnownModelsForRuntime } from "./support.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import type { ContextWindowSlots } from "./types/context-window-slots.js";
-import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
+import type { ProbeContext, RuntimeDescriptor } from "./types/runtime-descriptor.js";
+import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 export type ProviderModelSource = "configured" | "live" | "cache" | "catalog" | "default";
 
@@ -227,17 +228,52 @@ export type ModelOffer = { kind: "offered" } | { kind: "not-offered"; available:
 /**
  * Whether a target offers a model, judged on its live list only. A runtime that does not list live, a local engine or
  * protocol gateway (whose ids are labels its operator configured), a cached list and an empty list all answer
- * `unknown`, which never refuses. An id the list names after `sameServedModel`'s canonicalization (a dated snapshot,
- * a `-latest` alias, a provider prefix) is offered.
+ * `unknown`, which never refuses. A listed id offers the requested one when it names the same model per
+ * `listedModelOffers`: a floating alias is offered by any snapshot of its model, a pinned snapshot only by itself.
  */
 export function modelOfferForStatus(status: TargetStatus | null | undefined, modelId: string): ModelOffer {
-	if (!status?.runtime || !modelRouteGuarded(status.runtime) || !runtimeListsModelsLive(status.runtime))
-		return { kind: "unknown" };
-	const listed = hasLiveModelCatalog(status) ? uniqueModels(status.discoveredModels) : [];
+	if (!status?.runtime) return { kind: "unknown" };
+	return modelOfferForListing(status.runtime, hasLiveModelCatalog(status) ? status.discoveredModels : [], modelId);
+}
+
+function modelOfferForListing(
+	runtime: RuntimeDescriptor,
+	liveModels: ReadonlyArray<string | undefined>,
+	modelId: string,
+): ModelOffer {
+	if (!modelRouteGuarded(runtime) || !runtimeListsModelsLive(runtime)) return { kind: "unknown" };
+	const listed = uniqueModels(liveModels);
 	if (listed.length === 0) return { kind: "unknown" };
 	const requested = modelId.trim();
-	if (listed.some((id) => id === requested || sameServedModel(requested, id))) return { kind: "offered" };
+	if (listed.some((id) => id === requested || listedModelOffers(id, requested))) return { kind: "offered" };
 	return { kind: "not-offered", available: listed };
+}
+
+/**
+ * The offer a target's provider makes when asked live now, for a caller that holds no status, such as a worker
+ * process (row 384). The runtime's own probe answers with `fresh`, so a cached listing is never the evidence; a probe
+ * that fails, throws or still answers from its cache is `unknown`.
+ */
+export async function probedModelOffer(
+	target: TargetDescriptor,
+	runtime: RuntimeDescriptor,
+	modelId: string,
+	ctx: Omit<ProbeContext, "fresh">,
+): Promise<ModelOffer> {
+	if (!modelRouteGuarded(runtime) || !runtimeListsModelsLive(runtime)) return { kind: "unknown" };
+	const probeCtx: ProbeContext = { ...ctx, fresh: true };
+	try {
+		const result = runtime.probe ? await runtime.probe(target, probeCtx) : null;
+		if (result !== null && !result.ok) return { kind: "unknown" };
+		if (result?.models)
+			return result.modelsSource === "cache" ? { kind: "unknown" } : modelOfferForListing(runtime, result.models, modelId);
+		return runtime.probeModels
+			? modelOfferForListing(runtime, await runtime.probeModels(target, probeCtx), modelId)
+			: { kind: "unknown" };
+	} catch {
+		// No answer is no evidence: the request goes as it would have.
+		return { kind: "unknown" };
+	}
 }
 
 export function canonicalizeWireModelId(status: TargetStatus, requested: string): string {
