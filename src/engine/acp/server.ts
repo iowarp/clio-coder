@@ -86,6 +86,7 @@ import { clioStateDir } from "../../core/xdg.js";
 import type { StartupHint } from "../../domains/context/contract.js";
 import type { RunResultFacts } from "../../domains/dispatch/index.js";
 import { readRunResultFacts, readRunResultFactsForReplay, runResultWireFacts } from "../../domains/dispatch/index.js";
+import { redactCommandOutputSecrets } from "../../domains/evidence/redact.js";
 import { PROVIDER_PROBE_TIMEOUT_MS, type ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import { modelIdsForStatus } from "../../domains/providers/model-discovery.js";
@@ -107,6 +108,7 @@ import {
 	redactFinalUrlCredentials,
 	redactSecretString,
 	redactStreamingUrlCredentials,
+	redactToolArgs,
 	redactUrlCredentials,
 	UrlCredentialStreamFilter,
 } from "../../domains/safety/redaction.js";
@@ -1499,21 +1501,27 @@ function rawStringBytes(key: string | undefined, parentKey: string | undefined):
 	return key === "diff" && parentKey === "details" ? ACP_MAX_RAW_DIFF_BYTES : ACP_MAX_STRING_BYTES;
 }
 
-function boundRawValue(value: unknown, depth: number, key?: string, parentKey?: string): unknown {
+function boundRawValue(
+	value: unknown,
+	depth: number,
+	key?: string,
+	parentKey?: string,
+	scrub: (text: string) => string = redactUrlCredentials,
+): unknown {
 	// Redacted ahead of its bound, which could otherwise cut a password into a piece no pattern recognizes (#446).
-	if (typeof value === "string") return boundString(redactUrlCredentials(value), rawStringBytes(key, parentKey));
+	if (typeof value === "string") return boundString(scrub(value), rawStringBytes(key, parentKey));
 	if (Array.isArray(value)) {
 		if (depth >= ACP_MAX_RAW_RECORD_DEPTH) return "[depth]";
 		// A member inherits no path: `details.diff` names one string, not a list
 		// of them, and a thousand-entry array of wide strings is the payload the
 		// record cap exists to stop.
-		return value.map((entry) => boundRawValue(entry, depth + 1));
+		return value.map((entry) => boundRawValue(entry, depth + 1, undefined, undefined, scrub));
 	}
 	if (isRecord(value)) {
 		if (depth >= ACP_MAX_RAW_RECORD_DEPTH) return "[depth]";
 		const bounded: Record<string, unknown> = {};
 		for (const [entryKey, entry] of Object.entries(value)) {
-			bounded[redactUrlCredentials(entryKey)] = boundRawValue(entry, depth + 1, entryKey, key);
+			bounded[redactUrlCredentials(entryKey)] = boundRawValue(entry, depth + 1, entryKey, key, scrub);
 		}
 		return bounded;
 	}
@@ -1542,8 +1550,13 @@ function originalRawRecordBytes(value: unknown): number | null {
  * the record cap after per-string bounding is thousands of small fields, and
  * the honest thing to send is the fact that it was elided plus its size.
  */
-function boundRawRecord(value: unknown): Record<string, unknown> {
-	const bounded = isRecord(value) ? (boundRawValue(value, 0) as Record<string, unknown>) : {};
+function boundRawRecord(
+	value: unknown,
+	scrub: (text: string) => string = redactUrlCredentials,
+): Record<string, unknown> {
+	const bounded = isRecord(value)
+		? (boundRawValue(value, 0, undefined, undefined, scrub) as Record<string, unknown>)
+		: {};
 	let serialized: string | undefined;
 	try {
 		serialized = JSON.stringify(bounded);
@@ -1558,6 +1571,20 @@ function boundRawRecord(value: unknown): Record<string, unknown> {
 	// The bounded size is the fallback: an unserializable original has no size of
 	// its own, and reporting the copy's is closer than reporting nothing.
 	return { truncated: true, bytes: originalRawRecordBytes(value) ?? boundedBytes };
+}
+
+/** The title's scrub for one string: the call's own credentials, in any shape the title would hide (M-53). */
+function redactCallText(value: string): string {
+	return redactCommandOutputSecrets(redactSecretString(value));
+}
+
+/**
+ * A call's `rawInput`, projected for display as the title is: a secret-named argument or environment block blanked and
+ * every string scrubbed with the title's rule before its bound. The `tool_call` card and the permission ask send this one
+ * record, so a credential the title hides never rides beside it (M-53). Execution keeps the original arguments.
+ */
+function boundRawInput(args: unknown): Record<string, unknown> {
+	return boundRawRecord(redactToolArgs(args), redactCallText);
 }
 
 /**
@@ -2212,7 +2239,7 @@ function handleChatEvent(
 		// same objects rather than recompute them from a copy of the arguments that
 		// may since have been normalized.
 		const snapshot: AcpToolCallSnapshot = {
-			rawInput: boundRawRecord(event.args),
+			rawInput: boundRawInput(event.args),
 			...toolCallPresentation(toolName, event.args, cwd),
 		};
 		active.toolCallSnapshots.set(toolCallId, snapshot);
@@ -2836,7 +2863,7 @@ function prepareAcpReplay(
 					title: presentation.title,
 					kind: presentation.kind,
 					status: "in_progress" satisfies AcpToolCallStatus,
-					rawInput: boundRawRecord(call.args),
+					rawInput: boundRawInput(call.args),
 					...(presentation.locations !== undefined ? { locations: presentation.locations } : {}),
 				},
 			});
@@ -3442,8 +3469,12 @@ const ACP_PERMISSION_OPTION_IDS = ["allow-once", "reject-once", "reject-and-stop
 /** Bound for one line of decision copy. The longest of them is well under this. */
 const ACP_MAX_DECISION_COPY_BYTES = 512;
 
+/**
+ * One line of decision copy, scrubbed as the call's title is ahead of its bound: the meta quotes the operator's request
+ * and the call target, either of which can carry the credential the title hides (M-53).
+ */
 function decisionCopy(value: string): string {
-	return boundString(sanitizeCallTargetText(value), ACP_MAX_DECISION_COPY_BYTES);
+	return boundString(redactCallText(sanitizeCallTargetText(value)), ACP_MAX_DECISION_COPY_BYTES);
 }
 
 /**

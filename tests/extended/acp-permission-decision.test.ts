@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { SessionContract } from "../../src/domains/session/contract.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -61,7 +62,11 @@ function fakeTransport(answer: (params: Record<string, unknown>) => unknown) {
  * `npm run lint` is a repository script rather than a no-prompt runner, so the
  * presentation the bridge attaches is the one the policy actually produced.
  */
-async function askOnce(answer: (params: Record<string, unknown>) => unknown, command = "npm run lint") {
+async function askOnce(
+	answer: (params: Record<string, unknown>) => unknown,
+	command = "npm run lint",
+	operatorText?: string,
+) {
 	const safety = createWorkerSafety({ cwd: process.cwd() });
 	const registry = createRegistry({ safety, autonomy: () => "default" });
 	registry.register(bashTool);
@@ -85,9 +90,22 @@ async function askOnce(answer: (params: Record<string, unknown>) => unknown, com
 		getSessionId: () => null,
 	};
 	let emit: (event: unknown) => void = () => {};
+	// The ledger the ask quotes the operator's request from: one typed message, read as the `task` row.
+	const meta = { id: "session-1", cwd: process.cwd(), createdAt: "2026-11-22T00:00:00.000Z" };
+	const ledger =
+		operatorText === undefined
+			? undefined
+			: ({
+					create: () => meta,
+					current: () => meta,
+					history: () => [meta],
+					leafId: () => null,
+					readEntries: () => [{ kind: "message", role: "user", turnId: "turn-1", payload: { operatorText } }],
+				} as unknown as SessionContract);
 	const served = serveClioAcpAgent({
 		transport: peer.transport,
 		chat,
+		...(ledger !== undefined ? { session: ledger } : {}),
 		toolRegistry: registry,
 		autonomy: () => "default",
 		cwd: process.cwd(),
@@ -162,6 +180,17 @@ describe("contracts/acp attaches the decision facts it already computed to the p
 			cards.map(() => title),
 		);
 		ok(cards.length >= 2);
+	});
+
+	it("carries no credential from the operator's prompt in any request_permission field (M-53)", async () => {
+		const token = `${"gh"}p_${"A1b2C3d4E5f6".repeat(3)}`;
+		const command = `git push https://x-access-token:${token}@example.invalid/w61.git main && echo ${token}`;
+		const turn = await askOnce(deny, command, `Call the bash tool once with exactly this command: \`${command}\``);
+		const meta = (turn.ask?._meta as Record<string, Record<string, unknown>>)["clio-coder/decision"] ?? {};
+		const task = meta.task as { text: string } | undefined;
+		ok(task?.text.startsWith("Call the bash tool once"), JSON.stringify(task));
+		const serialized = JSON.stringify(turn.ask);
+		ok(!serialized.includes("ghp_"), serialized);
 	});
 
 	it("labels the allow option for the call it approves, kinds unchanged", async () => {
