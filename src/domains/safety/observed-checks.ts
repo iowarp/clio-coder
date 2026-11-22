@@ -137,6 +137,9 @@ function resultStanding(payload: Record<string, unknown>): "passed" | "failed" |
 	const details = record(result?.details);
 	const admission = record(details?.chainAdmission)?.outcome ?? payload.outcome;
 	if (admission === "blocked" || isRefusalToolResultError(result)) return "refused";
+	// A verify call that could not run (refused up front, runner unavailable, or its runner's usage error) judged nothing,
+	// so it settles no outcome, as the run-effects recorder seals it (L10).
+	if (payload.unresolved === true || details?.unresolved === true) return "refused";
 	// A check that ran and came back red also carries its message as a block reason, so only a bare one means refused.
 	if (admission === undefined && typeof payload.blockReason === "string") return "refused";
 	const nonZero = typeof details?.exitCode === "number" && details.exitCode !== 0;

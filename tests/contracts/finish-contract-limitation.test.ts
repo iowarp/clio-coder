@@ -15,6 +15,7 @@ import {
 	FINISH_CONTRACT_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
+	standingFailedCheck,
 } from "../../src/domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
 import { runCheckFacts } from "../../src/domains/safety/observed-checks.js";
@@ -956,6 +957,30 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		);
 		deepStrictEqual(facts.failing, []);
 		strictEqual(assess([...edit, ...dispatched], "high").reason, "unvalidated_mutation");
+	});
+
+	it("a verify call that could not run is no failed check; one that ran red is (L10)", (t) => {
+		const root = mkdtempSync(join(tmpdir(), "finish-not-run-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		// The engine drops an error result's details, so the typed marker rides on the persisted payload.
+		const verified = (payload: Record<string, unknown>) =>
+			standingFailedCheck({
+				sessionEntries: [
+					userMessage("user-1"),
+					toolCall("verify-1", ToolNames.Verify, { check: "python-unittest", args: ["-p", "test_l10.py"] }),
+					{
+						kind: "message",
+						role: "tool_result",
+						turnId: "verify-1",
+						payload: { toolName: ToolNames.Verify, toolCallId: "verify-1", isError: true, outcome: "error", ...payload },
+					},
+					assistantMessage("assistant-1", "Done."),
+				],
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+			});
+		strictEqual(verified({ unresolved: true, result: { details: {} } }), false);
+		strictEqual(verified({ result: { details: { exitCode: 1 } } }), true);
 	});
 
 	it("projects the limitation kind onto the completion-evidence tag", () => {

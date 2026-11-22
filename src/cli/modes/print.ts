@@ -71,6 +71,7 @@ import { standingDispatchRuns } from "../../domains/safety/observed-checks.js";
 import { redactFinalUrlCredentials, redactSecretString, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import {
 	createRunEffectsRecorder,
+	notRunCheckIds,
 	type RunEffectsRecorder,
 	recordToolExecutionEffects,
 } from "../../domains/safety/run-effects.js";
@@ -2081,6 +2082,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage = [stderrMessage, failureMessage].filter(Boolean).join("\n");
 	}
 	const exitCode = terminal.exitCode;
+	// A verify check whose latest receipt sealed could-not-run judged nothing: the run lists it as not run (L10).
+	const notRunLines = notRunCheckIds(runStats.runEffects.snapshot()).map(
+		(check) =>
+			`not run: ${ToolNames.Verify} ${redactSecretsText(redactSecretString(redactUrlCredentials(check)), createRedactionTally())}`,
+	);
 	// Fleet design 4.3: the envelope carries the host's seal of the typed declaration, never a reading of the answer:
 	// the claim, its assessment from the turn's facts, and state = assessed, which `--exit-code` maps (ruling 7).
 	noteRunCompletion({
@@ -2090,7 +2096,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		state: sealedCompletion.assessed,
 		...(sealedCompletion.facts.length > 0 ? { facts: sealedCompletion.facts } : {}),
 		limitations: sealedCompletion.limitations,
-		unverified: sealedCompletion.unverified,
+		unverified: [...new Set([...sealedCompletion.unverified, ...notRunLines])],
 		...(sealedCompletion.remaining !== undefined ? { remaining: sealedCompletion.remaining } : {}),
 	});
 	if (options.outputSchema !== undefined) {

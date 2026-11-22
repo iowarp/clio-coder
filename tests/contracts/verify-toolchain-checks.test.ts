@@ -148,6 +148,55 @@ describe("verify in repositories without package.json", () => {
 		});
 	}
 
+	it("refuses args unittest's parser rejects up front, and seals an exit 2 as not run only when its parser confirms it (L10)", async () => {
+		// The fake runner exits 2 like argparse; as the parser probe (`-c`) it exits with whatever `probe-exit` holds.
+		const root = workspace({
+			"tests/test_a.py": TEST_CASE,
+			"bin/python3":
+				'#!/bin/sh\nif [ "$1" = -c ]; then read -r code < probe-exit; exit "$code"; fi\necho \'error: unrecognized arguments\' >&2\nexit 2\n',
+		});
+		chmodSync(join(root, "bin/python3"), 0o755);
+		const previousPath = process.env.PATH;
+		const previousVenv = process.env.VIRTUAL_ENV;
+		process.chdir(root);
+		try {
+			process.env.PATH = join(root, "bin");
+			delete process.env.VIRTUAL_ENV;
+			for (const [args, rejected] of [
+				[["-p", "test_a.py"], "-p"],
+				[["-k", "-p"], "-k"],
+				[["--durations", "x"], "--durations x"],
+			] as const) {
+				const refused = await verifyTool.run({ check: "python-unittest", args: [...args] });
+				strictEqual(refused.details?.unresolved, true);
+				strictEqual(refused.details?.exitCode, undefined, "refused before running");
+				match(textOf(refused), new RegExp(`does not accept '${rejected}'.*"discover", "-s", "tests", "-p"`, "u"));
+			}
+			// argparse clusters and unambiguous long prefixes reach the runner.
+			writeFileSync(join(root, "probe-exit"), "2");
+			const confirmed = await verifyTool.run({ check: "python-unittest", args: ["-vk", "sample", "--verb"] });
+			strictEqual(confirmed.details?.exitCode, 2);
+			strictEqual(confirmed.details?.usageError, true);
+			strictEqual(confirmed.details?.unresolved, true, "not run, never a failed validation");
+			deepStrictEqual(confirmed.details?.judgement, {
+				execution: "unavailable",
+				validation: "not-run",
+				scientificValidity: "not established by this check",
+			});
+			// A project hook raising SystemExit(2) also exits 2, but the parser accepts the args, so the run stays red.
+			writeFileSync(join(root, "probe-exit"), "0");
+			const red = await verifyTool.run({ check: "python-unittest", args: ["test_a"] });
+			strictEqual(red.details?.exitCode, 2);
+			strictEqual(red.details?.usageError, undefined);
+			strictEqual(red.details?.unresolved, undefined);
+		} finally {
+			if (previousPath === undefined) delete process.env.PATH;
+			else process.env.PATH = previousPath;
+			if (previousVenv === undefined) delete process.env.VIRTUAL_ENV;
+			else process.env.VIRTUAL_ENV = previousVenv;
+		}
+	});
+
 	it("follows pytest when the project declares it as a dependency", () => {
 		const root = workspace({
 			"pyproject.toml": `${PYPROJECT}\n[dependency-groups]\ndev = ["pytest>=8"]\n`,

@@ -10711,7 +10711,7 @@ export function createDispatchBundle(
 					.map((fact) => fact.sourceId.replace(/^[\w-]+:/u, ""));
 				const assuranceFact = {
 					value: assurance,
-					cause: compromisedReason(appliedResultContract, finalText, failedChecks),
+					cause: compromisedReason(appliedResultContract, finalText, failedChecks, observedRunEffects.notRunChecks),
 				};
 				// A worker whose own report lists a failing check does not land on the
 				// operator's branch unless host verification passed. With no declared
@@ -10730,6 +10730,7 @@ export function createDispatchBundle(
 						? {
 								assurance,
 								failedChecks,
+								notRunChecks: observedRunEffects.notRunChecks,
 								contract: appliedResultContract,
 								output: finalText,
 								branch: req.taskWorktree.branch,
@@ -10875,7 +10876,11 @@ export function createDispatchBundle(
 										destination: mergeDestination(req.taskWorktree.root),
 										changedPaths: worktreeReceipt.changedPaths ?? [],
 										reason: withheldVerdict.reason,
-										workerFailedChecks: mutationReportFailures(mergeGateInput?.contract ?? null, mergeGateInput?.output ?? null),
+										workerFailedChecks: mutationReportFailures(
+											mergeGateInput?.contract ?? null,
+											mergeGateInput?.output ?? null,
+											mergeGateInput?.notRunChecks,
+										),
 										...(hostVerification !== undefined ? { hostVerification } : {}),
 										protectedPaths: previewedProtected,
 									})

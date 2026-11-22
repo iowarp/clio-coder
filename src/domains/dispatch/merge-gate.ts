@@ -60,6 +60,8 @@ export interface MergeGateInput {
 	removedTests?: ReadonlyArray<string>;
 	/** Checks this run executed that failed on its final tree, from its typed validations. */
 	failedChecks?: ReadonlyArray<string>;
+	/** Checks whose latest verify receipt sealed could-not-run; the worker's own failure on one is not counted (L10). */
+	notRunChecks?: ReadonlySet<string>;
 }
 
 /**
@@ -70,20 +72,22 @@ export function compromisedReason(
 	contract: ResultContract | null,
 	output: string | null,
 	failedChecks: ReadonlyArray<string> = [],
+	notRunChecks?: ReadonlySet<string>,
 ): string {
-	return compromisedVerdict(contract, output, failedChecks).reason;
+	return compromisedVerdict(contract, output, failedChecks, notRunChecks).reason;
 }
 
 function compromisedVerdict(
 	contract: ResultContract | null,
 	output: string | null,
 	failedChecks: ReadonlyArray<string>,
+	notRunChecks?: ReadonlySet<string>,
 ): MergeGateVerdict {
 	const listed = (names: ReadonlyArray<string>): string => {
 		const named = names.slice(0, 3).map(boundedCheck).join("; ");
 		return `${named}${names.length > 3 ? `; and ${names.length - 3} more` : ""}`;
 	};
-	const failed = mutationReportFailures(contract, output);
+	const failed = mutationReportFailures(contract, output, notRunChecks);
 	const already = "if that failure was already there";
 	if (failed.length > 0)
 		return { reason: `the worker's own report lists a failing validation (${listed(failed)})`, appliesWhen: already };
@@ -224,7 +228,7 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 		};
 	}
 	if (input.assurance === "compromised")
-		return compromisedVerdict(input.contract, input.output, input.failedChecks ?? []);
+		return compromisedVerdict(input.contract, input.output, input.failedChecks ?? [], input.notRunChecks);
 	if (input.assurance === "grounded" || input.assurance === "reviewed" || input.contract === null) return null;
 	const first = mutationReportChecks(input.contract, input.output).declaredChecks[0];
 	if (first === undefined) return null;

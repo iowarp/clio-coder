@@ -2127,7 +2127,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				if (
 					options.toolCallCap !== undefined &&
 					input.toolName === ToolNames.Verify &&
-					judgement?.execution === "unavailable"
+					judgement?.execution === "unavailable" &&
+					// A runner that rejected its arguments runs with others, so only the entry's own startup failure locks it (L10).
+					input.toolResultDetails?.usageError !== true
 				) {
 					for (const id of [input.toolResultDetails?.check, input.toolArgs?.check]) {
 						if (typeof id === "string" && id.trim()) {

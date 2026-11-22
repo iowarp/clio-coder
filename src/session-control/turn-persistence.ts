@@ -105,6 +105,7 @@ export interface TurnPersistence {
 			blockReason?: string;
 			actionClass?: string;
 			autoApproved?: "yolo";
+			unresolved?: true;
 		},
 	): void;
 	/** Synthesized terminal row for a turn ended by a terminating tool result. */
@@ -424,6 +425,9 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			// dynamic tool by the same rule the live row used.
 			if (event.actionClass !== undefined) payload.actionClass = event.actionClass;
 			if (event.autoApproved !== undefined) payload.autoApproved = event.autoApproved;
+			// The typed could-not-run marker, which the engine drops from an error result's details: the finish contract's
+			// replay reads it so a check that never ran is not a red one (L10).
+			if (event.unresolved === true) payload.unresolved = true;
 			const turn = appendTurn(deps.session, {
 				kind: "tool_result",
 				payload,

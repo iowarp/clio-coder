@@ -162,6 +162,144 @@ export function discoverToolchainChecks(workspaceRoot: string, diagnostics: stri
 	return checks;
 }
 
+interface UnittestOption {
+	short?: string;
+	long?: string;
+	/** The value the option takes, as its argparse `type` checks it; absent for a flag. */
+	value?: "text" | "int";
+}
+
+/**
+ * `python -m unittest`'s argparse options (Python 3.12). `-h` is left out because help exits 0 having run no test, so
+ * the rejection mirror refuses it and the prefixes that resolve to it.
+ */
+const UNITTEST_OPTIONS: ReadonlyArray<UnittestOption> = [
+	{ short: "-v", long: "--verbose" },
+	{ short: "-q", long: "--quiet" },
+	{ long: "--locals" },
+	{ long: "--durations", value: "int" },
+	{ short: "-f", long: "--failfast" },
+	{ short: "-c", long: "--catch" },
+	{ short: "-b", long: "--buffer" },
+	{ short: "-k", value: "text" },
+];
+const UNITTEST_DISCOVER_OPTIONS: ReadonlyArray<UnittestOption> = [
+	...UNITTEST_OPTIONS,
+	{ short: "-s", long: "--start-directory", value: "text" },
+	{ short: "-p", long: "--pattern", value: "text" },
+	{ short: "-t", long: "--top-level-directory", value: "text" },
+];
+/** Python's `int()` over a string: optional surrounding space and sign, digits with single underscores between. */
+const PYTHON_INT = /^\s*[+-]?\p{Nd}+(?:_\p{Nd}+)*\s*$/u;
+const ARGPARSE_NEGATIVE_NUMBER = /^-\d+$|^-\d*\.\d+$/u;
+
+type ParsedArg =
+	| { kind: "positional" }
+	| { kind: "option"; option: UnittestOption; explicit: string | null }
+	| { kind: "cluster"; options: ReadonlyArray<UnittestOption>; explicit: string | null }
+	| { kind: "rejected" };
+
+/** How argparse reads one argument against these options: `_parse_optional` with `allow_abbrev`, then short clusters. */
+function parseUnittestArg(arg: string, options: ReadonlyArray<UnittestOption>): ParsedArg {
+	if (!arg.startsWith("-") || arg === "-") return { kind: "positional" };
+	const positionalLike = ARGPARSE_NEGATIVE_NUMBER.test(arg) || arg.includes(" ");
+	if (arg.startsWith("--")) {
+		const equals = arg.indexOf("=");
+		const name = equals === -1 ? arg : arg.slice(0, equals);
+		const explicit = equals === -1 ? null : arg.slice(equals + 1);
+		const exact = options.find((option) => option.long === name);
+		if (exact !== undefined) return { kind: "option", option: exact, explicit };
+		// `--help` is among argparse's candidates, so a prefix of it is ambiguous or help, never another option.
+		const candidates = [...options.flatMap((option) => (option.long ? [option.long] : [])), "--help"].filter((long) =>
+			long.startsWith(name),
+		);
+		if (candidates.length === 1 && candidates[0] !== "--help") {
+			const option = options.find((entry) => entry.long === candidates[0]);
+			if (option !== undefined) return { kind: "option", option, explicit };
+		}
+		return candidates.length === 0 && positionalLike ? { kind: "positional" } : { kind: "rejected" };
+	}
+	// A short option, its `=value` or attached value, or a cluster of flags that may end in one value option.
+	const first = options.find((option) => option.short === arg.slice(0, 2));
+	if (first === undefined) return positionalLike ? { kind: "positional" } : { kind: "rejected" };
+	if (arg.length === 2) return { kind: "option", option: first, explicit: null };
+	if (arg[2] === "=" && first.value !== undefined) return { kind: "option", option: first, explicit: arg.slice(3) };
+	const cluster: UnittestOption[] = [];
+	for (let index = 1; index < arg.length; index += 1) {
+		const option = options.find((entry) => entry.short === `-${arg[index]}`);
+		if (option === undefined) return { kind: "rejected" };
+		cluster.push(option);
+		if (option.value !== undefined) {
+			const rest = arg.slice(index + 1);
+			return { kind: "cluster", options: cluster, explicit: rest.length > 0 ? rest : null };
+		}
+	}
+	return { kind: "cluster", options: cluster, explicit: null };
+}
+
+/**
+ * The first argument `python -m unittest` would reject with its exit 2 usage error, or null, read the way its argparse
+ * parser reads them. The options are a closed, stdlib-defined set, so an unsupported one is refused before running:
+ * `-p` belongs to `discover` alone, and the runner's usage error was sealed as a failing validation that held a merge
+ * (L10). Where argparse's own positional quirks would still reject a form this accepts, the run's exit 2 is checked
+ * against the runner's parser after the fact.
+ */
+function unsupportedUnittestArg(args: ReadonlyArray<string>): string | null {
+	const discover = args[0]?.toLowerCase() === "discover";
+	const options = discover ? UNITTEST_DISCOVER_OPTIONS : UNITTEST_OPTIONS;
+	let positionals = 0;
+	for (let index = discover ? 1 : 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (arg === "--") {
+			positionals += args.length - index - 1;
+			break;
+		}
+		const parsed = parseUnittestArg(arg, options);
+		if (parsed.kind === "rejected") return arg;
+		if (parsed.kind === "positional") {
+			positionals += 1;
+			continue;
+		}
+		const option = parsed.kind === "option" ? parsed.option : parsed.options[parsed.options.length - 1];
+		if (option?.value === undefined) {
+			// A flag takes no value: argparse refuses `--verbose=x` and `-v=x`.
+			if (parsed.explicit !== null) return arg;
+			continue;
+		}
+		let value = parsed.explicit;
+		if (value === null) {
+			const next = args[index + 1];
+			// A separate value must not itself read as an option, as `-k -p` does.
+			if (next === undefined || next === "--" || parseUnittestArg(next, options).kind !== "positional") return arg;
+			value = next;
+			index += 1;
+		}
+		if (option.value === "int" && !PYTHON_INT.test(value)) return parsed.explicit === null ? `${arg} ${value}` : arg;
+	}
+	// discover takes at most start, pattern and top as positionals.
+	return discover && positionals > 3 ? (args[args.length - 1] ?? "discover") : null;
+}
+
+/**
+ * Why verify refuses to run this argv, or null. Resolution keeps the argv so the safety scan judges what the model
+ * sent; the tool refuses it before spawning, naming the forms the runner accepts so the retry is a correct one.
+ */
+export function unsupportedRunnerArgs(check: ToolchainCheck, argv: ReadonlyArray<string>): string | null {
+	const base = check.argsBase;
+	if (base?.at(-1) !== "unittest" || argv.length <= base.length || base.some((arg, index) => argv[index] !== arg))
+		return null;
+	const rejected = unsupportedUnittestArg(argv.slice(base.length));
+	if (rejected === null) return null;
+	const flag = check.command.indexOf("-s");
+	const start = (flag === -1 ? undefined : check.command[flag + 1]) ?? ".";
+	return (
+		`check '${check.id}' runs \`${base.join(" ")} <args>\`, which does not accept '${rejected}'; nothing ran. ` +
+		`Accepted args: test names (module, module.Class, module.Class.test_method, or a file path such as ${start}/test_x.py) with -v, -q, -f, -c, -b, --locals, -k PATTERN or --durations N (an integer); ` +
+		`or "discover" first, which also takes -s DIR, -p PATTERN and -t DIR, e.g. args: ["discover", "-s", "${start}", "-p", "test_x.py"]. ` +
+		"Retry with one of these forms, or with no args for the whole suite."
+	);
+}
+
 /** The argv a derived check runs with model-supplied arguments, or why the check refuses them. */
 export function toolchainArgv(check: ToolchainCheck, extraArgs: ReadonlyArray<string>): string[] | Error {
 	if (extraArgs.length === 0) return [...check.command];

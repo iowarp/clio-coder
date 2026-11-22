@@ -415,6 +415,8 @@ export interface ObservedRunEffects {
 	validationOutcomes?: ReadonlyMap<string, boolean>;
 	/** `validationOutcomes` joined by verify-call outcomes under check id and resolved command; read in its place. */
 	checkOutcomes?: ReadonlyMap<string, boolean>;
+	/** Checks whose latest verify receipt sealed could-not-run, under the same keys; see `RunEffects.notRunChecks`. */
+	notRunChecks?: ReadonlySet<string>;
 	/** Whether the run made an observed workspace mutation; absent reads as unknown. */
 	mutationObserved?: boolean;
 }
@@ -1969,15 +1971,36 @@ export function isBaselineValidation(entry: unknown): boolean {
 	return entry !== null && typeof entry === "object" && (entry as Record<string, unknown>).baseline === true;
 }
 
-/** Named failures in the worker's mutation report, without inferring unreported checks. */
-export function mutationReportFailures(contract: ResultContract | null, output: string | null): string[] {
+/**
+ * Whether a reported failure names a check whose latest verify receipt sealed could-not-run, matched by that receipt's
+ * check id or resolved command: a usage or startup error ran nothing, so it is never a failed validation (L10).
+ */
+function reportedNotRun(name: string, notRunChecks: ReadonlySet<string> | undefined): boolean {
+	// A verify spelling matches as written; only a command reading drops shell output plumbing.
+	return notRunChecks?.has(name.trim()) === true || notRunChecks?.has(observedValidationCommand(name)) === true;
+}
+
+/**
+ * Named failures in the worker's mutation report, without inferring unreported checks. A failure on a check the run's
+ * own receipt sealed could-not-run is left out, so the worker's word cannot hold a merge on it alone (L10).
+ */
+export function mutationReportFailures(
+	contract: ResultContract | null,
+	output: string | null,
+	notRunChecks?: ReadonlySet<string>,
+): string[] {
 	if (contract?.kind !== "mutation-report") return [];
 	const parsed = parseJson(output);
 	if (!parsed.ok || !Array.isArray(parsed.value.validations)) return [];
 	return parsed.value.validations.flatMap((entry: unknown) => {
 		if (entry === null || typeof entry !== "object") return [];
 		const check = entry as Record<string, unknown>;
-		return check.passed === false && !isBaselineValidation(check) && string(check.name) ? [check.name as string] : [];
+		return check.passed === false &&
+			!isBaselineValidation(check) &&
+			string(check.name) &&
+			!reportedNotRun(check.name as string, notRunChecks)
+			? [check.name as string]
+			: [];
 	});
 }
 
@@ -2353,6 +2376,7 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 	// Missing evidence keeps old, potentially nonchronological reports conservative.
 	// Verify calls count as bash checks do: a green claim against a red latest verify is a failure (bt-27).
 	const outcomes = input.observedRunEffects?.checkOutcomes ?? input.observedRunEffects?.validationOutcomes;
+	const effectsNotRun = input.observedRunEffects?.notRunChecks;
 	// A reported baseline excuses its own observed red only while no mutation was observed: after one, every
 	// standing outcome judged the changed tree, and calling it a baseline cannot clear a real failure (bt-27).
 	const baselines = new Set(
@@ -2361,8 +2385,11 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 			: [],
 	);
 	const reportedFailure =
-		validations.some((check) => !check.passed && outcomes?.get(observedValidationCommand(check.name)) !== true) ||
-		[...(outcomes ?? [])].some(([name, passed]) => !passed && !baselines.has(name));
+		validations.some((check) => {
+			if (check.passed) return false;
+			const observed = outcomes?.get(observedValidationCommand(check.name));
+			return observed !== true && !(observed === undefined && reportedNotRun(check.name, effectsNotRun));
+		}) || [...(outcomes ?? [])].some(([name, passed]) => !passed && !baselines.has(name));
 	const effects = input.observedRunEffects;
 	if (effects === undefined)
 		return success(contract, reportedFailure ? "fail" : validations.length > 0 ? "pass" : "unmeasured", value);
