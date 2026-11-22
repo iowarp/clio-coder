@@ -273,11 +273,12 @@ On a route without prompt caching, an automatic or fit fold checkpoint, never a 
 
 ## read: page through a file with offset, limit, and tail
 
-Reads one UTF-8 text file, an image, or a document rendered as text: a Jupyter notebook, a PDF, or a zip, tar or tar.gz archive. Sources: [read.ts](../../src/tools/read.ts), `src/tools/read-documents/`.
+Reads a UTF-8 text file, an image, or a document rendered as text: a Jupyter notebook, a PDF, or a zip, tar or tar.gz archive. Sources: [read.ts](../../src/tools/read.ts), `src/tools/read-documents/`.
 
 | Argument | Contract |
 | --- | --- |
-| `path` | Required; relative/absolute, with `~` home expansion. |
+| `path` | One file; relative/absolute, with `~` home expansion. Required unless `paths` is given. |
+| `paths` | Several files in one call, up to 16, in place of `path`; `offset`, `limit`, `tail` and `line_numbers` apply to each. Not with `pages` or `member`. |
 | `offset` | 1-indexed line, default 1. |
 | `limit` | Maximum lines. |
 | `tail` | Last N lines; overrides offset/limit. |
@@ -300,7 +301,10 @@ In an installed package, most `.ts` files under `src/` ship packed in `dist/asse
 ```text
 read(path="src/tools/read.ts", offset=80, limit=60)
 read(path="build.log", tail=100)
+read(paths=["src/tools/read.ts", "src/tools/read-fan-out.ts"], line_numbers=true)
 ```
+
+A call with `paths` is run as one read per file ([read-fan-out.ts](../../src/tools/read-fan-out.ts)). Each path is admitted on its own, so the safety policy, the workspace boundary and the sandbox treat it exactly as they treat a single read, and a refused path shows `not read:` with its reason in place while the others are returned. The result has one `== <path> ==` section per file, and all sections share the one per-call cap: a path the cap left no room for reads `not read: this call's byte cap was used by the files above; read it in another call`, and a section cut by the cap ends `[cut: this call's byte cap]`. An image is read alone, with `path`. The call is blocked when every path was refused and is an error when no path returned content.
 
 ## edit: exact text replacements in one file
 
@@ -1294,6 +1298,8 @@ The host seals every ended turn as the claim beside its assessment. An undeclare
 | `failed_check` | A check failed since the last change. |
 | `uncollected_run` | A detached dispatch batch is ready to collect, or on a declared turn still running. |
 | `open_task` | The task board still has pending or active items, or on a declared turn blocked ones. |
+| `observation_budget` | A headless run's last read or search calls were refused by the spent observation pool, so what they would have shown went unseen. |
+| `missing_output` | A file the operator named as an output does not exist when the turn is sealed. |
 
 A declared turn takes no continuation. The high-rigor finish gate does not re-prompt a turn that declared `partly_done` or `not_done`, and on a declared `done` what the gate would have asked for becomes a sealed fact, while the gate's reminder is still injected as a warning. An undeclared work turn keeps the existing continuations: the open-tasks nudge carries it onward once per operator prompt while board items stay open. A headless run carries the sealed completion in its `run_end` envelope, and `run --exit-code` maps an unfinished state to exit 1 ([Completion and `--exit-code`](exit-codes-and-output.md#completion-and---exit-code)).
 
@@ -1360,7 +1366,7 @@ Arguments:
 
 - `action` (optional). `ask` (default) to present questions; `complete` to finalise the interview and record compact decisions.
 - `mode` (optional). `round` (default) to batch multiple questions; `single_question` for exactly one question.
-- `questions` (optional array). For `action="ask"`, up to four question objects containing:
+- `questions` (optional array). For `action="ask"`, up to four question objects (always an array, also for one question; a bare string in it is read as that question's text) containing:
   - `question` (required): Question text prompt.
   - `header` (optional): Short header.
   - `options` (optional array): Suggested choices (`{label, description}`).

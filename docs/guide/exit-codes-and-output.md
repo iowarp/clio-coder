@@ -129,7 +129,7 @@ Cause codes, in precedence order:
 | `5` | `unscripted` |
 | `3` | `permission_required`, `judge_streak` |
 | `4` | `session_cost_ceiling`, `max_cost_usd`, `autonomous_cap`, `max_requests`, `max_tool_calls` |
-| `1` | `provider_error`, `context_overflow`, `no_answer`, `no_reply_text`, `missing_output`, `exploration_stalled`, `output_limit`, `schema_mismatch`, `verify_failed`, `quality_failed`, `verdict_failed`, `noop`, `limitation`, `dispatched_worker_failed`, `worker_failed`, `output_write_failed`, `run_failed` |
+| `1` | `model_unavailable`, `served_model_mismatch`, `provider_error`, `context_overflow`, `no_answer`, `no_reply_text`, `missing_output`, `exploration_stalled`, `output_limit`, `schema_mismatch`, `verify_failed`, `quality_failed`, `verdict_failed`, `noop`, `limitation`, `dispatched_worker_failed`, `worker_failed`, `output_write_failed`, `run_failed` |
 
 `not_started` covers a request refused before any work, and `run_failed` a failure no narrower code names. After a step template's turns, the sealed run record (not the envelope) keeps `stepPipeline`, which names the step tool and says whether it signalled `done`; a pipeline left unfinished keeps the outcome and carries `stoppedBy` (`cap` for the yolo continuation cap with a step still running, `unreported` when the last turn at the cap made no step call and ended on its own summary, so the step tool simply never signalled `done`, `cancel` or `failure` when a cancel or a failed turn ended it, `turn` for a turn nothing continued). Always judge overall success/failure from `run_end`, not from model-level `agent_end` ([run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)).
 
@@ -141,7 +141,7 @@ Once a main run settles, its `run_end` envelope carries `completion`: how the ag
 "completion":{"declared":true,"claimed":"done","assessed":"partly_done","state":"partly_done","facts":["unvalidated_mutation"],"limitations":[],"unverified":[]}
 ```
 
-`claimed` is the declared `done`, `partly_done` or `not_done`, and `assessed` is the host's reading of it: a `done` over an open obligation (`unvalidated_mutation`, `failed_check`, `uncollected_run`, `open_task` or `observation_budget`, listed in `facts`) is `partly_done`. `state` is the assessment. A run that declared nothing has `declared: false`, `claimed: null` and state `unknown`. `limitations`, `unverified` and the optional `remaining` repeat the declaration.
+`claimed` is the declared `done`, `partly_done` or `not_done`, and `assessed` is the host's reading of it: a `done` over an open obligation (`unvalidated_mutation`, `failed_check`, `uncollected_run`, `open_task`, `observation_budget` or `missing_output`, listed in `facts`) is `partly_done`. `state` is the assessment. A run that declared nothing has `declared: false`, `claimed: null` and state `unknown`. `limitations`, `unverified` and the optional `remaining` repeat the declaration.
 
 Without `--exit-code` the completion changes no exit code. With it, a run that would exit 0 exits 1 when `state` is `partly_done` or `not_done`; `done` and an undeclared run keep 0, and every other exit is unchanged ([run-failure.ts](../../src/cli/run-failure.ts)).
 

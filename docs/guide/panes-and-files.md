@@ -174,12 +174,12 @@ rows. For example, run from a plain terminal with the files pane enabled and
 an outdated files engine, the diagnostics include:
 
 ```text
-OK   external tool herdr    pane host 0.9.5 (Clio's pinned copy) at /home/you/.local/share/clio-coder/tools/herdr/0.9.5/herdr
+OK   external tool herdr    pane host 0.9.5 (CLIO Coder's pinned copy) at /home/you/.local/share/clio-coder/tools/herdr/0.9.5/herdr
 WARN external tool yazi     PATH copy /home/you/.local/bin/yazi is 26.1.22, below the 26.8.15 floor, and nothing is vendored (install with `clio-coder tools install yazi`)
 INFO external tool croc     not found (install with `clio-coder tools install croc`)
 INFO external tool cliamp   not found (install with `clio-coder tools install cliamp`)
 INFO files pane profile     /home/you/.cache/clio-coder/yazi/profile (missing); user config /home/you/.config/yazi is separate and untouched
-OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
+OK   panes mode             CLIO Coder's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
 OK   naming panes           no legacy CLIO Coder pane ownership tokens or watch titles found
 OK   panes journal dir      /home/you/.local/state/clio-coder/telemetry/runs is writable
