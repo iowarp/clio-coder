@@ -447,6 +447,9 @@ function quotaRows(
 			label: `${window.scope ? `${window.scope} ` : ""}${window.label}`,
 			usedPct: { fact: { kind: "measured", value: window.usedPct, source: "provider" }, display: `${window.usedPct}%` },
 			resetsAt: window.resetsAt,
+			unit: window.unit ?? null,
+			durationSeconds: window.durationSeconds ?? null,
+			access: window.access ?? "unknown",
 		})),
 	}));
 }

@@ -96,7 +96,7 @@ const CALL = {
 	target: TARGET,
 } as const satisfies FieldProjection;
 const QUOTA_WINDOW = {
-	...keep("usedPct", "resetsAt", "unit", "durationSeconds"),
+	...keep("usedPct", "resetsAt", "unit", "durationSeconds", "access", "unlimited", "qualification"),
 	key: "token",
 	scope: "token",
 	label: "withhold",
@@ -399,7 +399,18 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"process.sealed": SEAL,
 	"share.sealed": { ...SEAL, profile: "keep" },
 	"quota.read": {
-		...keep("source", "observedAt", "status", "retryAfterSeconds", "stale", "limitReached"),
+		...keep(
+			"source",
+			"observedAt",
+			"status",
+			"retryAfterSeconds",
+			"stale",
+			"limitReached",
+			"access",
+			"overage",
+			"resetsAt",
+			"validUntil",
+		),
 		provider: "runtime",
 		windows: QUOTA_WINDOW,
 		displayName: "withhold",

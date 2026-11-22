@@ -12,20 +12,24 @@ import { createCodexCliQuotaProvider } from "../../src/domains/quota/codex-cli-p
 import type { CodexCredentials } from "../../src/domains/quota/codex-provider.js";
 import { createCodexQuotaProvider } from "../../src/domains/quota/codex-provider.js";
 import { CODEX_USAGE_URL } from "../../src/domains/quota/codex-usage.js";
+import { createCopilotQuotaProvider } from "../../src/domains/quota/copilot-provider.js";
 import {
 	codexStreamSnapshots,
 	noteCodexStreamQuota,
 	observedCodexQuota,
 	observedQuota,
 	type QuotaReading,
+	quotaDenial,
 	quotaReadingFingerprint,
 	quotaReadingFromMessage,
 } from "../../src/domains/quota/index.js";
 import { footerQuotaSegment } from "../../src/domains/quota/presentation.js";
+import { quotaReadingFromSnapshot } from "../../src/domains/quota/reading.js";
 import type { QuotaProvider } from "../../src/domains/quota/types.js";
 import { foldAccountQuota, quotaAccount } from "../../src/domains/telemetry/read-model.js";
 import { codexAccountScope, parseCodexQuotaEvent } from "../../src/engine/apis/codex-quota.js";
 import { observeResponsesModelId } from "../../src/engine/apis/responses-model-id.js";
+import { readCopilotQuota } from "../../src/engine/copilot/quota.js";
 import type { CodexQuotaObservation } from "../../src/engine/types.js";
 import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
 import { createTurnState } from "../../src/session-control/turn-state.js";
@@ -96,8 +100,8 @@ it("keys primary as session and secondary as weekly, naming the slot, when limit
 
 	assert.equal(snapshot.status, "ok");
 	assert.deepEqual(snapshot.windows, [
-		{ key: "session", label: "Primary", short: "pri", usedPct: 40, resetsAt: null },
-		{ key: "weekly", label: "Secondary", short: "sec", usedPct: 60, resetsAt: null },
+		{ key: "session", label: "Primary", short: "pri", usedPct: 40, resetsAt: null, unit: "percent" },
+		{ key: "weekly", label: "Secondary", short: "sec", usedPct: 60, resetsAt: null, unit: "percent" },
 	]);
 });
 
@@ -116,7 +120,7 @@ it("reports unlimited credits without a used percentage", async () => {
 
 	const snapshot = await provider(fetch).fetch();
 
-	assert.deepEqual(snapshot.credits, { display: "Unlimited", usedPct: null });
+	assert.deepEqual(snapshot.credits, { display: "Unlimited", usedPct: null, unit: "provider-credits" });
 });
 
 it("reports the raw balance string when credits carry a balance", async () => {
@@ -124,7 +128,7 @@ it("reports the raw balance string when credits carry a balance", async () => {
 
 	const snapshot = await provider(fetch).fetch();
 
-	assert.deepEqual(snapshot.credits, { display: "$4.20", usedPct: null });
+	assert.deepEqual(snapshot.credits, { display: "$4.20", usedPct: null, unit: "provider-credits" });
 });
 
 it("sends ChatGPT-Account-Id only when the credential record carries an account id", async () => {
@@ -363,4 +367,225 @@ it("never folds one account's quota window against another account's reading on 
 		method: "shared-account-window-delta",
 	});
 	assert.equal(fold(a1, b, a2)?.reading, a2);
+});
+
+it("stamps comparable pool evidence for Codex, Anthropic and Copilot: pseudonym, units, durations and a deny status only the provider states (S5b)", async () => {
+	const token = `e30.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct-pool" } })).toString("base64url")}.sig`;
+	const poll = async (rateLimit: Record<string, unknown>, credits?: Record<string, unknown>) => {
+		const { fetch } = stubFetch(() =>
+			jsonResponse({
+				plan_type: "plus",
+				rate_limit: {
+					...rateLimit,
+					primary_window: { used_percent: 100, reset_at: 1_767_225_600, limit_window_seconds: 18_000 },
+					secondary_window: { used_percent: 40, reset_at: 1_767_600_000, limit_window_seconds: 604_800 },
+				},
+				...(credits ? { credits } : {}),
+			}),
+		);
+		const snapshot = await provider(fetch, { ...CREDENTIALS, accessToken: token, accountId: "acct-pool" }).fetch();
+		const reading = quotaReadingFromSnapshot(snapshot, NOW.toISOString(), 60_000);
+		assert.ok(reading && validPayload("quota.read", reading));
+		return reading;
+	};
+	const denied = await poll({ allowed: false, limit_reached: true }, { has_credits: false, unlimited: false });
+	assert.equal(denied.access, "denied");
+	assert.equal(denied.overage, "refused");
+	assert.match(denied.accountPseudonym ?? "", /^[0-9a-f]{32}$/);
+	assert.ok(!JSON.stringify(denied).includes("acct-pool"));
+	assert.deepEqual(
+		denied.windows.map((window) => [window.key, window.unit, window.durationSeconds]),
+		[
+			["session", "percent", 18_000],
+			["weekly", "percent", 604_800],
+		],
+	);
+	assert.deepEqual(quotaDenial(denied, NOW.getTime())?.window, {
+		key: "session",
+		label: "5h",
+		durationSeconds: 18_000,
+		resetsAt: new Date(1_767_225_600_000).toISOString(),
+	});
+	assert.equal(quotaDenial(denied, NOW.getTime())?.fresh, true);
+	assert.equal(quotaDenial(denied, NOW.getTime() + 120_000)?.fresh, false);
+
+	const full = await poll({ allowed: true, limit_reached: false });
+	assert.equal(full.access, "allowed", "a window measured at 100% is not a denial");
+	assert.equal(quotaDenial(full), null);
+	const paid = await poll(
+		{ allowed: false, limit_reached: true },
+		{ has_credits: true, unlimited: false, balance: "5" },
+	);
+	assert.deepEqual([paid.access, paid.overage], ["allowed", "permitted"]);
+	assert.equal((await poll({})).access, "unknown");
+
+	const limitOnly = parseCodexQuotaEvent(
+		{ type: "codex.rate_limits", rate_limits: { allowed: false, limit_reached: true } },
+		codexAccountScope(token),
+		NOW.getTime(),
+	);
+	assert.ok(limitOnly);
+	const stream = quotaReadingFromMessage({ codexQuota: limitOnly }, "openai-codex", "codex-target");
+	assert.ok(stream && validPayload("quota.read", stream));
+	assert.deepEqual([stream.limitOnly, stream.access, stream.windows.length], [true, "denied", 0]);
+	assert.equal(stream.accountPseudonym, denied.accountPseudonym, "poll and stream share one pool key");
+	assert.equal(quotaDenial(stream, NOW.getTime())?.window, null, "a denial survives a missing window");
+
+	const { fetch: other } = stubFetch(() => jsonResponse({ rate_limit: { allowed: true } }));
+	const selected = await provider(other, { ...CREDENTIALS, accessToken: token, accountId: "acct-other" }).fetch();
+	assert.equal(
+		selected.accountPseudonym,
+		undefined,
+		"an explicitly selected account the token cannot vouch for has no pool",
+	);
+
+	const { accountPseudonym: _pool, ...unpooled } = denied;
+	const anonymous = (used: number, at: string): QuotaReading => ({
+		...unpooled,
+		observedAt: at,
+		windows: [{ key: "weekly", usedPct: { kind: "measured", value: used, source: "provider" } }],
+	});
+	const folded = foldAccountQuota(
+		[anonymous(40, "2026-01-01T00:00:00.000Z"), anonymous(60, "2026-01-01T00:01:00.000Z")].map(
+			(data) => ({ k: "quota.read", data }) as unknown as TelemetryRecord,
+		),
+	);
+	assert.equal([...folded.values()][0]?.consumed.size, 0, "readings without a verified identity never fold a delta");
+
+	const familyOnly = quotaReadingFromMessage(
+		{
+			anthropicResponse: {
+				observedAt: NOW.toISOString(),
+				status: 429,
+				attempts: 1,
+				requestId: null,
+				accountScope: "0123456789ab",
+				retryAfterSeconds: null,
+				rateLimit: { "7d-status": "rejected", "7d-reset": "1767225600", "overage-status": "rejected" },
+				messageStart: null,
+			},
+		},
+		"anthropic-max",
+		"claude-target",
+	);
+	assert.ok(familyOnly && validPayload("quota.read", familyOnly));
+	assert.deepEqual([familyOnly.access, familyOnly.overage, familyOnly.windows.length], ["denied", "refused", 0]);
+	assert.deepEqual(
+		[quotaDenial(familyOnly, NOW.getTime())?.resetsAt, quotaDenial(familyOnly, NOW.getTime())?.fresh],
+		[new Date(1_767_225_600_000).toISOString(), true],
+		"a family rejection without utilization still denies, fresh, until its reset",
+	);
+
+	const copilot = async (raw: unknown) => {
+		const client = async () => ({
+			getAuthStatus: async () => ({ isAuthenticated: true, login: "octocat", host: "https://github.com" }),
+			rpc: { account: { getQuota: async () => raw } },
+		});
+		const snapshot = await createCopilotQuotaProvider({
+			readQuota: () => readCopilotQuota({ client }),
+			now: () => NOW,
+		}).fetch();
+		const reading = quotaReadingFromSnapshot(snapshot, NOW.toISOString(), 60_000);
+		assert.ok(validPayload("quota.read", reading));
+		assert.ok(!JSON.stringify(reading).includes("octocat"));
+		return reading;
+	};
+	const evidence = (reading: QuotaReading) =>
+		reading.windows.map((window) => [
+			window.key,
+			window.unit,
+			window.durationSeconds ?? null,
+			window.usedPct.kind === "measured" ? window.usedPct.value : (window.unlimited ?? window.usedPct.kind),
+			window.access,
+			window.qualification,
+		]);
+	const legacy = await copilot({
+		quotaSnapshots: {
+			chat: {
+				isUnlimitedEntitlement: true,
+				entitlementRequests: 0,
+				usedRequests: 0,
+				hasQuota: true,
+				tokenBasedBilling: true,
+			},
+			premium_interactions: {
+				isUnlimitedEntitlement: false,
+				entitlementRequests: 300,
+				usedRequests: 300,
+				hasQuota: false,
+				usageAllowedWithExhaustedQuota: false,
+				overageAllowedWithExhaustedQuota: false,
+				tokenBasedBilling: false,
+			},
+		},
+	});
+	assert.match(legacy.accountPseudonym ?? "", /^[0-9a-f]{32}$/);
+	assert.deepEqual(evidence(legacy), [
+		["premium_interactions", "premium-requests", null, 100, "denied", "authoritative"],
+		["chat", "provider-credits", null, true, "allowed", "authoritative"],
+	]);
+	assert.equal(legacy.access, "allowed", "an exhausted premium bucket denies its window, not the chat bucket");
+	assert.equal(quotaDenial(legacy), null);
+
+	const budget = {
+		consumed: 300,
+		entitlement: 300,
+		overage: 0,
+		overageAllowedWhenExhausted: true,
+		remainingPercentage: 0,
+		unlimited: false,
+		usageAllowedWhenExhausted: false,
+	};
+	const monthly = {
+		state: "available",
+		scope: "user",
+		unit: "requests",
+		consumedQuantity: 300,
+		cycleStart: "2026-01-01T00:00:00Z",
+		resetOn: "2026-02-01T00:00:00Z",
+	};
+	const sdk = { provider: { id: "github" }, observationKind: "account_snapshot", acquisitionStatus: "succeeded" };
+	const failed = {
+		...sdk,
+		quotaId: "chat",
+		unit: "unknown",
+		accessState: "unavailable",
+		capacityState: "unavailable",
+		acquisitionStatus: "failed",
+	};
+	const current = await copilot({
+		providerQuotas: [
+			{
+				...sdk,
+				quotaId: "premium",
+				compatibilityKey: "premium_interactions",
+				unit: "requests",
+				quantityKind: "authoritative_budget",
+				accessState: "allowed",
+				capacityState: "exhausted",
+				availableQuantity: 0,
+				budgetMetadata: budget,
+				monthlyUsage: monthly,
+			},
+			{
+				...sdk,
+				quotaId: "credits",
+				unit: "ai_credits",
+				quantityKind: "advisory_balance",
+				accessState: "unknown",
+				capacityState: "available",
+				availableQuantity: 0,
+			},
+			failed,
+		],
+	});
+	assert.deepEqual(evidence(current), [
+		["premium_interactions", "premium-requests", 2_678_400, 100, "allowed", "authoritative"],
+		["credits", "provider-credits", null, "unknown", "unknown", "advisory"],
+	]);
+	assert.deepEqual([current.access, current.overage], ["allowed", "permitted"], "exhausted with overage permitted");
+	assert.equal(current.accountPseudonym, legacy.accountPseudonym, "one account, one pool, whatever the model");
+
+	const unacquired = await copilot({ providerQuotas: [failed] });
+	assert.deepEqual([unacquired.status, unacquired.access, unacquired.validUntil], ["error", "unknown", undefined]);
 });

@@ -161,6 +161,7 @@ export function createClaudeCodeQuotaProvider(options: ClaudeCodeQuotaOptions = 
 			return snapshot("ok", null, {
 				windows: usage.windows,
 				credits: usage.credits,
+				...(usage.accountPseudonym === undefined ? {} : { accountPseudonym: usage.accountPseudonym }),
 				plan: formatPlan(credentials.subscriptionType),
 			});
 		},

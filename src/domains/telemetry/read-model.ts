@@ -2991,13 +2991,22 @@ export function quotaAccountDetails(reading: QuotaReading) {
 				? {
 						display: reading.credits.display,
 						usedPct: { fact: creditPct, display: renderFact(creditPct, "percent") },
+						unit: reading.credits.unit ?? null,
 					}
 				: null,
 		retryAfter: retry ? { fact: retry, display: renderFact(retry, "duration") } : null,
+		pool: reading.accountPseudonym ?? null,
+		access: reading.access ?? "unknown",
+		overage: reading.overage ?? "unknown",
+		resetsAt: reading.resetsAt ?? null,
+		validUntil: reading.validUntil ?? null,
 	};
 }
 
-/** Matching Anthropic credentials share one allowance; their route associations survive the fold (#434, #423). */
+/**
+ * Anthropic credentials of one verified organization (the same pool pseudonym) with matching windows share one
+ * allowance; their route associations survive the fold (#434, #423). Rows without a pool never merge.
+ */
 export function reconcileQuotaAccounts(rows: QuotaStateV1["providers"]): QuotaStateV1["providers"] {
 	const kept: QuotaStateV1["providers"] = [];
 	const anthropic = new Set(["anthropic-max", "claude-code"]);
@@ -3007,6 +3016,8 @@ export function reconcileQuotaAccounts(rows: QuotaStateV1["providers"]): QuotaSt
 				row.status === "ok" &&
 				other.status === "ok" &&
 				row.provider !== other.provider &&
+				row.pool !== null &&
+				row.pool === other.pool &&
 				anthropic.has(row.provider) &&
 				anthropic.has(other.provider) &&
 				row.windows.length > 0 &&
@@ -3042,6 +3053,19 @@ export function reconcileQuotaAccounts(rows: QuotaStateV1["providers"]): QuotaSt
 	return kept;
 }
 
+/**
+ * Two readings come from one verified account: matching pool pseudonyms (and no conflicting account digest), or, where
+ * neither carries a pool, matching account digests. A reading with neither identity matches nothing.
+ */
+function sameQuotaIdentity(a: QuotaReading, b: QuotaReading): boolean {
+	if (a.accountPseudonym !== undefined || b.accountPseudonym !== undefined)
+		return (
+			a.accountPseudonym === b.accountPseudonym &&
+			(a.account === undefined || b.account === undefined || a.account === b.account)
+		);
+	return a.account !== undefined && a.account === b.account;
+}
+
 /** A provider reports a window's reset with drift between readings; a reset that moved further began a new window. */
 const QUOTA_RESET_DRIFT_MS = 5 * 60_000;
 function sameQuotaWindow(a: string | undefined, b: string | undefined): boolean {
@@ -3060,7 +3084,8 @@ export interface AccountQuota {
  * §12.5, C2). Consumption is estimated, never measured: other devices draw from the same shared window, so the delta
  * is the account's, not this host's. A window whose reset moved, or whose share fell, restarted between the two
  * readings and has no delta. Readings from two different provider accounts on one target are never compared; the
- * delta is taken against the newest earlier reading whose account is the same or unstated.
+ * delta is taken against the newest earlier reading of the same pool whose account is the same or unstated, so a
+ * login switch under one provider never joins the two pools.
  */
 export function foldAccountQuota(records: readonly TelemetryRecord[]): Map<string, AccountQuota> {
 	const byAccount = new Map<string, QuotaReading[]>();
@@ -3076,10 +3101,7 @@ export function foldAccountQuota(records: readonly TelemetryRecord[]): Map<strin
 		const previous = readings
 			.slice(0, -1)
 			.reverse()
-			.find(
-				(candidate) =>
-					candidate.account === undefined || reading.account === undefined || candidate.account === reading.account,
-			);
+			.find((candidate) => sameQuotaIdentity(candidate, reading));
 		const consumed = new Map<string, Fact<number>>();
 		for (const window of reading.windows) {
 			const prior = previous?.windows.find((candidate) => candidate.key === window.key);

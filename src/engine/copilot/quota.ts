@@ -6,6 +6,7 @@
  * retries in a loop, and never reads external credential files.
  */
 
+import { createHash } from "node:crypto";
 import { COPILOT_LOGIN_MESSAGE, copilotClient, heldCopilotClient, holdCopilotClient } from "./client.js";
 
 export const COPILOT_QUOTA_TIMEOUT_MS = 15_000;
@@ -15,6 +16,12 @@ export type CopilotQuotaUnit = "requests" | "ai_credits" | "nano_aiu" | "tokens"
 export type CopilotQuotaQuantityKind = "authoritative_budget" | "advisory_balance" | "none" | "unknown";
 
 export type CopilotQuotaObservationKind = "account_snapshot" | "admission_state" | "unknown";
+
+/** The service's own admission verdict for a bucket, as the SDK states it. `unavailable` is a client placeholder. */
+export type CopilotQuotaAccessState = "allowed" | "denied" | "not_required" | "unknown" | "unavailable";
+
+/** Whether the SDK received a service observation at all, apart from what it says. */
+export type CopilotQuotaAcquisition = "succeeded" | "unavailable" | "failed";
 
 export interface CopilotQuotaAccount {
 	login: string;
@@ -33,6 +40,14 @@ export interface CopilotQuotaEntry {
 	overage: number | null;
 	remainingPercentage: number | null;
 	exhausted: boolean;
+	/** The SDK's stated access verdict; `null` when it states none. */
+	accessState: CopilotQuotaAccessState | null;
+	/** The service's explicit admission flag; `null` when it reports none. */
+	hasQuota: boolean | null;
+	/** `null` when the SDK did not report an acquisition status (the legacy snapshot shape). */
+	acquisition: CopilotQuotaAcquisition | null;
+	/** The billing cycle's length from the reported cycle start and reset; `null` when none was reported. */
+	periodSeconds: number | null;
 	tokenBasedBilling: boolean | null;
 	usageAllowedWhenExhausted: boolean | null;
 	overageAllowedWhenExhausted: boolean | null;
@@ -40,8 +55,13 @@ export interface CopilotQuotaEntry {
 	reason: string | null;
 }
 
+/** A digest of the GitHub account (host and login), so every reading of one account names it and never a token. */
+function copilotAccountScope(account: CopilotQuotaAccount): string {
+	return createHash("sha256").update(`${account.host}\0${account.login}`).digest("hex").slice(0, 16);
+}
+
 export type CopilotQuotaReadResult =
-	| { kind: "ok"; account: CopilotQuotaAccount; entries: CopilotQuotaEntry[] }
+	| { kind: "ok"; account: CopilotQuotaAccount; accountScope: string; entries: CopilotQuotaEntry[] }
 	| { kind: "no_credentials"; message: string }
 	| { kind: "unsupported"; message: string }
 	| { kind: "error"; message: string };
@@ -122,6 +142,32 @@ function parseQuantityKind(value: unknown): CopilotQuotaQuantityKind | null {
 	}
 }
 
+function parseAccessState(value: unknown): CopilotQuotaAccessState | null {
+	switch (value) {
+		case "allowed":
+		case "denied":
+		case "not_required":
+		case "unknown":
+		case "unavailable":
+			return value;
+		default:
+			return null;
+	}
+}
+
+function parseAcquisition(value: unknown): CopilotQuotaAcquisition | null {
+	return value === "succeeded" || value === "unavailable" || value === "failed" ? value : null;
+}
+
+/** Seconds from a reported cycle start to its reset; never guessed from a bucket name. */
+function cycleSeconds(start: unknown, end: unknown): number | null {
+	const from = toUtcIso(start);
+	const to = toUtcIso(end);
+	if (from === null || to === null) return null;
+	const seconds = Math.round((Date.parse(to) - Date.parse(from)) / 1000);
+	return Number.isSafeInteger(seconds) && seconds >= 1 ? seconds : null;
+}
+
 function parseObservationKind(value: unknown): CopilotQuotaObservationKind | null {
 	switch (value) {
 		case "account_snapshot":
@@ -162,6 +208,11 @@ function parseProviderQuotaState(raw: unknown): CopilotQuotaEntry | null {
 	const remainingPercentage = finitePct(budget?.remainingPercentage);
 	const exhausted = raw.capacityState === "exhausted" || raw.accessState === "denied";
 	const resetsAt = toUtcIso(budget?.resetAtEpochMs) ?? toUtcIso(monthly?.resetOn);
+	// The cycle measures this bucket only when its reset is the cycle's own reset.
+	const periodSeconds =
+		resetsAt !== null && resetsAt === toUtcIso(monthly?.resetOn)
+			? cycleSeconds(monthly?.cycleStart, monthly?.resetOn)
+			: null;
 	return {
 		key,
 		unit,
@@ -174,6 +225,10 @@ function parseProviderQuotaState(raw: unknown): CopilotQuotaEntry | null {
 		overage,
 		remainingPercentage,
 		exhausted,
+		accessState: parseAccessState(raw.accessState),
+		hasQuota: typeof raw.hasQuota === "boolean" ? raw.hasQuota : null,
+		acquisition: parseAcquisition(raw.acquisitionStatus),
+		periodSeconds,
 		tokenBasedBilling,
 		usageAllowedWhenExhausted:
 			typeof budget?.usageAllowedWhenExhausted === "boolean" ? budget.usageAllowedWhenExhausted : null,
@@ -231,6 +286,10 @@ function parseLegacyQuotaSnapshot(key: string, raw: unknown): CopilotQuotaEntry 
 		overage,
 		remainingPercentage,
 		exhausted,
+		accessState: parseAccessState(raw.accessState),
+		hasQuota: typeof raw.hasQuota === "boolean" ? raw.hasQuota : null,
+		acquisition: parseAcquisition(raw.acquisitionStatus),
+		periodSeconds: null,
 		tokenBasedBilling,
 		usageAllowedWhenExhausted,
 		overageAllowedWhenExhausted,
@@ -387,7 +446,7 @@ export async function readCopilotQuota(options: CopilotQuotaReadOptions = {}): P
 						message: "Unexpected GitHub Copilot account.getQuota response (quota unknown)",
 					};
 				}
-				return { kind: "ok", account, entries };
+				return { kind: "ok", account, accountScope: copilotAccountScope(account), entries };
 			})(),
 			timeoutMs,
 		);

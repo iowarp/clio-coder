@@ -215,6 +215,22 @@ export function settingsFingerprintCommitment(hash: string): SettingsFingerprint
 	};
 }
 
+/**
+ * A provider's deny status for a quota pool or window: `denied` only when the provider says the account cannot send
+ * (a reached limit with no usable credits or overage), `allowed` when it says it can, `unknown` otherwise. A window
+ * measured full is not a denial by itself.
+ */
+export const QUOTA_ACCESS = ["allowed", "denied", "unknown"] as const;
+export type QuotaAccess = (typeof QUOTA_ACCESS)[number];
+/** Whether the provider will bill past the included allowance (credits, overage), where it states so. */
+export const QUOTA_OVERAGE = ["permitted", "refused", "unknown"] as const;
+export type QuotaOverage = (typeof QUOTA_OVERAGE)[number];
+/**
+ * How far a window's quantities may be read: an `authoritative` budget supports a percentage, an `advisory` balance is
+ * display-only, an `admission` verdict carries no post-charge balance, and `none` measures nothing.
+ */
+export const QUOTA_QUALIFICATION = ["authoritative", "advisory", "admission", "none"] as const;
+export type QuotaQualification = (typeof QUOTA_QUALIFICATION)[number];
 const QuotaWindowSchema = Type.Object(
 	{
 		key: ExistingId,
@@ -226,6 +242,12 @@ const QuotaWindowSchema = Type.Object(
 		unit: Type.Optional(EconomyUnitSchema),
 		/** The window's length as the provider reported it, such as Codex `limit_window_seconds`; never inferred. */
 		durationSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+		/** The provider's own allow or deny status for this window; absent when it states none for the window. */
+		access: Type.Optional(vocabulary(QUOTA_ACCESS)),
+		/** The provider reported no limit for this window: it keeps its unit and has no percentage. */
+		unlimited: Type.Optional(Type.Literal(true)),
+		/** How far the provider qualified the window's quantities; absent when it did not say. */
+		qualification: Type.Optional(vocabulary(QUOTA_QUALIFICATION)),
 	},
 	closed,
 );
@@ -1913,6 +1935,17 @@ export const QuotaReadSchema = Type.Object(
 		 * rather than dropped for having no percentage. Absent on readings with windows and on older records.
 		 */
 		limitOnly: Type.Optional(Type.Literal(true)),
+		/**
+		 * The provider's deny status for the whole pool, with any usable credits or overage taken into account. A denial
+		 * stands on its own even when no window says which limit binds. Absent on older records, which read as unknown.
+		 */
+		access: Type.Optional(vocabulary(QUOTA_ACCESS)),
+		/** Whether the provider will bill past the included allowance, as it stated; absent on older records. */
+		overage: Type.Optional(vocabulary(QUOTA_OVERAGE)),
+		/** The pool-wide reset the provider reported, apart from any window's own reset. */
+		resetsAt: Type.Optional(utc),
+		/** Until when the reading counts as fresh: its acquisition time plus the freshness window that read it. */
+		validUntil: Type.Optional(utc),
 	},
 	closed,
 );

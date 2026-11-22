@@ -125,7 +125,11 @@ export function createAnthropicMaxQuotaProvider(options: AnthropicMaxQuotaOption
 					retryAfterSeconds: usage.retryAfterSeconds,
 				});
 			}
-			return snapshot("ok", null, { windows: usage.windows, credits: usage.credits });
+			return snapshot("ok", null, {
+				windows: usage.windows,
+				credits: usage.credits,
+				...(usage.accountPseudonym === undefined ? {} : { accountPseudonym: usage.accountPseudonym }),
+			});
 		},
 	};
 }

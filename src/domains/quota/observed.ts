@@ -9,6 +9,7 @@
 
 import type { AnthropicResponseObservation, CodexQuotaObservation } from "../../engine/types.js";
 import { parseAnthropicHeaders } from "./anthropic-headers.js";
+import { accountPseudonym, codexAccess, withAnthropicEvidence } from "./pool-reading.js";
 import { anthropicRateLimitSeverity } from "./severity.js";
 import type { UsageSnapshot } from "./types.js";
 import { formatPlan } from "./types.js";
@@ -93,9 +94,10 @@ export function noteAnthropicStreamQuota(
 	observation: AnthropicResponseObservation,
 	authProfile: string | null,
 ): void {
-	const snapshot = parseAnthropicHeaders(observation);
+	const parsed = parseAnthropicHeaders(observation);
 	const storedAtMs = Date.parse(observation.observedAt);
-	if (snapshot === null || !Number.isFinite(storedAtMs)) return;
+	if (parsed === null || !Number.isFinite(storedAtMs)) return;
+	const snapshot = withAnthropicEvidence(parsed, observation.accountScope);
 	const key = JSON.stringify(["anthropic-stream", targetId, authProfile, observation.accountScope]);
 	const previous = observed.get(key);
 	const previousTarget = observed.get(anthropicTargets.get(targetId)?.key ?? "");
@@ -174,8 +176,12 @@ function codexKey(targetId: string, accountScope: string): string {
 	return JSON.stringify(["codex-stream", targetId, accountScope]);
 }
 
-/** One codex.rate_limits event as the quota views read it; the journal's quota reading shares its window keys. */
+/**
+ * One codex.rate_limits event as the quota views read it; the journal's quota reading shares its window keys. The pool
+ * is the ChatGPT account the request's token names, the same pseudonym the usage poll stamps.
+ */
 export function codexStreamSnapshot(observation: CodexQuotaObservation): UsageSnapshot {
+	const pool = accountPseudonym("chatgpt", observation.accountScope);
 	return {
 		providerId: "codex",
 		displayName: "Codex",
@@ -192,12 +198,16 @@ export function codexStreamSnapshot(observation: CodexQuotaObservation): UsageSn
 			label: window.windowMinutes === 300 ? "5h" : window.windowMinutes === 10_080 ? "Weekly" : `${window.windowMinutes}m`,
 			usedPct: window.usedPercent,
 			resetsAt: window.resetsAt,
+			unit: "percent" as const,
+			...(Math.round(window.windowMinutes * 60) >= 1 ? { durationSeconds: Math.round(window.windowMinutes * 60) } : {}),
 		})),
 		credits: observation.credits?.unlimited
-			? { display: "Unlimited", usedPct: null }
+			? { display: "Unlimited", usedPct: null, unit: "provider-credits" }
 			: observation.credits?.hasCredits && observation.credits.balance !== null
-				? { display: observation.credits.balance, usedPct: null }
+				? { display: observation.credits.balance, usedPct: null, unit: "provider-credits" }
 				: null,
+		...codexAccess(observation),
+		...(pool === undefined ? {} : { accountPseudonym: pool }),
 	};
 }
 
@@ -222,6 +232,8 @@ interface ObservedQuotaReading {
 	snapshot: UsageSnapshot;
 	stale: boolean;
 	source: "poll" | "response-headers" | "stream-event";
+	/** The freshness window of the cache or stream that made the reading. */
+	validForMs: number;
 }
 
 /** Every reading this process holds and how it arrived, for the telemetry read model's quota view (#434 §11). */
@@ -230,8 +242,9 @@ export function observedQuotaReadings(nowMs = Date.now()): ObservedQuotaReading[
 	const codexKeys = new Map([...codexTargets].map(([targetId, key]) => [key, targetId]));
 	return [...observed.keys()].flatMap((key): ObservedQuotaReading[] => {
 		const reading = readObserved(key, nowMs);
-		const latest = observed.get(key)?.latest;
-		if (!reading || (!reading.snapshot && !latest)) return [];
+		const entry = observed.get(key);
+		const latest = entry?.latest;
+		if (!reading || !entry || (!reading.snapshot && !latest)) return [];
 		const snapshot = latest
 			? {
 					...latest,
@@ -248,6 +261,7 @@ export function observedQuotaReadings(nowMs = Date.now()): ObservedQuotaReading[
 						snapshot,
 						stale: snapshot.stale === true || reading.stale,
 						source: anthropicKeys.has(key) ? "response-headers" : "poll",
+						validForMs: entry.ttlMs,
 					},
 				]
 			: [
@@ -255,6 +269,7 @@ export function observedQuotaReadings(nowMs = Date.now()): ObservedQuotaReading[
 						snapshot: { ...snapshot, providerId: `codex:${codexTarget}` },
 						stale: reading.stale,
 						source: "stream-event",
+						validForMs: entry.ttlMs,
 					},
 				];
 	});

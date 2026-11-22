@@ -123,7 +123,7 @@ export function createCodexCliQuotaProvider(options: CodexCliQuotaOptions = {}):
 					retryAfterSeconds: usage.retryAfterSeconds,
 				});
 			}
-			return snapshot("ok", null, { windows: usage.windows, credits: usage.credits, plan: usage.plan });
+			return snapshot("ok", null, { windows: usage.windows, credits: usage.credits, plan: usage.plan, ...usage.pool });
 		},
 	};
 }

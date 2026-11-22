@@ -9,6 +9,10 @@
  */
 
 import { createHash } from "node:crypto";
+import type { EconomyUnit } from "../../core/telemetry/economy.js";
+import type { QuotaAccess, QuotaOverage, QuotaQualification } from "../../core/telemetry/schemas.js";
+
+export type { QuotaAccess, QuotaOverage, QuotaQualification };
 
 /** Outcome of one usage read, including the reasons a read produced no data. */
 export type QuotaStatus = "ok" | "no_credentials" | "expired" | "error" | "loading";
@@ -31,12 +35,31 @@ export interface UsageWindow {
 	severity?: string;
 	/** True when the provider marks this window as the currently binding limit. */
 	active?: boolean;
+	/** The native unit the window counts, as the provider reported it; `percent` for a bare percentage. */
+	unit?: EconomyUnit;
+	/** The window's length as the provider reported it; never inferred from a label. */
+	durationSeconds?: number;
+	/** The provider's own allow or deny status for this window, when it states one per window. */
+	access?: QuotaAccess;
+	/** How far the provider qualified the window's quantities, when it says. */
+	qualification?: QuotaQualification;
+}
+
+/**
+ * A window the provider reported without an authoritative pair to take a percentage from: an unlimited bucket, an
+ * advisory balance, an admission verdict. It keeps its unit, reset and status and never carries a made-up percent.
+ */
+export interface UsageAllowance extends Omit<UsageWindow, "usedPct" | "severity" | "active"> {
+	/** The provider reported no limit. */
+	unlimited?: true;
 }
 
 /** Prepaid credit balance for providers that bill credits instead of windows. */
 export interface UsageCredits {
 	display: string;
 	usedPct: number | null;
+	/** The unit `display` counts, when the provider names one; a balance without one is never currency. */
+	unit?: EconomyUnit;
 }
 
 /** Everything one provider reported about quota at a single point in time. */
@@ -45,6 +68,8 @@ export interface UsageSnapshot {
 	displayName: string;
 	status: QuotaStatus;
 	windows: UsageWindow[];
+	/** Windows without a percentage (see UsageAllowance); journaled beside `windows`, never shown as a percent. */
+	allowances?: UsageAllowance[];
 	credits?: UsageCredits | null;
 	plan?: string | null;
 	message?: string | null;
@@ -57,6 +82,17 @@ export interface UsageSnapshot {
 	stale?: boolean;
 	/** ISO 8601 instant of the read that produced this snapshot. */
 	fetchedAt: string | null;
+	/**
+	 * The funding pool this reading belongs to: a keyed pseudonym of the provider's stable billing identity
+	 * (`pool-reading.ts`), absent when the adapter has no verified identity to key it on.
+	 */
+	accountPseudonym?: string;
+	/** The provider's deny status for the whole pool; absent reads as unknown. A full window alone is not a denial. */
+	access?: QuotaAccess;
+	/** Whether the provider will bill past the included allowance, where it states so. */
+	overage?: QuotaOverage;
+	/** The pool-wide reset the provider reported, apart from any window's own reset. */
+	resetsAt?: string | null;
 }
 
 /**
