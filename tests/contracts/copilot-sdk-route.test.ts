@@ -64,6 +64,7 @@ import { getEngineOAuthProvider } from "../../src/engine/oauth.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { createSideRequestAdmission } from "../../src/entry/side-request-admission.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
+import { assessToolCallFlood } from "../../src/session-control/repetition-detector.js";
 import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
@@ -248,6 +249,25 @@ class FakeSession {
 			await globalThis.__clioCopilotCallSettles;
 			this.usage({ model: "fake-model", apiCallId: "c1", inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
 			this.emit("assistant.message", { messageId: "c1", apiCallId: "c1", content: "", toolRequests: [{ toolCallId: "call_streamed", name: "read", arguments: { path: "a.md" } }] });
+			return;
+		}
+		const parallel = /op:parallel-reads:(distinct|same|unstreamed)/.exec(prompt)?.[1];
+		if (parallel) {
+			// Six parallel reads streamed one after another, as gemini on the Copilot target sends them (row 385); each
+			// call's input lands before the next starts, and the consumer runs between calls as it does on the wire.
+			this.emit("assistant.message_start", { messageId: "p1" });
+			const calls = Array.from({ length: 6 }, (_, index) => ({
+				toolCallId: "call_p" + index,
+				name: "read",
+				arguments: { path: parallel === "same" ? "src/a.ts" : "src/file-" + index + ".ts" },
+			}));
+			for (const call of calls) {
+				const input = parallel === "unstreamed" ? [""] : ['{"path":', JSON.stringify(call.arguments.path) + "}"];
+				for (const inputDelta of input) this.emit("assistant.tool_call_delta", { toolCallId: call.toolCallId, toolName: "read", inputDelta });
+				await new Promise((resolve) => setImmediate(resolve));
+			}
+			this.usage({ model: "fake-model", apiCallId: "p1", inputTokens: 50, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+			this.emit("assistant.message", { messageId: "p1", apiCallId: "p1", content: "", toolRequests: calls });
 			return;
 		}
 		if (prompt.includes("op:after-reasoning")) {
@@ -2008,6 +2028,38 @@ test("a reply that is only a tool call streams its first token before the call s
 		[{ id: "call_streamed", name: "read", args: { path: "a.md" } }],
 	);
 	disposeCopilotConversations(key);
+});
+
+test("streamed parallel reads of distinct files are not a tool-call flood; the same read six times still is (row 385)", async () => {
+	// Judged as the turn runtime judges them: at every call's start and end, over the calls before it.
+	const judge = async (mode: string) => {
+		const key = `parallel-reads-${mode}`;
+		const stream = engineStreamSimple(
+			model,
+			normalizeContext({ tools: [readTool], messages: [user(`op:parallel-reads:${mode}`)] }),
+			{ sessionId: key },
+		);
+		let verdict: ReturnType<typeof assessToolCallFlood> = { kind: "ok" };
+		for await (const event of stream) {
+			if (verdict.kind !== "ok" || (event.type !== "toolcall_start" && event.type !== "toolcall_end")) continue;
+			verdict = assessToolCallFlood(event.partial, event.contentIndex + (event.type === "toolcall_end" ? 1 : 0));
+		}
+		const message = await stream.result();
+		disposeCopilotConversations(key);
+		return { verdict, message };
+	};
+	const distinct = await judge("distinct");
+	deepStrictEqual(distinct.verdict, { kind: "ok" }, "six reads of different files are parallel work");
+	deepStrictEqual(
+		distinct.message.content.map((block) => (block.type === "toolCall" ? block.arguments : block)),
+		Array.from({ length: 6 }, (_, index) => ({ path: `src/file-${index}.ts` })),
+	);
+	ok(
+		distinct.message.content.every((block) => !("partialJson" in block)),
+		"the settled calls carry no streaming input",
+	);
+	deepStrictEqual((await judge("unstreamed")).verdict, { kind: "ok" }, "calls whose input never streamed wait");
+	deepStrictEqual((await judge("same")).verdict, { kind: "flooding", toolName: "read", repeats: 5 });
 });
 
 test("a lost runtime or a closed conversation settles the open step, and the client restarts", async () => {

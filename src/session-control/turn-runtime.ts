@@ -2376,6 +2376,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 				// Some adapters end every call block only when the stream ends, so the calls before a starting one are judged
 				// at its start: their arguments are complete by then, and the stop lands while the flood is still streaming.
+				// A call still marked as streaming its arguments (copilot-sdk's `partialJson`) is skipped until they are final.
 				if (
 					(assistantEvent.type === "toolcall_start" || assistantEvent.type === "toolcall_end") &&
 					state.repetitionAbortReason === null &&

@@ -52,6 +52,9 @@ test("a stream cycling a few sentences or paragraphs is repeating; varied long o
 		content: Array.from({ length: 6 }, (_, index) => call("edit", { path: "a.ts", oldText: `${index}` })),
 	};
 	deepStrictEqual(assessToolCallFlood(hunks, 6), { kind: "ok" }, "parallel edits to one file are not a flood");
+	// A call still streaming its arguments has none to judge yet (copilot-sdk, row 385).
+	const streaming = { content: Array.from({ length: 6 }, () => ({ ...call("read", {}), partialJson: '{"pa' })) };
+	deepStrictEqual(assessToolCallFlood(streaming, 6), { kind: "ok" }, "calls whose arguments still stream wait");
 });
 
 test("reasoning that keeps re-drafting the same short code lines is a loop the sentence check misses (bt-25)", () => {
