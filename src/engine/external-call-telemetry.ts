@@ -1,5 +1,6 @@
 import { hostname } from "node:os";
 import { processBirthToken } from "../core/process-identity.js";
+import { type ProviderCharge, providerChargeEconomics } from "../core/telemetry/economy.js";
 import type { Fact } from "../core/telemetry/fact.js";
 import { createTelemetryForwarder } from "../core/telemetry/forwarder.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
@@ -132,6 +133,24 @@ export function reportedUsageSums(
 	};
 }
 
+/**
+ * The charge a peer's provider reported, or its own client-side total, as its own fact beside the route price (R1); a
+ * positive one on a route declared free is flagged.
+ */
+function peerCharge(input: WorkerRunInput, pricing: Pricing): ProviderCharge | null {
+	const usd = pricing.usd;
+	if (pricing.pricedBy !== "provider") return null;
+	const amount =
+		usd.kind === "measured"
+			? { kind: "measured" as const, value: usd.value, source: "provider" as const }
+			: usd.kind === "estimated" && usd.method === "peer-report"
+				? { kind: "estimated" as const, value: usd.value, method: "peer-report" as const }
+				: null;
+	if (amount === null) return null;
+	const freeRoute = freeRouteRule(input) !== null;
+	return { currency: "USD", amount, ...(freeRoute && amount.value > 0 ? { discrepancy: "free-route" as const } : {}) };
+}
+
 function externalTarget(input: WorkerRunInput) {
 	return {
 		targetId: input.target.id,
@@ -142,26 +161,35 @@ function externalTarget(input: WorkerRunInput) {
 	};
 }
 
+/** The rule that makes the target's route price free: declared free, or every declared rate zero. */
+function freeRouteRule(input: WorkerRunInput): "declared" | "zero-rates" | null {
+	const rates = input.target.pricing;
+	if (!rates) return null;
+	if (rates === "free") return "declared";
+	return [rates.input, rates.output, rates.cacheRead ?? 0, rates.cacheWrite ?? 0].every((rate) => rate === 0)
+		? "zero-rates"
+		: null;
+}
+
 /**
- * A free or all-zero target prices any usage at zero; otherwise declared rates price measured counts, unless different
- * models served the scope, whose summed tokens no one route rate prices (S4c).
+ * A free or all-zero target prices any usage at zero, whatever the peer reported it charged (that charge is its own
+ * fact, R1); otherwise declared rates price measured counts, unless different models served the scope, whose summed
+ * tokens no one route rate prices (S4c).
  */
 function priceExternalUsage(input: WorkerRunInput, facts: ExternalUsageFacts, mixedModels = false): ExternalUsageFacts {
-	if (facts.pricing.usd.kind !== "unknown" || !input.target.pricing) return facts;
-	const rates = input.target.pricing;
-	if (
-		rates === "free" ||
-		[rates.input, rates.output, rates.cacheRead ?? 0, rates.cacheWrite ?? 0].every((rate) => rate === 0)
-	)
+	const freeRule = freeRouteRule(input);
+	if (freeRule !== null)
 		return {
 			...facts,
 			pricing: {
 				usd: { kind: "measured" as const, value: 0, source: "local-count" as const },
 				pricedBy: "free" as const,
-				freeRule: rates === "free" ? ("declared" as const) : ("zero-rates" as const),
+				freeRule,
 			},
 		};
-	if (mixedModels) return facts;
+	if (facts.pricing.usd.kind !== "unknown" || !input.target.pricing) return facts;
+	const rates = input.target.pricing;
+	if (rates === "free" || mixedModels) return facts;
 	// An unpriced cache read bills at the input price, as resolveEffectivePricing does.
 	const effective = {
 		input: rates.input,
@@ -252,9 +280,11 @@ export function observeExternalWorkerRun(
 				if (served) servedModels.add(served);
 				if (observed && !calls.has(identity)) {
 					calls.add(identity);
-					const facts = priceExternalUsage(input, externalUsageFacts(observed));
+					const reported = externalUsageFacts(observed);
+					const facts = priceExternalUsage(input, reported);
 					const callId = newCallId();
 					const attemptId = newAttemptId();
+					const charge = observed.coverage === "complete" ? peerCharge(input, reported.pricing) : null;
 					const settlement = callSettlementFromMessage(
 						{ stopReason: "stop", usage: { ...observed.usage, clioExternal: { tokenUsage: "provider-reported" } } },
 						"none",
@@ -275,6 +305,7 @@ export function observeExternalWorkerRun(
 									? facts.usage
 									: (Object.fromEntries(fields.map((field) => [field, unknown])) as CallUsage),
 							pricing: facts.pricing,
+							...(charge ? { economics: providerChargeEconomics(charge) } : {}),
 							callId,
 							attemptId,
 							attempt: 0,

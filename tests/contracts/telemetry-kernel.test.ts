@@ -710,6 +710,27 @@ test("declared target rates price the counts of a runtime that computed no cost,
 		usd: { kind: "measured", value: 0.5, source: "provider" },
 		pricedBy: "provider",
 	});
+	// On a route declared free the route price stays free; the provider's charge stands beside it, flagged, even with
+	// no token usage, and so does a seat's reported debit (S4b, R1).
+	const charged = callSettlementFromMessage(
+		{
+			stopReason: "stop",
+			usage: { cost: { total: 0.5, totalFromProvider: true } },
+			copilotBilling: { premiumRequests: 0, nanoAiu: 1_200_000, modelCalls: 1 },
+		},
+		{ pricedBy: "free", freeRule: "declared" },
+	);
+	deepStrictEqual(charged.pricing, {
+		usd: { kind: "measured", value: 0, source: "local-count" },
+		pricedBy: "free",
+		freeRule: "declared",
+	});
+	deepStrictEqual(charged.economics?.additive.providerCharge, {
+		currency: "USD",
+		amount: { kind: "measured", value: 0.5, source: "provider" },
+		discrepancy: "free-route",
+	});
+	strictEqual(charged.billing?.discrepancy, "free-route");
 	// A side request (System One one-shot, safety judge) carries the same marks through sideQuestionUsage.
 	const settled: CallSettled[] = [];
 	const unsubscribe = telemetryHub().subscribe("call.settled", (payload) => {

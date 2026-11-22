@@ -1,5 +1,6 @@
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import { wireEffortFact } from "../../core/telemetry/call-effort.js";
+import { providerChargeEconomics } from "../../core/telemetry/economy.js";
 import type { FailureCause, TurnNoAnswerCause } from "../../core/telemetry/enums.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact } from "../../core/telemetry/fact.js";
@@ -394,13 +395,22 @@ export function callSettlementFromMessage(
 		},
 		...(typeof raw.responseId === "string" ? { responseId: raw.responseId } : {}),
 		...(neverSent ? {} : wireEffortFact(raw)),
-		...copilotBilling(raw.copilotBilling),
+		...(usd !== null && providerCost && !neverSent
+			? {
+					economics: providerChargeEconomics({
+						currency: "USD",
+						amount: { kind: "measured", value: usd, source: "provider" },
+						...(pricedBy === "free" && usd > 0 ? { discrepancy: "free-route" as const } : {}),
+					}),
+				}
+			: {}),
+		...copilotBilling(raw.copilotBilling, pricedBy === "free"),
 		...(interruptedEstimate ? { interruptedEstimate } : {}),
 	};
 }
 
 /** The seat units a copilot-sdk step reported (`CopilotStepBilling`, src/engine/copilot/stream.ts). */
-function copilotBilling(raw: unknown): Pick<CallSettled, "billing"> {
+function copilotBilling(raw: unknown, freeRoute: boolean): Pick<CallSettled, "billing"> {
 	const billing = record(raw);
 	if (Object.keys(billing).length === 0) return {};
 	const fact = (value: unknown): Fact<number> =>
@@ -408,15 +418,20 @@ function copilotBilling(raw: unknown): Pick<CallSettled, "billing"> {
 			? { kind: "measured", value, source: "provider" }
 			: unknown;
 	const calls = billing.modelCalls;
+	const premiumRequests = fact(billing.premiumRequests);
+	const nanoAiu = fact(billing.nanoAiu);
+	const debited = [premiumRequests, nanoAiu].some((unit) => unit.kind === "measured" && unit.value > 0);
 	return {
 		billing: {
 			provider: "github-copilot",
-			premiumRequests: fact(billing.premiumRequests),
-			nanoAiu: fact(billing.nanoAiu),
+			premiumRequests,
+			nanoAiu,
 			modelCalls:
 				typeof calls === "number" && Number.isSafeInteger(calls) && calls >= 0
 					? { kind: "measured", value: calls, source: "local-count" }
 					: unknown,
+			// The seat debited a call on a route declared free; both facts stand (R1).
+			...(freeRoute && debited ? { discrepancy: "free-route" as const } : {}),
 		},
 	};
 }

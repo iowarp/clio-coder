@@ -56,13 +56,26 @@ const money = <K extends TSchema>(known: K) =>
 	]);
 
 /**
+ * A positive debit the provider reported on a route whose price is free: the two facts disagree, and both stand (R1).
+ */
+export const ChargeDiscrepancySchema = Type.Literal("free-route");
+/**
  * What the provider reported it charged for the attempt, gross of any split between payers. Measured only from the
  * provider; a peer's own client-side total (Claude SDK `total_cost_usd`) is a `peer-report` estimate. It sits beside the
- * route price and never replaces it, even when the route is declared free (R1).
+ * route price and never replaces it, even when the route is declared free (R1), where a positive charge is flagged.
  */
-export const ProviderChargeSchema = money(
-	Type.Union([measuredByProvider(AmountSchema), estimatedBy(AmountSchema, Type.Literal("peer-report"))]),
-);
+export const ProviderChargeSchema = Type.Union([
+	Type.Object(
+		{
+			currency: CurrencyCodeSchema,
+			amount: Type.Union([measuredByProvider(AmountSchema), estimatedBy(AmountSchema, Type.Literal("peer-report"))]),
+			discrepancy: Type.Optional(ChargeDiscrepancySchema),
+		},
+		closed,
+	),
+	Type.Object({ amount: MissingFactSchema }, closed),
+]);
+export type ProviderCharge = Static<typeof ProviderChargeSchema>;
 /**
  * The extra money payable by the user for the attempt, excluding fixed fees already paid. Measured only from a
  * provider or statement assertion of amount, payer and scope; otherwise an estimate by the method that derived it, or
@@ -182,6 +195,12 @@ function missingEconomics(fact: Missing): CallEconomics & RunEconomics {
 		comparison: { apiEquivalent: { amount: fact } },
 		funding: fact,
 	};
+}
+
+/** An attempt's economics when all it captured is the provider's charge; every other quantity reads as not captured. */
+export function providerChargeEconomics(providerCharge: ProviderCharge): CallEconomics {
+	const economics = missingEconomics({ kind: "unknown", reason: "not-captured" });
+	return { ...economics, additive: { ...economics.additive, providerCharge } };
 }
 
 /**

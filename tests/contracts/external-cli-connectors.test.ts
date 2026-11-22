@@ -313,6 +313,50 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		equal((await price(usage, ["claude-haiku-4.5", "claude-opus-5.5"], zero)).coverage.measured, 1);
 	});
 
+	it("keeps a free route's price free beside the charge a peer reported (S4b, R1)", async () => {
+		const run = input(tmpdir(), codexCliRuntime);
+		run.telemetryContext = { sessionId: null, runId: "ext-charge", agent: { role: "worker", id: "ext-charge" } };
+		run.target = { ...run.target, pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+		const usage = {
+			input: 10,
+			output: 3,
+			totalTokens: 13,
+			cost: { total: 0.25 },
+			clioExternal: { cost: "provider-reported" },
+		};
+		const payload = bindExternalUsage(
+			{ callIndex: 1, usage: {}, model: "m", responseId: "r1" },
+			{ usage, coverage: "complete" },
+		);
+		const message = bindExternalUsage(
+			{ role: "assistant", content: [], stopReason: "stop", usage } as unknown as AgentMessage,
+			{ usage, coverage: "complete" },
+		);
+		const frames: WorkerTelemetryFrame[] = [];
+		await observeExternalWorkerRun(
+			run,
+			(event) => {
+				if (event.type === "clio_coder_telemetry") frames.push(event);
+			},
+			(emit) => {
+				emit({ type: "clio_coder_model_call", payload } as unknown as Parameters<typeof emit>[0]);
+				emit({ type: "message_end", message } as Parameters<typeof emit>[0]);
+				return { promise: Promise.resolve({ messages: [message], exitCode: 0 }), abort: () => undefined };
+			},
+		).promise;
+		const free = { usd: { kind: "measured", value: 0, source: "local-count" }, pricedBy: "free", freeRule: "zero-rates" };
+		const settled = frames.map(({ record }) => record).find((record) => record.k === "call.settled");
+		const reported = frames.map(({ record }) => record).find((record) => record.k === "run.usage_reported");
+		deepStrictEqual(settled?.k === "call.settled" ? settled.data.pricing : null, free);
+		deepStrictEqual(settled?.k === "call.settled" ? settled.data.economics?.additive.providerCharge : null, {
+			currency: "USD",
+			amount: { kind: "measured", value: 0.25, source: "provider" },
+			discrepancy: "free-route",
+		});
+		equal(reported?.k === "run.usage_reported" ? reported.data.pricing.pricedBy : null, "free");
+		equal(reported?.k === "run.usage_reported" ? reported.data.pricing.usd.measured : null, 0);
+	});
+
 	it("fails Codex turns without a valid terminal JSONL event", async () => {
 		const { root, binary } = scratch([{ type: "thread.started", thread_id: "t" }, { type: "turn.started" }]);
 		const result = await startCodexCliWorkerRun(input(root, codexCliRuntime), () => undefined, {
