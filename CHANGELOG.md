@@ -195,7 +195,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 **Safety**
 
-- An approval card for a sandbox escape whose only reason is leaving the sandbox offers "Approve for this session" (Alt+P, or Ctrl+G P), scoped to the exact script files by content hash, the cwd and the env assignments. ACP offers it as `allow-session-scope`, and contained yolo offers it on the agent's `ask_user` question that names leaving the sandbox.
+- An approval card for a sandbox escape whose only reason is leaving the sandbox offers "Approve for this session" (Alt+P, or Ctrl+G p), scoped to the exact script files by content hash, the cwd and the env assignments. ACP offers it as `allow-session-scope`, and contained yolo offers it on the agent's `ask_user` question that names leaving the sandbox.
 - `safety.liveCheckTargets` names Copilot targets whose login file the session's contained commands may read, so a live check runs without leaving the sandbox. When a judged command runs a script in the workspace or scratch roots, the safety judge reads its first 4 KiB.
 - `safety.sandboxCacheMaxGiB` (default 4) caps the sandbox cache, which is pruned daily and by `doctor --fix`.
 - `decide` with `operator_words`, a verbatim quote of what the operator typed, supersedes an operator decision without another interview.
@@ -289,8 +289,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 - The welcome screen keeps one hints page, and the rows above the composer leave the transcript a third of the terminal.
 - "Reply from <target> · <model>" appears only when the replying route changes.
-- The version banner, notices, installer output, desktop app messages and prompts name the product CLIO Coder. The `clio-coder` command, package and paths are unchanged.
-- Every remaining notice, doctor row, error, help line and desktop app message names the product CLIO Coder, and autonomous commits are authored `CLIO Coder` with the same bot email.
+- The version banner, notices, doctor rows, errors, help lines, installer output, desktop app messages and prompts name the product CLIO Coder, and autonomous commits are authored `CLIO Coder` with the same bot email. The `clio-coder` command, package and paths are unchanged.
 - The desktop app names its transcript detail tiers Compact, Standard and Detailed, as `interface.outputDetail` does.
 - ACP tool cards and permission asks title a shell call by its command and any other call as its tool and target. The outward allow option reads "Approve this outward call once".
 - ACP sends host status notices, runtime notices and the thinking clamp as `session_info_update`, not as reply text, and sends startup notices once per session.
@@ -439,6 +438,9 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - The loop guard counts `cd <cwd> && x` and `x` as the same call.
 - A session taken over by `clio-coder session terminate` says who took it and why, and the launcher prints a hosted pane's last error lines when it exits.
 - The contained-yolo notice is remembered in `home.json` and no longer writes `safety.yoloConfinement` into your `settings.yaml`.
+
+**Desktop app and ACP**
+
 - ACP replay keeps a drained steer in its turn, ends a turn at its own last entry and shows a tool card with the title and locations it streamed live. ACP answers always carry `agentInfo.version`, as ACP v1 requires.
 - The desktop app draws the yolo continuation notice in its turn, shows a reopened request as asked with its recorded time, shows the last System check at once on reload, naming the platform from the first frame instead of `Local`, and repairs a background unit an earlier version installed instead of refusing it.
 - The desktop app's guided setup creates a new home's credentials, state directories and migration record when it starts, so a home set up from a setup file shows no doctor issues and no pending migrations before its first task.
