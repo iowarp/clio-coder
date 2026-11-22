@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { resolveReviewSubject, taskBranchRefusal } from "../../src/cli/run-review.js";
 import { executeTaskLand, planTaskLand } from "../../src/tools/task-land.js";
 import { applyTaskWorktree, createTaskWorktree, settleTaskWorktree } from "../../src/tools/task-worktree.js";
 
@@ -83,5 +84,22 @@ describe("fleet land", () => {
 		strictEqual(git(root, "log", "-1", "--format=%s"), "land the crashed run");
 		strictEqual(git(root, "rev-list", "--count", "HEAD"), "2");
 		strictEqual(git(root, "show", "HEAD:c.txt"), "crashed run");
+	});
+
+	it("resolves a kept task branch for run --review in its worktree and refuses a branch the reviewer cannot see", () => {
+		const base = git(root, "rev-parse", "HEAD");
+		const task = keptTask("t4", "a.txt", "task\n");
+		const subject = resolveReviewSubject({ root, ref: "clio-coder/task/t4", agentId: "reviewer" });
+		if ("refusal" in subject) throw new Error(subject.refusal);
+		strictEqual(subject.worktree, task.path);
+		match(subject.task, /task branch clio-coder\/task\/t4 of run t4/u);
+		match(subject.task, new RegExp(`Base: ${base}`, "u"));
+		match(subject.task, /Destination: main/u);
+		match(subject.task, /edit a\.txt/u);
+		git(root, "branch", "clio-coder/task/t5");
+		const gone = resolveReviewSubject({ root, ref: "t5", agentId: "reviewer" });
+		match("refusal" in gone ? gone.refusal : "", /no kept worktree.*git worktree add/u);
+		match(taskBranchRefusal("review clio-coder/task/t4 against main", root, "reviewer") ?? "", /--review t4 /u);
+		strictEqual(taskBranchRefusal("review clio-coder/task/t4.", task.path, "reviewer"), null);
 	});
 });
