@@ -1,4 +1,7 @@
 import { SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
+import { sandboxAvailability } from "../../core/sandbox/availability.js";
+import { mainShellContained } from "../../core/sandbox/main-session.js";
+import { workerSandboxConfinesWrites } from "../../core/sandbox/worker-process.js";
 import { shellLikeArgv } from "../../core/shell-argv.js";
 import { type DeclaredCheck, defaultVerifyTimeoutMs } from "./catalog.js";
 
@@ -43,7 +46,7 @@ interface TaskGateState {
 	active: boolean;
 	gates: TaskGate[];
 	rejected: RejectedTaskGate[];
-	/** True when every command this worker spawns runs under bubblewrap with no writable roots. */
+	/** True when every command this worker spawns runs under bubblewrap, writing only inside the worker's own write roots. */
 	confined: boolean;
 	/** True when this worker could run a gate in the main-session sandbox, as main bash at default would. */
 	containable: boolean;
@@ -190,6 +193,18 @@ export function configureTaskGates(task: string, options: { confined: boolean; c
 		confined: options.confined,
 		containable: options.containable === true,
 	};
+}
+
+/**
+ * A checker worker's gates, judged by the OS sandbox its commands run in. A gate is confined when that sandbox confines
+ * every write to the worker's own write roots, as main bash's sandbox at default confines it to the workspace (M-42).
+ */
+export function configureWorkerTaskGates(task: string): void {
+	configureTaskGates(task, {
+		confined: workerSandboxConfinesWrites(),
+		// The main-session sandbox main bash would run an unrecognized gate in.
+		containable: workerSandboxConfinesWrites() && mainShellContained("auto", sandboxAvailability()),
+	});
 }
 
 /** Back to no gates: a process that is not a checker worker. */

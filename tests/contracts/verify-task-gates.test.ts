@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../src/core/safe-exec.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
+import { resolveWorkerSandboxSpec } from "../../src/core/sandbox/worker-policy.js";
+import { configureWorkerProcessSandbox } from "../../src/core/sandbox/worker-process.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStatePath } from "../../src/core/xdg.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
-import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
+import { createSafetyPolicyEngine, TASK_GATE_REFUSED_RULE_ID } from "../../src/domains/safety/policy-engine.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { renderToolPreview } from "../../src/interactive/renderers/tool-execution.js";
@@ -20,6 +22,7 @@ import { verifyTool } from "../../src/tools/verify/index.js";
 import {
 	clearTaskGates,
 	configureTaskGates,
+	configureWorkerTaskGates,
 	contractDeclaresTaskGates,
 	extractTaskGates,
 	taskGateBounds,
@@ -97,7 +100,7 @@ describe("verifier task gates", () => {
 		strictEqual(widened.kind === "error" && widened.details?.unresolved, true);
 	});
 
-	it("runs a checker's `check:` task line as a verify check, inline source only in a sandbox that writes nothing (M-42)", async () => {
+	it("runs a checker's `check:` task line as a verify check, inline source only in a worker sandbox that confines writes (M-42)", async () => {
 		const root = enter({ "m.py": "def add(a, b):\n    return a + b\n" });
 		const task = 'Without editing any file, verify m.add(1,1)==2.\ncheck: python3 -c "import m; print(m.add(1,1))"';
 		ok(contractDeclaresTaskGates("debugger-report") && !contractDeclaresTaskGates("mutation-report"));
@@ -120,6 +123,32 @@ describe("verifier task gates", () => {
 		const ran = await verify("gate-1");
 		strictEqual(ran.kind, "ok", JSON.stringify(ran));
 		if (ran.kind === "ok") match(ran.output, /\b2\b/u);
+
+		// The default checker dispatch ({agent, task}, no write roots) runs in a sandbox that writes its workspace: the
+		// gate takes the contained verdict main bash at default gives inline source. With no worker sandbox it is refused.
+		const defaultGate = () => {
+			configureWorkerTaskGates(task);
+			return createSafetyPolicyEngine({ cwd: root }).evaluate({ tool: ToolNames.Verify, args: { check: "gate-1" } });
+		};
+		const spec = resolveWorkerSandboxSpec({
+			mode: "auto",
+			readOnly: false,
+			cwd: root,
+			writeBoundaries: [],
+			network: false,
+			dependencyRoots: [],
+		});
+		deepStrictEqual(spec?.writableRoots, [root]);
+		configureWorkerProcessSandbox(spec, true);
+		try {
+			const contained = defaultGate();
+			strictEqual(contained.kind, "allow", JSON.stringify(contained));
+		} finally {
+			configureWorkerProcessSandbox(undefined);
+		}
+		const unsandboxed = defaultGate();
+		strictEqual(unsandboxed.kind, "block");
+		strictEqual(unsandboxed.ruleId, TASK_GATE_REFUSED_RULE_ID);
 	});
 
 	it("lists the gates and tells a verifier it has no shell for anything else", async () => {
@@ -136,7 +165,7 @@ describe("verifier task gates", () => {
 		ok(other.kind === "error" && /no shell/u.test(other.message) && !/use bash/u.test(other.message));
 	});
 
-	it("admits an unrecognized gate unasked only inside a sandbox that writes nothing, else as bash would", () => {
+	it("admits an unrecognized gate unasked only inside a worker sandbox that confines writes, else as bash would", () => {
 		const root = enter({});
 		const headless = (confined: boolean, task = "Run `node check.js`.") => {
 			configureTaskGates(task, { confined });

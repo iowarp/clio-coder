@@ -64,13 +64,7 @@ import {
 	responseSchemaDialectFor,
 	runtimeSpeaksResponseSchemaDialect,
 } from "../core/response-schema.js";
-import { sandboxAvailability } from "../core/sandbox/availability.js";
-import { mainShellContained } from "../core/sandbox/main-session.js";
-import {
-	workerSandboxConfinesWrites,
-	workerSandboxReadableRoots,
-	workerSandboxWritesNothing,
-} from "../core/sandbox/worker-process.js";
+import { workerSandboxReadableRoots } from "../core/sandbox/worker-process.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { isMcpToolName, type ToolName, ToolNames } from "../core/tool-names.js";
@@ -155,7 +149,7 @@ import {
 import type { TaskWorktree } from "../tools/task-worktree.js";
 import {
 	clearTaskGates,
-	configureTaskGates,
+	configureWorkerTaskGates,
 	contractDeclaresTaskGates,
 	isTaskGateCall,
 } from "../tools/verify/task-gates.js";
@@ -1089,11 +1083,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// A checker (verifier, debugger) has no shell; the gate commands its task
 	// names are what it may run through verify (task-gates.ts). Every other role sees none.
 	if (contractDeclaresTaskGates(input.resultContract?.kind)) {
-		configureTaskGates(input.task, {
-			confined: workerSandboxWritesNothing(),
-			// The main-session sandbox main bash would run an unrecognized gate in.
-			containable: workerSandboxConfinesWrites() && mainShellContained("auto", sandboxAvailability()),
-		});
+		configureWorkerTaskGates(input.task);
 	} else {
 		clearTaskGates();
 	}

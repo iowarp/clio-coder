@@ -2367,15 +2367,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		}
 		if (bash.kind === "block") return named;
 		// Interpreter source (`python3 -c ...`) hides its paths from the scan, the one ask main bash at default leaves
-		// to its sandbox. A gate in a sandbox that writes nothing takes that contained verdict, so a checker can run the
-		// command its task names (M-42); every other ask still refuses the gate.
+		// to its sandbox. A gate in a worker sandbox that confines writes to the worker's own roots takes that contained
+		// verdict, so a checker can run the command its task names (M-42); every other ask still refuses the gate.
 		if (gate.confined && bash.ruleId === HIDDEN_CONTENT_RULE_ID) {
 			const contained = evaluateOperatorDefault(bashCall, posture, {
 				level: "default",
 				scratchRoots: [],
 				sandbox: true,
 				snapshots: false,
-				readOnly: true,
 			});
 			if (contained.kind === "allow") {
 				const { shellSandbox: _ownSandbox, ...inWorkerSandbox } = contained;
@@ -3906,8 +3905,8 @@ export const TASK_GATE_REFUSED_RULE_ID = "verify-task-gate-asks";
 /**
  * A gate the verifier's dispatched task names. The scan's rails still block or
  * ask; what it passed as unrecognized becomes recognized only when the worker
- * runs it under bubblewrap with no writable roots, so the gate can change
- * nothing. Anywhere else a gate gets exactly the admission bash would give the
+ * runs it under bubblewrap confined to its own write roots, as main bash at
+ * default runs it contained. Anywhere else a gate gets exactly the admission bash would give the
  * same argv, so task text cannot carry an unrecognized command past an ask.
  */
 function taskGatePolicy<T extends Pick<SafetyPolicyDecision, "kind" | "execRecognition" | "reasons">>(
