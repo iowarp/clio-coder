@@ -6,7 +6,7 @@ import { SessionDeltaKinds as SessionDeltas } from "../../contracts/runtime.js";
 import type { SessionDelta, SessionSnapshot } from "../../contracts/sessions.js";
 import type { QueueSnapshot } from "../../contracts/steering.js";
 import { applyControl, lostControlNotice } from "../chat/control-model.js";
-import { telemetryInvalidations, telemetryRefresh } from "../telemetry/live-model.js";
+import { refreshesAtSettle, settledKey, telemetryInvalidations, telemetryRefresh } from "../telemetry/live-model.js";
 import { onTokenRejected, tokenRejected } from "./auth-state.js";
 import type { Client } from "./client.js";
 import { clock } from "./clock.js";
@@ -108,7 +108,8 @@ export function subscribe(
 	const telemetryPending = new Map<string, Set<string>>();
 	const telemetryTimers = new Map<string, () => void>();
 	/** Invalidates the keys given and any held for the session; true when the operator window moved too. */
-	const refreshTelemetry = (id: string, keys: ReadonlySet<string>) => {
+	/** `settled` is the snapshot's settle key at a turn's end; a read keyed by the key it retired is left alone. */
+	const refreshTelemetry = (id: string, keys: ReadonlySet<string>, settled?: string) => {
 		telemetryTimers.get(id)?.();
 		telemetryTimers.delete(id);
 		const due = new Set([...(telemetryPending.get(id) ?? []), ...keys]);
@@ -116,7 +117,11 @@ export function subscribe(
 		if (due.size === 0) return false;
 		telemetryRefreshed.set(id, timers.now());
 		// No cancel first: restarting an in-flight read on every push turned ten pushes into ten reads of a busy agent.
-		for (const key of due) void queries.invalidateQueries({ queryKey: [key, id] });
+		for (const key of due)
+			void queries.invalidateQueries({
+				queryKey: [key, id],
+				...(settled !== undefined ? { predicate: (query) => refreshesAtSettle(query.queryKey, settled) } : {}),
+			});
 		return due.has("telemetry");
 	};
 	const deferTelemetry = (id: string, keys: ReadonlySet<string>, delayMs: number) => {
@@ -380,7 +385,10 @@ export function subscribe(
 			const decision = finished.has(id)
 				? ({ refresh: "now" } as const)
 				: telemetryRefresh(timers.now(), telemetryRefreshed.get(id));
-			if (decision.refresh === "now") operatorMetrics = refreshTelemetry(id, keys) || operatorMetrics;
+			const turns = finished.has(id) ? queries.getQueryData<SessionSnapshot>(["session", id])?.turns : undefined;
+			if (decision.refresh === "now")
+				operatorMetrics =
+					refreshTelemetry(id, keys, turns === undefined ? undefined : settledKey(turns)) || operatorMetrics;
 			else deferTelemetry(id, keys, decision.delayMs);
 		}
 		if (operatorMetrics) invalidate.add("operator-metrics");

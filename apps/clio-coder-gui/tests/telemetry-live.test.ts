@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { createClient } from "../client/api/client.js";
 import { subscribe } from "../client/api/events.js";
 import { TELEMETRY_REFRESH_MS, telemetryInvalidations, telemetryRefresh } from "../client/telemetry/live-model.js";
@@ -336,6 +336,43 @@ test("a task start's control events, each in its own frame, read the session ove
 	assert.equal(pending.length, 1, "the burst shares one trailing overview read");
 	pending[0]?.run();
 	assert.equal(overview(invalidated.mock.calls), 1);
+});
+
+test("a turn's end leaves the usage read its settle key retires, so the move to the new key aborts nothing", async (t) => {
+	let now = 0;
+	const timers = { now: () => now, schedule: () => () => {} };
+	const queries = new QueryClient();
+	t.after(() => queries.clear());
+	const stream = await liveStream(t, queries, timers);
+	const turn = (id: string) => ({ id, status: "completed" });
+	queries.setQueryData(["session", "ending"], { turns: [turn("turn-0")] });
+	const aborted: string[] = [];
+	// What useSessionUsage reads: keyed by the newest settled turn, with the request's abort signal.
+	const usage = (settled: string) => ({
+		queryKey: ["session-usage", "ending", settled, 0],
+		queryFn: ({ signal }: { signal: AbortSignal }) => {
+			signal.addEventListener("abort", () => aborted.push(settled));
+			return setTimeout(5, { settled });
+		},
+		retry: false,
+	});
+	const observer = new QueryObserver(queries, usage("turn-0"));
+	t.after(observer.subscribe(() => {}));
+	const settledRead = async () => {
+		for (let wait = 0; wait < 100 && observer.getCurrentResult().isFetching; wait += 1) await setTimeout(1);
+	};
+	await settledRead();
+	stream.deliver(telemetryUpdate("ending", 1));
+	await settledRead();
+	now = 100;
+	stream.deliver(telemetryUpdate("ending", 2));
+	// The finished turn's fold moves the settle key in the same commit that flushes the waiting refresh.
+	queries.setQueryData(["session", "ending"], { turns: [turn("turn-0"), turn("turn-1")] });
+	stream.deliver(finishedTurn("ending", 3));
+	observer.setOptions(usage("turn-1"));
+	await settledRead();
+	assert.deepEqual(aborted, [], "no usage read is started on the retired key only to be aborted");
+	assert.deepEqual(observer.getCurrentResult().data, { settled: "turn-1" }, "the new key reads once");
 });
 
 test("a malformed event frame is skipped and the stream carries on", async (t) => {

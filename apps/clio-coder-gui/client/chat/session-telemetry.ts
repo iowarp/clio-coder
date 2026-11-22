@@ -6,6 +6,7 @@ import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { sessionReadScope } from "../api/sessions.js";
+import { settledKey } from "../telemetry/live-model.js";
 
 import { type Spend, tokensText, usageReadable } from "./session-usage-model.js";
 
@@ -15,18 +16,6 @@ const contextReadBasis = new WeakMap<ContextLedger, number>();
 
 /** How many of the retained turns have settled. The projection keeps only the newest turns, so this stops at its cap. */
 export const settledTurns = (turns: Turns): number => turns.filter((turn) => turn.status !== "running").length;
-
-/**
- * Changes on every settle, which is when the ledger and the accounting can have moved, and has no ceiling: the id
- * of the newest settled turn. A count of settled turns stops moving once the projection drops its oldest turns.
- */
-export function settledKey(turns: Turns): string {
-	for (let index = turns.length - 1; index >= 0; index--) {
-		const turn = turns[index];
-		if (turn && turn.status !== "running") return turn.id;
-	}
-	return "none";
-}
 
 /** The settle key of the session snapshot every view of this task reads, so each read of a session keys alike. */
 function useSettledKey(client: Client, sessionId: string): string {
