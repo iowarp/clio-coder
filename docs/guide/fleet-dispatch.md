@@ -512,7 +512,13 @@ rebinds the same assignment member to its actual node and cost bound, so a retry
 never queues behind or outspends its own plan slot. Admission checks the global
 pool, the node and the target's inference endpoint independently; a target's
 `maxConcurrentRequests` overrides the endpoint slot count CLIO Coder discovers, and the
-orchestrator's own streaming turn holds one endpoint slot. The schema, locking protocol,
+orchestrator's own streaming turn holds one endpoint slot. Admission also refuses a route
+whose quota pool the provider has explicitly denied, with reason `provider-quota-denied`
+naming the provider, the window, its reset and the age of the evidence
+([admission.ts](../../src/domains/dispatch/admission.ts)). It reads the shared quota cache
+without a network call, and only a fresh denial for the credential the route spends binds:
+a window at 100% that the provider did not deny, or a stale or failed reading, admits. The
+refused route is not moved to another. The schema, locking protocol,
 lease and drain lifetimes, and owner-liveness rules are specified in
 [capacity-and-scheduling.md](../architecture/capacity-and-scheduling.md).
 

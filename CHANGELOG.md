@@ -241,6 +241,8 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Call and run records carry an `economics` block with separate facts for the provider's charge, the marginal charge, a seat credit estimate, a local energy estimate and the public API price of the same usage. A fact nothing measured reads unknown with reason `not-captured`, never 0, and shared telemetry omits the block.
 - A signed-in GitHub Copilot target reports its quota in the quota readout, with Premium, Chat and Completions buckets and a percentage only where the provider reports an authoritative count.
 - A dated catalogue of public API list prices ships as `models/economy-rates.json` for comparisons; it never prices a route. `pnpm economy:check [--as-of YYYY-MM-DD]` validates it in a checkout.
+- A dispatched worker is refused its route when the provider has explicitly denied that route's quota pool, with reason `provider-quota-denied` naming the provider, the window, its reset and the age of the evidence; the pinned route is never moved to another. Only a fresh denial for the credential the route spends binds: a window at 100% that the provider did not deny, or a stale, failed or unknown reading, admits.
+- Quota readings carry a pool pseudonym (a keyed hash, under a per-install key, of the provider's billing identity, never a credential), each window's native unit and duration, and an access state that reads `denied` only on the provider's own signal. Copilot quota is also recorded from the live stream as it arrives.
 
 **Terminal UI**
 
