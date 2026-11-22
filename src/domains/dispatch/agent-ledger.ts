@@ -226,6 +226,11 @@ export interface RenderAgentLedgerOptions {
 	maxChars?: number;
 	assignments?: ReadonlyArray<LedgerAssignment>;
 	receiptFindings?: ReadonlyArray<LedgerReceiptFindings>;
+	/**
+	 * Runs whose answers the reader already holds (a dispatch or collect result prints each run's answer above the
+	 * board): their sealed findings are not repeated, and a finding post restating one of them is left out.
+	 */
+	answered?: ReadonlyArray<LedgerReceiptFindings>;
 }
 
 function authorKey(entry: AgentLedgerEntry): string {
@@ -264,7 +269,16 @@ export function renderAgentLedger(
 	opts: RenderAgentLedgerOptions = {},
 ): string {
 	const maxChars = opts.maxChars;
-	let visible = [...entries].sort((left, right) => left.sequence - right.sequence);
+	const answeredKey = (runId: string, claim: string) => `${runId}\0${oneLine(claim)}`;
+	const answered = new Set(
+		(opts.answered ?? []).flatMap((item) => [
+			...item.findings.map((finding) => answeredKey(item.runId, finding.claim)),
+			...item.ungrounded.map((claim) => answeredKey(item.runId, claim)),
+		]),
+	);
+	let visible = [...entries]
+		.filter((entry) => entry.body.kind !== "finding" || !answered.has(answeredKey(entry.runId, entry.body.claim)))
+		.sort((left, right) => left.sequence - right.sequence);
 	const assignments = (opts.assignments ?? []).map((item) => {
 		const scope =
 			item.scopeSource === "none"
