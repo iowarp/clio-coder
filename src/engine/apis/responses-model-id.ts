@@ -7,7 +7,7 @@ import {
 	type StreamOptions,
 } from "@earendil-works/pi-ai";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
-import type { CacheReadField } from "../../core/token-split.js";
+import type { CacheReadField, CacheWriteField } from "../../core/token-split.js";
 import type { CodexQuotaObservation } from "../types.js";
 import { codexAccountScope, parseCodexQuotaEvent } from "./codex-quota.js";
 import { withProxyConnectionNote } from "./proxy-connection-error.js";
@@ -23,16 +23,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const USAGE_EVENTS: ReadonlySet<unknown> = new Set(["response.completed", "response.incomplete", "response.done"]);
 
 /**
- * Whether a terminal event's usage sent a cache-read count. Pi (pi-ai 1.5.2)
- * reads only `input_tokens_details.cached_tokens` and turns its absence into
- * 0, so presence is judged on that field alone and moves with a Pi upgrade.
+ * Whether a terminal event's usage sent its cache-read and cache-write counts.
+ * Pi (pi-ai 1.5.2) reads only `input_tokens_details.cached_tokens` and
+ * `.cache_write_tokens`, turns their absence into 0 and subtracts both from the
+ * inclusive input count, so presence is judged on those fields alone and moves
+ * with a Pi upgrade.
  * Null when the event carries no usage, which Pi also leaves untouched.
  */
-function responsesCacheReadField(data: Record<string, unknown>): CacheReadField | null {
+function responsesCacheFields(
+	data: Record<string, unknown>,
+): { cacheReadField: CacheReadField; cacheWriteField: CacheWriteField } | null {
 	if (!USAGE_EVENTS.has(data.type) || !isRecord(data.response) || !isRecord(data.response.usage)) return null;
 	const details = data.response.usage.input_tokens_details;
-	const cached = isRecord(details) ? details.cached_tokens : undefined;
-	return typeof cached === "number" && Number.isFinite(cached) && cached >= 0 ? "sent" : "omitted";
+	const sent = (key: string) => {
+		const count = isRecord(details) ? details[key] : undefined;
+		return typeof count === "number" && Number.isFinite(count) && count >= 0 ? "sent" : "omitted";
+	};
+	return { cacheReadField: sent("cached_tokens"), cacheWriteField: sent("cache_write_tokens") };
 }
 
 /**
@@ -43,8 +50,9 @@ function responsesCacheReadField(data: Record<string, unknown>): CacheReadField 
  * provider had reported the model (DF-15). The completions path has its own
  * capture in `openai-completions.ts`; this is the Responses counterpart, and
  * it only annotates the terminal message, never the stream's content. It
- * also marks whether the terminal usage sent a cache-read count, as the
- * completions capture does, so an omitted count is never classified cold.
+ * also marks whether the terminal usage sent its cache-read and cache-write
+ * counts, as the completions capture does, so an omitted read is never
+ * classified cold and an omitted write never certifies the fresh input.
  * OAI-1 / #423 shares this callback and terminal annotation for sanitized Codex
  * quota events, preserving the existing transport and caller-owned callback.
  */
@@ -59,6 +67,7 @@ export function observeResponsesModelId<T extends StreamOptions>(
 	const accountScope = model.api === "openai-codex-responses" ? codexAccountScope(options?.apiKey) : null;
 	let reportedModelId: string | null = null;
 	let cacheReadField: CacheReadField = "omitted";
+	let cacheWriteField: CacheWriteField = "omitted";
 	const onProviderStreamEvent = options?.onProviderStreamEvent;
 	const source = invoke({
 		...options,
@@ -68,7 +77,8 @@ export function observeResponsesModelId<T extends StreamOptions>(
 				sawResponse = true;
 				const reported = data.response.model;
 				if (typeof reported === "string" && reported.trim().length > 0) reportedModelId = reported.trim();
-				cacheReadField = responsesCacheReadField(data) ?? cacheReadField;
+				const fields = responsesCacheFields(data);
+				if (fields) ({ cacheReadField, cacheWriteField } = fields);
 			}
 			await onProviderStreamEvent?.(data, eventModel);
 		},
@@ -81,6 +91,8 @@ export function observeResponsesModelId<T extends StreamOptions>(
 				: { state: "reported", reportedModelId };
 	// A count Pi normalized above zero was sent, whatever event shape carried it past the capture above.
 	const fieldFor = (usage: { cacheRead: number }): CacheReadField => (usage.cacheRead > 0 ? "sent" : cacheReadField);
+	const writeFieldFor = (usage: { cacheWrite: number }): CacheWriteField =>
+		usage.cacheWrite > 0 ? "sent" : cacheWriteField;
 	const output = createAssistantMessageEventStream();
 	void (async () => {
 		try {
@@ -88,9 +100,11 @@ export function observeResponsesModelId<T extends StreamOptions>(
 				if (event.type === "done") {
 					event.message.responseModelIdObservation = observation();
 					event.message.usage.cacheReadField = fieldFor(event.message.usage);
+					event.message.usage.cacheWriteField = writeFieldFor(event.message.usage);
 				} else if (event.type === "error") {
 					event.error.responseModelIdObservation = observation();
 					event.error.usage.cacheReadField = fieldFor(event.error.usage);
+					event.error.usage.cacheWriteField = writeFieldFor(event.error.usage);
 					if (event.error.errorMessage !== undefined)
 						event.error.errorMessage = withProxyConnectionNote(event.error.errorMessage, model.baseUrl);
 				}
@@ -119,6 +133,7 @@ export function observeResponsesModelId<T extends StreamOptions>(
 					totalTokens: 0,
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 					cacheReadField,
+					cacheWriteField,
 				},
 				stopReason: reason,
 				errorMessage: withProxyConnectionNote(cause instanceof Error ? cause.message : String(cause), model.baseUrl),

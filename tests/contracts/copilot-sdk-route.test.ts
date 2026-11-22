@@ -1518,6 +1518,9 @@ test("usage facts keep per-field presence and billing coverage", async () => {
 	strictEqual(partial.usage?.input.kind, "unknown", "an uncached input that may still hold cache writes");
 	strictEqual(partial.usage?.reasoning.kind, "unknown", "one of two calls omitted reasoning");
 	deepStrictEqual(partial.usage?.output, { kind: "measured", value: 2, source: "provider" });
+	deepStrictEqual(partial.usage?.cacheRead, { kind: "measured", value: 0, source: "provider" });
+	// The whole prompt and the output were sent, so the call's size stays known beside its unknown split.
+	deepStrictEqual(partial.usage?.total, { kind: "measured", value: 22, source: "provider" });
 	// PV-4: the requested model served the step, so no response model is stamped; reasoning needs every call's count.
 	const served = await step({ messages: [user("zero usage")] }, "facts-session");
 	strictEqual(served.responseModel, undefined, "the requested model served the step");

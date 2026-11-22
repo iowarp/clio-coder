@@ -69,6 +69,12 @@ export type NormalizedTokenUsage = ReturnType<typeof normalizeTokenUsage>;
 /** Whether a provider's response sent a cache-read count or omitted it, so an omitted zero is never measured. */
 export type CacheReadField = "sent" | "omitted";
 
+/**
+ * Whether a provider's response sent a cache-write count or omitted it. An adapter whose prompt count includes the
+ * writes sets it, so an omitted write count leaves both the writes and the fresh input it was subtracted from unknown.
+ */
+export type CacheWriteField = "sent" | "omitted";
+
 /** Per-call usage; `cacheReadField` is absent when the adapter does not check the field. */
 export type CallUsage = NormalizedTokenUsage & { cacheReadField?: CacheReadField };
 

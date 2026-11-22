@@ -930,7 +930,7 @@ class Step {
 	private billing: CopilotStepBilling = { premiumRequests: null, nanoAiu: null, modelCalls: 0 };
 	private toolUse: string[] | null = null;
 	private usageEvents = 0;
-	private readonly fieldReports = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+	private readonly fieldReports = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
 	private reasoningReports = 0;
 	private reasoningSum = 0;
 	/** Whether this step ran with thinking off (a non-reasoning model, or effort `none` sent), so a reasoning 0 is true. */
@@ -1154,6 +1154,8 @@ class Step {
 		if (outputTokens !== undefined) this.fieldReports.output += 1;
 		if (cacheRead !== undefined) this.fieldReports.cacheRead += 1;
 		if (cacheWrite !== undefined) this.fieldReports.cacheWrite += 1;
+		// The whole prompt plus the output is known whether or not its cached parts were split out.
+		if (inputTokens !== undefined && outputTokens !== undefined) this.fieldReports.totalTokens += 1;
 		// Reasoning is part of the output; like the fields above it counts only when every call of the step sent it.
 		const reasoning = count(data.reasoningTokens);
 		if (reasoning !== undefined) {

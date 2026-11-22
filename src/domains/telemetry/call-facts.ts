@@ -259,15 +259,15 @@ export function callSettlementFromMessage(
 	const breakdownIncomplete = providerTotal !== null && providerTotal > breakdown;
 	const totalOnly = breakdownIncomplete && breakdown === 0;
 	// An adapter that knows which counts the provider sent lists them (copilot-sdk): a listed count is the
-	// provider's measurement, and an unlisted one is unknown whatever placeholder it holds. On a call that never
-	// reached its end the lower-bound rule above still applies: a listed positive count is kept, a listed zero
-	// may only mark where the stream stopped and stays unknown.
+	// provider's measurement, and an unlisted one, the total included, is unknown whatever placeholder it holds. On a
+	// call that never reached its end the lower-bound rule above still applies: a listed positive count is kept, a
+	// listed zero may only mark where the stream stopped and stays unknown.
 	const reportedFields = Array.isArray(usage.reportedFields)
 		? new Set(usage.reportedFields.filter((field): field is string => typeof field === "string"))
 		: null;
 	const read = (key: keyof CallUsage | "totalTokens"): Fact<number> => {
 		const value = amount(usage[key]);
-		if (reportedFields !== null && key !== "totalTokens") {
+		if (reportedFields !== null) {
 			return reportedFields.has(key) && value !== null && Number.isInteger(value) && (terminal || value > 0)
 				? { kind: "measured", value, source: "provider" }
 				: unknown;
@@ -281,23 +281,34 @@ export function callSettlementFromMessage(
 		)
 			return unknown;
 		if (key === "cacheRead" && usage.cacheReadField === "omitted") return unknown;
+		// An inclusive prompt count less an omitted write count may still hold writes, so its fresh part is unknown too.
+		if ((key === "cacheWrite" || key === "input") && usage.cacheWriteField === "omitted") return unknown;
 		if (
 			value > 0 ||
 			reported ||
 			external.tokenUsage === "provider-reported" ||
-			(key === "cacheRead" && usage.cacheReadField === "sent")
+			(key === "cacheRead" && usage.cacheReadField === "sent") ||
+			(key === "cacheWrite" && usage.cacheWriteField === "sent")
 		) {
 			return { kind: "measured", value, source: "provider" };
 		}
 		return unknown;
 	};
-	const total = breakdownIncomplete ? read("totalTokens") : undefined;
 	const output = read("output");
-	const counts: CallUsage = {
+	const breakdownFacts = {
 		input: read("input"),
 		output,
 		cacheRead: read("cacheRead"),
 		cacheWrite: read("cacheWrite"),
+	};
+	// The provider's total stands beside a breakdown it exceeds or one with an unknown part, so the call's size stays
+	// known when its split is not.
+	const total =
+		breakdownIncomplete || Object.values(breakdownFacts).some((fact) => fact.kind !== "measured")
+			? read("totalTokens")
+			: undefined;
+	const counts: CallUsage = {
+		...breakdownFacts,
 		cacheWrite1h: read("cacheWrite1h"),
 		reasoning: reasoningFact(read("reasoning"), raw.content, output),
 		...(total?.kind === "measured" ? { total } : {}),

@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { test } from "node:test";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { completeEngineText, streamSimple } from "../../src/engine/ai.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { sideQuestionUsage } from "../../src/session-control/side-question.js";
@@ -15,6 +16,7 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 			for await (const chunk of request) body += String(chunk);
 			// Astra r1-6: a Responses usage without input_tokens_details is an omitted count, not a cold read.
 			const omitCache = body.includes("Omit the cache count.");
+			const omitWrite = body.includes("Omit the write count.");
 			response.writeHead(200, { "content-type": "text/event-stream" });
 			const send = (value: { type: string; [key: string]: unknown }) =>
 				response.write(`event: ${value.type}\ndata: ${JSON.stringify(value)}\n\n`);
@@ -30,7 +32,11 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 							input_tokens: 10000,
 							output_tokens: 100,
 							total_tokens: 10100,
-							...(omitCache ? {} : { input_tokens_details: { cached_tokens: 6000, cache_write_tokens: 2000 } }),
+							...(omitCache
+								? {}
+								: {
+										input_tokens_details: { cached_tokens: 6000, ...(omitWrite ? {} : { cache_write_tokens: 2000 }) },
+									}),
 						},
 					},
 				});
@@ -92,6 +98,7 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 			);
 			// PV-8: Anthropic's cache_read_input_tokens is a sent count too, so a keepalive read of zero is a miss.
 			strictEqual(usage.cacheReadField, "sent");
+			if (api === "openai-responses") strictEqual(usage.cacheWriteField, "sent");
 			const long = api === "anthropic-messages" ? 500 : undefined;
 			strictEqual(usage.cacheWrite1h, long);
 			const expectedCost = (2000 * 3 + 6000 * 0.3 + (2000 - (long ?? 0)) * 3.75 + (long ?? 0) * 6 + 100 * 15) / 1e6;
@@ -119,6 +126,23 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 					{ apiKey: "fixture", maxTokens: 100 },
 				).result();
 				deepStrictEqual([omitted.usage.cacheRead, omitted.usage.cacheReadField], [0, "omitted"]);
+				// Pi subtracts an omitted write count as 0, so the fresh input may still hold writes; the read and the
+				// provider's total stay measured.
+				const noWrite = await streamSimple(
+					model,
+					{ messages: [{ role: "user", content: "Omit the write count.", timestamp: 0 }] },
+					{ apiKey: "fixture", maxTokens: 100 },
+				).result();
+				const facts = callSettlementFromMessage(noWrite, "none").usage;
+				deepStrictEqual(
+					[facts?.input.kind, facts?.cacheWrite.kind, facts?.cacheRead, facts?.total],
+					[
+						"unknown",
+						"unknown",
+						{ kind: "measured", value: 6000, source: "provider" },
+						{ kind: "measured", value: 10100, source: "provider" },
+					],
+				);
 			}
 		} finally {
 			server.closeAllConnections();
