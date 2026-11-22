@@ -6,12 +6,29 @@ import {
 	getCatalogModelForRuntime,
 	resolveEffectivePricing,
 } from "../../src/domains/providers/catalog.js";
+import { estimateLocalEnergy } from "../../src/domains/providers/energy-accounting.js";
 import type { TariffTokens } from "../../src/domains/providers/reference-tariff.js";
 import { auditReferenceTariff, quoteReferenceTariff } from "../../src/domains/providers/reference-tariff.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import openai from "../../src/domains/providers/runtimes/cloud/openai.js";
 import { calculateEngineCost } from "../../src/engine/ai.js";
 import type { Usage } from "../../src/engine/types.js";
+
+test("local energy counts overlapping calls once and splits only the shared span", () => {
+	const energy = estimateLocalEnergy({ activeWatts: 120, idleWatts: 20 }, [
+		{ startMs: 20_000, endMs: 40_000 },
+		{ startMs: 0, endMs: 60_000 },
+	]);
+	ok(energy?.perCall && energy.value !== null);
+	const expected = 100 / 60_000;
+	const tolerance = 1e-12;
+	const [short, long] = energy.perCall;
+	ok(short?.value != null && long?.value != null);
+	ok(energy.value <= expected + tolerance && energy.value >= expected - tolerance);
+	ok(Math.abs(short.value - expected / 6) < tolerance);
+	ok(Math.abs(long.value - (expected * 5) / 6) < tolerance);
+	strictEqual(energy.cost.value, null);
+});
 
 test("catalog synthesis preserves SDK context price tiers and explicit target prices replace them", () => {
 	const catalog = getCatalogModelForRuntime("openai", "gpt-5.4");
