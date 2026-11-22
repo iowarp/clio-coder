@@ -143,6 +143,10 @@ describe("playbook CLI variables", () => {
 			const json = captured(() => runPlaybookValidate(["stage", "--var", "fixture=r7", "--json"]));
 			strictEqual(json.code, 2, json.stdout + json.stderr);
 			match(json.stdout, /"valid": false/);
+			// `playbook graph` refuses the same playbook with the same code.
+			const graph = captured(() => runPlaybookGraph(["stage", "--var", "fixture=r7"]));
+			strictEqual(graph.code, 2, graph.stdout + graph.stderr);
+			match(graph.stderr, diagnostic);
 		}
 	});
 
