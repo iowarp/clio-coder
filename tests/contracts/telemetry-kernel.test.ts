@@ -660,14 +660,23 @@ test("declared target rates price the counts of a runtime that computed no cost,
 	const cost = { total: 0, totalUncomputed: true };
 	const usage = { input: 3, output: 27, cacheRead: 9905, cacheWrite: 226, totalTokens: 10161, cost };
 	const rates = { input: 2, output: 8, cacheRead: 2, cacheWrite: 0 };
-	const copilot = (reportedFields: string[]) =>
+	const copilot = (reportedFields: string[], servedModels = ["gpt-6-luna"]) =>
 		callSettlementFromMessage(
-			{ stopReason: "stop", usage: { ...usage, reportedFields } },
+			{
+				stopReason: "stop",
+				usage: { ...usage, reportedFields },
+				copilotBilling: { premiumRequests: null, nanoAiu: null, modelCalls: 2, servedModels },
+			},
 			{ pricedBy: "target-rates", rates },
 		).pricing;
 	deepStrictEqual(copilot(["input", "output", "cacheRead", "cacheWrite"]), {
 		usd: { kind: "measured", value: (3 * 2 + 27 * 8 + 9905 * 2) / 1_000_000, source: "local-count" },
 		pricedBy: "target-rates",
+	});
+	// A step two models served is priced by neither one's rates (S4c).
+	deepStrictEqual(copilot(["input", "output", "cacheRead", "cacheWrite"], ["gpt-6-luna", "claude-haiku-4.5"]), {
+		usd: { kind: "unknown", reason: "provider-omitted" },
+		pricedBy: "none",
 	});
 	// A rated count the provider never reported cannot be priced; a zero-rated one does not matter.
 	strictEqual(copilot(["input", "output", "cacheWrite"]).usd.kind, "unknown");
@@ -772,11 +781,14 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 		strictEqual(unsent.pricing.usd.kind, "absent");
 	}
 	const error = callSettlementFromMessage(
-		{ stopReason: "error", failure: { httpStatus: 429 }, usage: { input: 5 } },
+		{ stopReason: "error", failure: { httpStatus: 429 }, usage: { input: 5, output: 0 } },
 		"none",
 	);
 	strictEqual(error.disposition, "settled");
 	strictEqual(error.stop.failure, "rate_limited");
+	// A status ends the call, not its report: the zero an errored response carries stays unknown (S4c).
+	deepStrictEqual(error.usage?.input, { kind: "measured", value: 5, source: "provider" });
+	strictEqual(error.usage?.output.kind, "unknown");
 	const dropped = callSettlementFromMessage(
 		{ stopReason: "aborted", responseId: "response", usage: { input: 5 } },
 		"target-rates",

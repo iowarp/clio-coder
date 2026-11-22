@@ -260,10 +260,14 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 	});
 
 	it("prices a reported 1h cache-write subset at its own rate on declared target rates", async () => {
-		const price = async (usage: Record<string, number>) => {
+		const price = async (
+			usage: Record<string, number>,
+			servedModels: Array<string | undefined> = [],
+			pricing: WorkerRunInput["target"]["pricing"] = { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
+		) => {
 			const run = input(tmpdir(), codexCliRuntime);
 			run.telemetryContext = { sessionId: null, runId: "ext-1h", agent: { role: "worker", id: "ext-1h" } };
-			run.target = { ...run.target, pricing: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } };
+			run.target = { ...run.target, pricing };
 			const message = bindExternalUsage(
 				{ role: "assistant", content: [], stopReason: "stop", usage } as unknown as AgentMessage,
 				{ usage, coverage: "complete" },
@@ -275,6 +279,10 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 					if (event.type === "clio_coder_telemetry") frames.push(event);
 				},
 				(emit) => {
+					servedModels.forEach((responseModel, index) => {
+						const payload = { callIndex: index + 1, usage: {}, model: "claude-haiku-4.5", responseModel };
+						emit({ type: "clio_coder_model_call", payload } as unknown as Parameters<typeof emit>[0]);
+					});
 					emit({ type: "message_end", message } as Parameters<typeof emit>[0]);
 					return { promise: Promise.resolve({ messages: [message], exitCode: 0 }), abort: () => undefined };
 				},
@@ -288,6 +296,21 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		const inconsistent = await price({ ...usage, cacheWrite1h: 6 });
 		equal(inconsistent.unknownCount, 1);
 		equal(inconsistent.measured, 0);
+		// A run two models served is never priced at one rate over its summed tokens (S4c).
+		const mixed = await price(usage, ["claude-haiku-4.5", "claude-opus-5.5"]);
+		equal(mixed.unknownCount, 1);
+		equal(mixed.measured, 0);
+		ok(Math.abs(factKnownValue(await price(usage, ["claude-haiku-4.5", "claude-haiku-4.5"])) - 32 / 1_000_000) < 1e-12);
+		// A call that reports no served model was served its requested one, which still differs from another's.
+		equal((await price(usage, [undefined, "claude-opus-5.5"])).unknownCount, 1);
+		ok(Math.abs(factKnownValue(await price(usage, [undefined, "claude-haiku-4.5"])) - 32 / 1_000_000) < 1e-12);
+		// A free or all-zero target stays a free zero however many models served it.
+		const free = await price(usage, ["claude-haiku-4.5", "claude-opus-5.5"], "free");
+		equal(free.unknownCount, 0);
+		equal(free.coverage.measured, 1);
+		equal(free.measured, 0);
+		const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		equal((await price(usage, ["claude-haiku-4.5", "claude-opus-5.5"], zero)).coverage.measured, 1);
 	});
 
 	it("fails Codex turns without a valid terminal JSONL event", async () => {

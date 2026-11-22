@@ -194,8 +194,8 @@ export function abortReasonCause(message: unknown): FailureCause | undefined {
  * Adapter placeholders are not measurements. A usage object is the provider's report once any count in it is
  * positive or the adapter marked it provider-reported; its zeros are then measured zeros (#434). An all-zero
  * object without that mark is the seed pi writes before a response arrives, and every field stays unknown.
- * A response that never reached its end keeps the positive counts its provider reported as a lower bound, and its
- * zeros stay unknown, because they may only mark where the stream stopped. A reported total above its own
+ * A response that never reached its end, aborted or errored even with a status, keeps the positive counts its
+ * provider reported as a lower bound, and its zeros stay unknown, because they may only mark where the stream stopped. A reported total above its own
  * breakdown is kept beside it. A settled breakdown keeps its measured zeros even then, because Gemini's total also
  * counts tool-use prompt tokens that Pi maps to no field; only a breakdown with no count at all, the legacy
  * total-only row, leaves its zeros unknown.
@@ -252,6 +252,9 @@ export function callSettlementFromMessage(
 	const stop = typeof raw.settledStopReason === "string" ? raw.settledStopReason : raw.stopReason;
 	const reason = stop === "stop" || stop === "toolUse" || stop === "length" || stop === "aborted" ? stop : "error";
 	const terminal = (reason !== "error" && reason !== "aborted") || typeof failure.httpStatus === "number";
+	// Only a response that ran to its end can measure an unlisted zero; an aborted or errored one, even one that
+	// carried a status, may have stopped before its provider reported that count.
+	const completed = reason !== "error" && reason !== "aborted";
 	const providerTotal = amount(usage.totalTokens);
 	const breakdown = (["input", "output", "cacheRead", "cacheWrite"] as const).reduce(
 		(sum, key) => sum + (amount(usage[key]) ?? 0),
@@ -273,7 +276,7 @@ export function callSettlementFromMessage(
 				? { kind: "measured", value, source: "provider" }
 				: unknown;
 		}
-		if (value === 0 && (!terminal || totalOnly)) return unknown;
+		if (value === 0 && (!completed || totalOnly)) return unknown;
 		if (
 			usage.estimated === true ||
 			(usage.clioExternal !== undefined && external.tokenUsage !== "provider-reported") ||
@@ -324,9 +327,13 @@ export function callSettlementFromMessage(
 	const cost = record(usage.cost);
 	const usd = amount(cost.total);
 	const providerCost = usd !== null && (external.cost === "provider-reported" || cost.totalFromProvider === true);
+	const servedModels = record(raw.copilotBilling).servedModels;
+	const mixedModels = Array.isArray(servedModels) && new Set(servedModels).size > 1;
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };
 	if (neverSent) pricing = { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" };
 	else if (pricedBy === "free") pricing = pricedUsd("free", 0, freeRule);
+	// A step whose calls different models served is priced by none of their rates, nor its total by one tier.
+	else if (mixedModels && !providerCost) pricing = { usd: unknown, pricedBy: "none" };
 	else if (observed && pricedBy === "target-rates" && !providerCost && (usd === null || cost.totalUncomputed === true)) {
 		// A runtime that computed no cost (copilot-sdk marks its seeded zero totalUncomputed) is priced from its settled
 		// counts at the declared rates, so a settlement handed no rates leaves the amount unknown (#434). A runtime that
