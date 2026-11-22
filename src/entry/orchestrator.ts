@@ -11,7 +11,7 @@ import { noteMainRunV2, startRunOutput, writeRunDiagnostic } from "../cli/run-fa
 import { setToolEnvAutonomy, startLoginEnvCapture } from "../core/bash-exec.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
-import { type ClioSettings, readSettings, recordYoloConfinementOnce } from "../core/config.js";
+import { type ClioSettings, readSettings } from "../core/config.js";
 import {
 	DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 	interfaceGuidanceEnabled,
@@ -40,11 +40,7 @@ import {
 import { sandboxAvailability } from "../core/sandbox/availability.js";
 import { mainSandboxEnvPolicy } from "../core/sandbox/env-scrub.js";
 import { createGitHooksFingerprinter } from "../core/sandbox/git-hooks-fingerprint.js";
-import {
-	mainShellContained,
-	yoloContainedMigrationNotice,
-	yoloScriptSandboxState,
-} from "../core/sandbox/main-session.js";
+import { mainShellContained, yoloScriptSandboxState } from "../core/sandbox/main-session.js";
 import {
 	resolveMemoryRoute,
 	routingChangeNotices,
@@ -94,7 +90,12 @@ import {
 	isLoadableExtension,
 } from "../domains/extensions/index.js";
 import { InteropDomainModule } from "../domains/interop/index.js";
-import { describeUpgradeNotice, ensureClioState, hadOldYolo, takeUpgradeNotice } from "../domains/lifecycle/index.js";
+import {
+	describeUpgradeNotice,
+	ensureClioState,
+	takeContainedYoloNotice,
+	takeUpgradeNotice,
+} from "../domains/lifecycle/index.js";
 import {
 	createBackgroundCallJournal,
 	createBackgroundMemoryRouting,
@@ -2079,17 +2080,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			yoloHeldAtBoot = true;
 		}
 	}
-	// Yolo became contained (ob-yolo D1). A home that has not recorded its confinement hears it once (interactive after
-	// accepting yolo, headless on a yolo run); only one upgraded from before contained yolo hears of a change.
-	if (
-		yoloRefusal === null &&
-		(interactive ? savedSafety.yoloAccepted === true : startupAutonomy === "yolo") &&
-		savedSafety.yoloConfinement !== "unconfined" &&
-		recordYoloConfinementOnce()
-	) {
-		const notice = yoloContainedMigrationNotice(savedSafety, sandboxAvailability(), hadOldYolo());
-		if (interactive) initialNotices.push(notice);
-		else process.stderr.write(`clio-coder: ${notice}\n`);
+	// Yolo became contained (ob-yolo D1): the lifecycle domain says so once per home (interactive after accepting yolo,
+	// headless on a yolo run), remembered in its own state and never in the operator's settings.
+	const yoloNotice =
+		yoloRefusal === null && (interactive ? savedSafety.yoloAccepted === true : startupAutonomy === "yolo")
+			? takeContainedYoloNotice(savedSafety)
+			: null;
+	if (yoloNotice !== null) {
+		if (interactive) initialNotices.push(yoloNotice);
+		else process.stderr.write(`clio-coder: ${yoloNotice}\n`);
 	}
 	const startupOverrides: SessionOverrides = new Map(
 		bootAutonomy === undefined ? [] : [["safety.autonomy", bootAutonomy]],

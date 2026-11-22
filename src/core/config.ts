@@ -2968,31 +2968,16 @@ export function updateSavedSettingsDocument(
 }
 
 /**
- * Record `safety.yoloConfinement: contained` in the operator's user settings
- * when the file has no confinement yet, so the migration notice shows once.
- * Returns true only when this call wrote it. An unreadable or unwritable file
- * writes nothing and returns false.
+ * Whether the operator's user settings leave `safety.yoloConfinement` unnamed, so the one-time contained-yolo notice
+ * still has something to say. Reads only: the notice is remembered in lifecycle state, never in this file.
  */
-export function recordYoloConfinementOnce(): boolean {
-	const unrecorded = (saved: unknown): saved is Record<string, unknown> & { safety?: Record<string, unknown> } => {
-		if (saved === null || typeof saved !== "object" || Array.isArray(saved)) return false;
-		const safety = (saved as { safety?: unknown }).safety;
-		if (safety === undefined) return true;
-		return safety !== null && typeof safety === "object" && !Array.isArray(safety) && !("yoloConfinement" in safety);
-	};
-	if (!existsSync(settingsPath()) || !unrecorded(readSavedDocument())) return false;
-	let wrote = false;
-	try {
-		updateSavedSettingsDocument((saved) => {
-			if (!unrecorded(saved)) return saved;
-			saved.safety = { ...(saved.safety ?? {}), yoloConfinement: "contained" };
-			wrote = true;
-			return saved;
-		});
-	} catch {
-		return false;
-	}
-	return wrote;
+export function savedYoloConfinementUnnamed(): boolean {
+	if (!existsSync(settingsPath())) return false;
+	const saved = readSavedDocument();
+	if (saved === null || typeof saved !== "object" || Array.isArray(saved)) return false;
+	const safety = (saved as { safety?: unknown }).safety;
+	if (safety === undefined) return true;
+	return safety !== null && typeof safety === "object" && !Array.isArray(safety) && !("yoloConfinement" in safety);
 }
 
 /**

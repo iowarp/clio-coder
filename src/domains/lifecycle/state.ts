@@ -1,7 +1,10 @@
 import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type ClioSettings, savedYoloConfinementUnnamed } from "../../core/config.js";
 import { initializeClioHome } from "../../core/init.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { sandboxAvailability } from "../../core/sandbox/availability.js";
+import { yoloContainedMigrationNotice } from "../../core/sandbox/main-session.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStatePath } from "../../core/xdg.js";
 import { compareReleaseVersions } from "./release-version.js";
@@ -17,6 +20,8 @@ export interface StateInfo {
 	upgradedFrom?: string;
 	/** The version whose upgrade notice has already been shown once. */
 	noticedVersion?: string;
+	/** When the one-time contained-yolo notice was shown; the operator's settings never carry that memory. */
+	containedYoloNoticedAt?: string;
 	platform: string;
 	nodeVersion: string;
 }
@@ -124,4 +129,39 @@ export function takeUpgradeNotice(): UpgradeTransition | null {
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * The one-time contained-yolo notice this boot owes the operator, or null, claimed by stamping
+ * `containedYoloNoticedAt` in `home.json`. User settings that name their own `safety.yoloConfinement` already chose
+ * and hear nothing. A notice comes back only when this call wrote the claim, so a record that cannot be rewritten
+ * stays silent rather than repeating; the operator's settings file is never written. Only a home upgraded from
+ * before contained yolo hears of a change.
+ */
+export function takeContainedYoloNotice(safety: ClioSettings["safety"]): string | null {
+	if (safety.yoloConfinement === "unconfined" || !savedYoloConfinementUnnamed()) return null;
+	const path = join(clioStatePath(), "home.json");
+	let claimed = false;
+	try {
+		claimed = withStateFileLockSync(
+			path,
+			() => {
+				const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+				if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+				const raw = parsed as Record<string, unknown>;
+				if (raw.containedYoloNoticedAt !== undefined) return false;
+				safeResourceWrite(
+					path,
+					`${JSON.stringify({ ...raw, containedYoloNoticedAt: new Date().toISOString() }, null, 2)}\n`,
+					{ encoding: "utf8", mode: 0o600 },
+				);
+				chmodSync(path, 0o600);
+				return true;
+			},
+			{ timeoutMs: 50 },
+		);
+	} catch {
+		return null;
+	}
+	return claimed ? yoloContainedMigrationNotice(safety, sandboxAvailability(), hadOldYolo()) : null;
 }
