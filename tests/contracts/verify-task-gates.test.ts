@@ -123,6 +123,8 @@ describe("verifier task gates", () => {
 		const ran = await verify("gate-1");
 		strictEqual(ran.kind, "ok", JSON.stringify(ran));
 		if (ran.kind === "ok") match(ran.output, /\b2\b/u);
+		// A no-edit checker's gate leaves no interpreter cache behind, so its observed delta stays empty.
+		strictEqual(existsSync(join(root, "__pycache__")), false);
 
 		// The default checker dispatch ({agent, task}, no write roots) runs in a sandbox that writes its workspace: the
 		// gate takes the contained verdict main bash at default gives inline source. With no worker sandbox it is refused.

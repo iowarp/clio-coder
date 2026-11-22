@@ -223,6 +223,15 @@ export interface VerifyRunOptions {
 	workspaceRoot?: string;
 }
 
+/**
+ * What every verify check adds to the safe tool environment. A check observes the tree and does not author it: an
+ * interpreter's bytecode cache written beside the sources (`__pycache__/*.pyc`) is a change nobody made, which a
+ * no-edit checker's observed checkout delta then reported as the checker's mutation.
+ */
+function verifyCheckEnv(extra?: Record<string, string>): Record<string, string> {
+	return { PYTHONDONTWRITEBYTECODE: "1", ...extra };
+}
+
 /** The main-session sandbox's write hint for a contained check's failed output, on its own line, or "". */
 function sandboxHint(output: string, options: VerifyRunOptions | undefined): string {
 	const hint = options?.shellSandbox === undefined ? null : mainSandboxWriteHint(output, options.shellSandbox);
@@ -250,7 +259,7 @@ export async function runToolchainCheck(
 		file,
 		vector,
 		{ ...args, cwd, timeout_ms: typeof args.timeout_ms === "number" ? args.timeout_ms : check.timeoutMs },
-		{ ...options, truncateOutputOnly: true },
+		{ ...options, env: verifyCheckEnv(), truncateOutputOnly: true },
 	);
 	return withDeclaredEvidence(result, { ...check, command: [...argv] });
 }
@@ -273,7 +282,7 @@ export async function runTaskGateCheck(
 		file,
 		vector,
 		{ cwd: process.cwd(), ...bounds },
-		{ ...options, truncateOutputOnly: true },
+		{ ...options, env: verifyCheckEnv(), truncateOutputOnly: true },
 	);
 	return withDeclaredEvidence(result, { ...check, timeoutMs: bounds.timeout_ms });
 }
@@ -737,7 +746,7 @@ async function runJudgedCheck(
 				...(options?.workspaceRoot !== undefined ? { workspaceRoot: options.workspaceRoot } : {}),
 				timeoutMs: check.timeoutMs,
 				maxOutputBytes: JUDGED_CHECK_MAX_OUTPUT_BYTES,
-				...(numeric?.seed !== undefined ? { env: { [numeric.seed.env]: numeric.seed.value } } : {}),
+				env: verifyCheckEnv(numeric?.seed !== undefined ? { [numeric.seed.env]: numeric.seed.value } : undefined),
 				...(options?.signal !== undefined ? { signal: options.signal } : {}),
 				...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
 			});
@@ -887,7 +896,13 @@ export async function runProjectCheck(check: DeclaredCheck, options?: VerifyRunO
 	}
 	if (check.proof !== undefined)
 		return withDeclaredEvidence(await runProofCheck(check, file, vector, cwd, options), check);
-	const result = await runVectorTool("verify", file, vector, { cwd, timeout_ms: check.timeoutMs }, options);
+	const result = await runVectorTool(
+		"verify",
+		file,
+		vector,
+		{ cwd, timeout_ms: check.timeoutMs },
+		{ ...options, env: verifyCheckEnv() },
+	);
 	return withDeclaredEvidence(result, check);
 }
 
@@ -954,7 +969,7 @@ async function runProofCheck(
 			file,
 			vector,
 			{ cwd, timeout_ms: check.timeoutMs },
-			{ ...options, shellSandbox: { ...sandbox, network: false } },
+			{ ...options, env: verifyCheckEnv(), shellSandbox: { ...sandbox, network: false } },
 		);
 		if (result.kind === "error") return result;
 		if (
@@ -1009,6 +1024,7 @@ export async function recordPerfBaseline(
 			cwd,
 			timeoutMs: check.timeoutMs,
 			maxOutputBytes: JUDGED_CHECK_MAX_OUTPUT_BYTES,
+			env: verifyCheckEnv(),
 			...(options?.signal !== undefined ? { signal: options.signal } : {}),
 		});
 	} catch (error) {
@@ -1087,7 +1103,7 @@ export async function runScriptCheck(
 				"npm",
 				vector,
 				{ ...args, cwd, timeout_ms: timeoutMs },
-				{ ...options, truncateOutputOnly: true },
+				{ ...options, env: verifyCheckEnv(), truncateOutputOnly: true },
 			),
 			check,
 			["npm", ...vector],
