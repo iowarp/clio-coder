@@ -90,8 +90,9 @@ describe("resolveEffectivePricing", () => {
 				renderPricingSum(sumPricing([pricedUsd("free", 0, "local-native"), pricedUsd("free", 0, "declared")])),
 				renderPricingSum(sumPricing([pricedUsd("free", 0, "declared"), pricedUsd("free", 0, "zero-rates")])),
 				renderPricingSum(sumPricing([pricedUsd("free", 0, undefined)])),
+				renderPricingSum(sumPricing([pricedUsd("free", 0, "local-native"), pricedUsd("free", 0, undefined)])),
 			],
-			["$0.00 local", "$0.00 free (mixed)", "$0.00 free (mixed)", "$0.00 free (mixed)"],
+			["$0.00 local", "$0.00 free (mixed)", "$0.00 free (mixed)", "$0.00 free", "$0.00 free"],
 		);
 	});
 

@@ -1258,9 +1258,18 @@ const SIDE_CALL_ROLES: CallFilter["roles"] = [
 ];
 
 /** The `--output-format text` stderr line: session, outcome, requests, tokens in/out and spend. */
-function runTextSummaryLine(sessionId: string | null, outcome: RunOutcome, usage: Pick<RunCallUsage, "sums">): string {
+function runTextSummaryLine(
+	sessionId: string | null,
+	outcome: RunOutcome,
+	usage: Pick<RunCallUsage, "sums" | "facts" | "freeRuleMixed">,
+): string {
 	const { apiCalls, usd, usage: tokens } = usage.sums;
-	const cost = usd.coverage.measured === 0 && usd.coverage.estimated === 0 ? "unpriced" : renderUsdSum(usd, false);
+	const pricing = usage.facts.pricing;
+	const free = pricing.pricedBy === "free";
+	const cost =
+		usd.coverage.measured === 0 && usd.coverage.estimated === 0
+			? "unpriced"
+			: renderUsdSum(usd, free, free ? pricing.freeRule : undefined, free && usage.freeRuleMixed === true);
 	return `clio-coder run: session ${sessionId ?? "none"} · ${outcome} · ${renderCompactCount(apiCalls)} requests · ${renderCompactCount(tokens.input)}/${renderCompactCount(tokens.output)} tokens · ${cost}\n`;
 }
 

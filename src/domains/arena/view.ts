@@ -162,7 +162,9 @@ export function arenaMatchView(
 							durationMs: facts?.durationMs ?? null,
 							sessionId: facts?.sessionId ?? null,
 							tokens: facts?.totalTokens ? renderCompactCount(facts.totalTokens) : "not measured",
-							cost: facts?.cost ? renderUsdSum(facts.cost.usd, facts.cost.free, facts.cost.freeRule) : "not measured",
+							cost: facts?.cost
+								? renderUsdSum(facts.cost.usd, facts.cost.free, facts.cost.freeRule, facts.cost.freeRuleMixed)
+								: "not measured",
 						}
 					: null,
 		};

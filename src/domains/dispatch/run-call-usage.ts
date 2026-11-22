@@ -4,7 +4,12 @@ import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EstimateMethod, Fact, FactSum } from "../../core/telemetry/fact.js";
 import { readWorkerTelemetryRecord } from "../../core/telemetry/forwarder.js";
-import { agreedFreeRule, type RunSpendSums, sumFacts, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
+import {
+	freeRuleAgreement,
+	type RunSpendSums,
+	sumFacts,
+	unobservedRunUsageFacts,
+} from "../../core/telemetry/pricing.js";
 import { abandonedSettlement } from "../../core/telemetry/producer.js";
 import type { CallSettled, RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { CallTotals, FoldOptions } from "../telemetry/folds.js";
@@ -20,6 +25,8 @@ export interface RunCallUsage {
 	sums: RunSpendSums;
 	/** The same fold as one fact per quantity, as run.settled records it (#434). */
 	facts: RunUsageFacts;
+	/** True only when a free run's parts carried two or more different recorded free rules. */
+	freeRuleMixed?: boolean;
 }
 
 export type { RunUsageFacts };
@@ -98,20 +105,22 @@ function weakestPricedBy(used: Set<RunUsageFacts["pricing"]["pricedBy"]>): RunUs
 }
 
 type PricingBasisOf = Pick<RunUsageFacts["pricing"], "pricedBy" | "freeRule">;
+type PricingBasisResult = { basis: PricingBasisOf; freeRuleMixed: boolean };
 
-/** The weakest pricing of the parts, keeping a free rule only when the run is free and every part states that rule. */
-function runPricingBasis(parts: readonly PricingBasisOf[]): PricingBasisOf {
+/** The weakest pricing of the parts, keeping a free rule only when every part states it and flagging mixed only when recorded rules disagree. */
+function runPricingBasis(parts: readonly PricingBasisOf[]): PricingBasisResult {
 	const pricedBy = weakestPricedBy(new Set(parts.map((part) => part.pricedBy)));
-	const freeRule = pricedBy === "free" ? agreedFreeRule(parts) : undefined;
-	return freeRule !== undefined ? { pricedBy, freeRule } : { pricedBy };
+	const agreement = pricedBy === "free" ? freeRuleAgreement(parts) : undefined;
+	const basis: PricingBasisOf = agreement?.rule !== undefined ? { pricedBy, freeRule: agreement.rule } : { pricedBy };
+	return { basis, freeRuleMixed: agreement?.mixed === true };
 }
 
 /** The pricing behind the contributions the fold counted: a whole-scope snapshot replaces calls and parts (#434). */
 function pricingBasisOf(
 	records: readonly TelemetryRecord[],
 	folded: ReturnType<typeof foldRunJournal>,
-): PricingBasisOf {
-	if (folded.source === "conflict") return { pricedBy: "none" };
+): PricingBasisResult {
+	if (folded.source === "conflict") return { basis: { pricedBy: "none" }, freeRuleMixed: false };
 	if (folded.source === "aggregate") return runPricingBasis(folded.aggregate ? [folded.aggregate.pricing] : []);
 	const used: PricingBasisOf[] = [];
 	for (const attempt of folded.calls.attempts)
@@ -122,29 +131,40 @@ function pricingBasisOf(
 	return runPricingBasis(used);
 }
 
-function runUsageFacts(records: readonly TelemetryRecord[], folded: ReturnType<typeof foldRunJournal>): RunUsageFacts {
+function runUsageFacts(
+	records: readonly TelemetryRecord[],
+	folded: ReturnType<typeof foldRunJournal>,
+): { facts: RunUsageFacts; freeRuleMixed: boolean } {
 	const provenance = provenanceOf(records.map((record) => record.data));
 	const field = (key: string, sum: FactSum, fallback: MeasuredSource = "provider") =>
 		collapse(sum, provenance.get(key), fallback);
+	const pricing = pricingBasisOf(records, folded);
 	return {
-		usage: {
-			input: field("input", folded.usage.input),
-			cacheRead: field("cacheRead", folded.usage.cacheRead),
-			cacheWrite: field("cacheWrite", folded.usage.cacheWrite),
-			cacheWrite1h: field("cacheWrite1h", folded.usage.cacheWrite1h),
-			output: field("output", folded.usage.output),
-			reasoning: field("reasoning", folded.usage.reasoning),
+		facts: {
+			usage: {
+				input: field("input", folded.usage.input),
+				cacheRead: field("cacheRead", folded.usage.cacheRead),
+				cacheWrite: field("cacheWrite", folded.usage.cacheWrite),
+				cacheWrite1h: field("cacheWrite1h", folded.usage.cacheWrite1h),
+				output: field("output", folded.usage.output),
+				reasoning: field("reasoning", folded.usage.reasoning),
+			},
+			totalTokens: field("totalTokens", folded.totalTokens),
+			apiCalls: field("apiCalls", folded.apiCalls, "local-count"),
+			pricing: { usd: field("usd", folded.usd, "local-count"), ...pricing.basis },
 		},
-		totalTokens: field("totalTokens", folded.totalTokens),
-		apiCalls: field("apiCalls", folded.apiCalls, "local-count"),
-		pricing: { usd: field("usd", folded.usd, "local-count"), ...pricingBasisOf(records, folded) },
+		freeRuleMixed: pricing.freeRuleMixed,
 	};
 }
 
 export type CallSpend = Pick<CallSettled, "disposition" | "usage" | "pricing">;
 
 /** A run's spend from settlements a host holds outside a run journal, such as a headless main agent's calls (#434). */
-export function runUsageFromCalls(calls: readonly CallSpend[]): { facts: RunUsageFacts; sums: RunSpendSums } {
+export function runUsageFromCalls(calls: readonly CallSpend[]): {
+	facts: RunUsageFacts;
+	sums: RunSpendSums;
+	freeRuleMixed?: boolean;
+} {
 	const totals = emptyCallTotals();
 	for (const call of calls) addCallTotals(totals, call);
 	const provenance = provenanceOf(calls);
@@ -152,6 +172,7 @@ export function runUsageFromCalls(calls: readonly CallSpend[]): { facts: RunUsag
 		collapse(sum, provenance.get(key), fallback);
 	const sent = calls.filter((call) => call.disposition !== "never_sent");
 	const apiCalls: Fact<number> = { kind: "measured", value: sent.length, source: "local-count" };
+	const pricing = runPricingBasis(sent.map((call) => call.pricing));
 	const facts: RunUsageFacts = {
 		usage: {
 			input: field("input", totals.usage.input),
@@ -165,12 +186,13 @@ export function runUsageFromCalls(calls: readonly CallSpend[]): { facts: RunUsag
 		apiCalls,
 		pricing: {
 			usd: field("usd", totals.usd, "local-count"),
-			...runPricingBasis(sent.map((call) => call.pricing)),
+			...pricing.basis,
 		},
 	};
 	return {
 		facts,
 		sums: { usage: totals.usage, totalTokens: totals.totalTokens, apiCalls: sumFacts([apiCalls]), usd: totals.usd },
+		...(pricing.freeRuleMixed ? { freeRuleMixed: true } : {}),
 	};
 }
 
@@ -178,13 +200,15 @@ export function runUsageFromCalls(calls: readonly CallSpend[]): { facts: RunUsag
 export function runUsageFromCallRecords(input: Iterable<TelemetryRecord>, options: FoldOptions = {}): RunCallUsage {
 	const records = [...input];
 	const folded = foldRunJournal(records, options);
+	const { facts, freeRuleMixed } = runUsageFacts(records, folded);
 	return {
 		callIds: [...new Set(folded.calls.attempts.map(({ started }) => started.callId))].sort(),
 		callFacts: folded.calls.totals,
 		usageFacts: folded.usage,
 		coverageUnknown: folded.unknownCoverage,
 		sums: { usage: folded.usage, totalTokens: folded.totalTokens, apiCalls: folded.apiCalls, usd: folded.usd },
-		facts: runUsageFacts(records, folded),
+		facts,
+		...(freeRuleMixed ? { freeRuleMixed: true } : {}),
 	};
 }
 
