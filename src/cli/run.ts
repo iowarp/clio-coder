@@ -14,7 +14,6 @@ import { setRunDeadline } from "../core/termination-phase.js";
 import { clioDataDir } from "../core/xdg.js";
 import { autonomyCeilingRefusal, yoloRootRefusal } from "../core/yolo-host.js";
 import type { isUserOriginAudienceRefusal } from "../domains/agents/spec.js";
-import { assignmentNotRetried } from "../domains/dispatch/assignment.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { RunResult } from "../domains/dispatch/types.js";
@@ -1145,6 +1144,9 @@ async function runDispatch(
 		const recording = parsed.record === true ? dispatch.getRun(receipt.runId)?.recording : undefined;
 		// A failed run says why its assignment ran no further attempt; settlement lands with the durable writes (row 371).
 		if (receipt.exitCode !== 0) await dispatch.assignments?.flushWrites?.();
+		// Loaded here, after boot: assignment.ts reaches execution-role.ts and its recipe rules, which a top-level import
+		// pulled into the pre-boot closure (1,745,013 > 1,300,000 bytes, instant-shell-import-graph).
+		const { assignmentNotRetried } = await import("../domains/dispatch/assignment.js");
 		const notRetried = assignmentNotRetried(dispatch.assignments?.get(receipt.runId), receipt);
 		// SPEC 6.8 (review H02): the host validates the sealed receipt's final answer once. A worker that already failed
 		// keeps its own cause; a mismatch is exit 1 schema_mismatch and the receipt stays the one attempt.
