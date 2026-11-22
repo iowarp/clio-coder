@@ -274,8 +274,16 @@ function loadShipped(): LoadedCatalog {
 	return shipped;
 }
 
+/**
+ * The UTC day of an instant. A string must open with a real calendar day (ISO 8601): `Date` silently rolls
+ * 2026-11-31 into 2026-12-01, and non-ISO strings parse however the engine likes.
+ */
 function utcDay(date: string | Date): string | null {
-	if (typeof date === "string" && isDay(date)) return date;
+	if (typeof date === "string") {
+		const day = date.slice(0, 10);
+		if (!isDay(day)) return null;
+		if (date.length === 10) return day;
+	}
 	const parsed = typeof date === "string" ? new Date(date) : date;
 	return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
@@ -306,7 +314,7 @@ function writeRate(row: TariffRow, rates: TariffRates, retention: string): bigin
 			.join(", ");
 		return `cache-write retention unknown and ${row.id} write rates differ (${listed})`;
 	}
-	const rate = rates.cacheWrite[retention];
+	const rate = Object.hasOwn(rates.cacheWrite, retention) ? rates.cacheWrite[retention] : undefined;
 	return rate === undefined
 		? `${row.id} publishes no ${retention} cache-write rate (${Object.keys(rates.cacheWrite).join(", ")})`
 		: (rateMicros(rate) as bigint);
@@ -404,8 +412,10 @@ export function quoteReferenceTariff(
 }
 
 /**
- * Validates the shipped catalog (shape, units, thresholds, overlaps, gaps) and, as of `asOf`, flags models with no
- * row yet (future-only), expired promotions and rows verified more than 30 days ago.
+ * Validates the shipped catalog (shape, units, thresholds, overlaps, gaps) and, as of `asOf`, errors on a model with
+ * no standard row effective that day, unless a promotion effective that day ends where an announced standard row
+ * starts (the row `quoteReferenceTariff` quotes as `announced-list`). Warns on expired promotions and rows verified
+ * more than 30 days ago.
  */
 export function auditReferenceTariff(asOf: string): {
 	rows: readonly TariffRow[];
@@ -421,9 +431,17 @@ export function auditReferenceTariff(asOf: string): {
 		const standard = rows.filter((row) => row.model === model && row.kind === "standard");
 		if (standard.length === 0) errors.push(`${model}: missing a standard list price row`);
 		else if (!standard.some((row) => effectiveOn(row, asOf))) {
+			const bridged = rows.some(
+				(row) =>
+					row.model === model &&
+					row.kind === "promo" &&
+					effectiveOn(row, asOf) &&
+					standard.some((list) => list.effectiveFrom === row.effectiveTo),
+			);
+			if (bridged) continue;
 			const later = standard.filter((row) => row.effectiveFrom > asOf);
 			if (later.length > 0)
-				warnings.push(`${model}: future-only on ${asOf}; standard list price starts ${later[0]?.effectiveFrom}`);
+				errors.push(`${model}: future-only on ${asOf}; standard list price starts ${later[0]?.effectiveFrom}`);
 			else errors.push(`${model}: missing; every standard row ended before ${asOf}`);
 		}
 	}

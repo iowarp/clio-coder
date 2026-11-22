@@ -95,7 +95,7 @@
 					}
 				]
 			},
-			"notes": ["Cache reads cost 0.05x the input price; 5-minute writes 1.25x and 1-hour writes 2x."]
+			"notes": ["Cache reads cost 0.1x the input price; 5-minute writes 1.25x and 1-hour writes 2x."]
 		},
 		{
 			"id": "openai/gpt-6.2-sol@2026-11-22",

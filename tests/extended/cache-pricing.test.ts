@@ -141,4 +141,17 @@ test("reference tariff quotes the dated list price per request and refuses what 
 	deepStrictEqual(usd(carbon, "2026-12-01", "gemini-4-carbon"), [0.069, "base", "effective", "2026-12-01"]);
 	deepStrictEqual(usd(carbon, "2026-12-01", "gemini-4-carbon", promo), "unknown");
 	deepStrictEqual(usd(witness, "2026-11-22", "gpt-6.2-terra"), "unknown");
+	deepStrictEqual(usd(witness, "2026-11-31"), "unknown", "an invalid calendar day never rolls into December");
+	deepStrictEqual(usd(witness, "2026-11-31T10:00:00Z"), "unknown");
+	deepStrictEqual(usd({ ...witness, write: { toString: 5_000 } }), "unknown", "an inherited name is no retention");
+	const early = auditReferenceTariff("2026-11-21").errors;
+	const models = new Set(auditReferenceTariff("2026-11-22").rows.map((row) => row.model));
+	deepStrictEqual(
+		early,
+		[...models].map((model) => {
+			const starts = model === "gemini-4-carbon" ? "2026-12-01" : "2026-11-22";
+			return `${model}: future-only on 2026-11-21; standard list price starts ${starts}`;
+		}),
+	);
+	deepStrictEqual(auditReferenceTariff("2026-11-30").errors, [], "the Carbon promotion bridges to its announced row");
 });
