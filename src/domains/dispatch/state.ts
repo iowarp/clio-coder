@@ -27,10 +27,11 @@ import { resolveGuardrail } from "../../core/guardrails.js";
 import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { spendSumsOf, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
+import { EXECUTION_ROLE_VOCABULARY, gatePositionRole } from "../../core/telemetry/run-vocabulary.js";
 import { RunSpendSumsSchema, RunUsageFactsSchema } from "../../core/telemetry/schemas.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
-import { type AgentRoleFactsResolver, recordedRoleIsCurrent } from "./execution-role.js";
+import type { ExecutionRole } from "./execution-role.js";
 import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { removeRunFeeds } from "./run-feed.js";
 import type { RunEnvelope, RunStatus } from "./types.js";
@@ -56,8 +57,31 @@ export interface FleetRunRecord {
 
 export interface LedgerOptions {
 	maxRuns?: number;
-	/** Recipe facts for the role rule; without them only the vocabulary and gate positions judge a row's role. */
-	roleFacts?: AgentRoleFactsResolver;
+	/**
+	 * The roles the role rule assigns an agent's ungated runs (`agentRunRoles` over its recipe facts), null for an
+	 * agent unknown here. Without it only the vocabulary and gate positions judge a row's role. The caller resolves the
+	 * recipe rules so this reader never loads them (row 363).
+	 */
+	agentRoles?: AgentRolesResolver;
+}
+
+/** An agent's ungated role populations, or null when its recipe is unknown. */
+export type AgentRolesResolver = (agentId: string) => ReadonlyArray<ExecutionRole> | null;
+
+const UNGATED_ROLES: ReadonlyArray<ExecutionRole> = ["builder", "explorer", "checker"];
+
+/**
+ * Whether a recorded run's role is one the rule can assign it (row 352). A name outside the current vocabulary
+ * (`researcher`, `verifier`) never is; a gate position fixes its role; otherwise the role is one of the agent's
+ * populations, or any ungated role when its recipe is unknown here. Recovery is any agent's.
+ */
+function recordedRoleIsCurrent(run: RunEnvelope, agentRoles?: AgentRolesResolver): boolean {
+	const role: unknown = run.executionRole;
+	if (!(EXECUTION_ROLE_VOCABULARY as ReadonlyArray<unknown>).includes(role)) return false;
+	if (role === "recovery") return true;
+	const gated = gatePositionRole(run.gate?.role);
+	if (gated !== null) return role === gated;
+	return (agentRoles?.(run.agentId) ?? UNGATED_ROLES).includes(run.executionRole);
 }
 
 export type CreateRunInput = Omit<
@@ -209,7 +233,7 @@ function rowChecks(rows: number): { spend: RowCheck; sums: RowCheck } {
 	return compiledRowChecks;
 }
 
-function readRuns(path = runsPath(), roleFacts?: AgentRoleFactsResolver): RunEnvelope[] {
+function readRuns(path = runsPath(), agentRoles?: AgentRolesResolver): RunEnvelope[] {
 	if (!existsSync(path)) return [];
 	const raw = readFileSync(path, "utf8").trim();
 	if (raw.length === 0) return [];
@@ -224,7 +248,7 @@ function readRuns(path = runsPath(), roleFacts?: AgentRoleFactsResolver): RunEnv
 		const run = entry as unknown as RunEnvelope;
 		// A row whose role the rule no longer assigns is dropped, never relabeled; adaptive routing relearns that
 		// population (row 352). A live row is its writer's own state, so only a finished row answers to the recipe.
-		if (!recordedRoleIsCurrent(run, run.endedAt === null ? undefined : roleFacts)) continue;
+		if (!recordedRoleIsCurrent(run, run.endedAt === null ? undefined : agentRoles)) continue;
 		envelopes.push(run);
 	}
 	return envelopes;
@@ -378,7 +402,7 @@ function fileStamp(path: string): string | null {
 }
 
 export function openLedger(opts?: LedgerOptions): Ledger {
-	let runs: RunEnvelope[] = readRuns(runsPath(), opts?.roleFacts);
+	let runs: RunEnvelope[] = readRuns(runsPath(), opts?.agentRoles);
 	// Ids this process has written since the last successful persist. See
 	// mergeRunsById: this is what separates our writes from a sibling's rows we
 	// merely read at open time.
@@ -484,7 +508,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			// already in ring order and within the cap would rewrite runs.json byte for byte under the lock with two
 			// fsyncs, so it adopts those rows instead. A lowered cap still evicts through the write below.
 			if (dirty.size === 0) {
-				const disk = readRuns(runsPath(), opts?.roleFacts);
+				const disk = readRuns(runsPath(), opts?.agentRoles);
 				const capped = capRuns(mergeRunsById(disk, runs, dirty), resolveMaxRuns(opts?.maxRuns));
 				if (capped.length === disk.length && capped.every((run, index) => run === disk[index])) {
 					runs = capped;
@@ -495,7 +519,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			await withRunsLock(target, async () => {
 				if (stateRootRemoved()) return;
 				const unchanged = lastWrite !== null && lastWrite.path === target && lastWrite.stamp === fileStamp(target);
-				const diskRuns = unchanged && lastWrite !== null ? lastWrite.rows : readRuns(runsPath(), opts?.roleFacts);
+				const diskRuns = unchanged && lastWrite !== null ? lastWrite.rows : readRuns(runsPath(), opts?.agentRoles);
 				const merged = mergeRunsById(diskRuns, runs, dirty);
 				const capped = capRuns(merged, resolveMaxRuns(opts?.maxRuns));
 				runs = capped;
@@ -547,7 +571,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 		},
 
 		reload(): void {
-			runs = readRuns(runsPath(), opts?.roleFacts);
+			runs = readRuns(runsPath(), opts?.agentRoles);
 			// The mirror was just replaced wholesale, so any unpersisted claim is gone.
 			dirty.clear();
 		},

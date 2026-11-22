@@ -389,6 +389,7 @@ import type { ExecutionHandoff } from "./execution-handoff.js";
 import { abbreviateHandoffText } from "./execution-handoff.js";
 import {
 	agentRoleFactsResolver,
+	agentRunRoles,
 	dispatchResultContract,
 	requestRunRole,
 	routeCorrelationFactsForRun,
@@ -12487,7 +12488,11 @@ export function createDispatchBundle(
 				get maxRuns() {
 					return getEffectiveSettings()?.fleet?.history?.maxRuns ?? resolveGuardrail("maxDispatchRuns");
 				},
-				roleFacts: agentRoleFactsResolver((id) => agents.getSpec(id)),
+				agentRoles: (agentId) =>
+					agentRunRoles(
+						agentId,
+						agentRoleFactsResolver((id) => agents.getSpec(id)),
+					),
 			});
 			ledger = runLedger;
 			const recoverRuns = async (): Promise<void> => {
