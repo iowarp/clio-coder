@@ -885,6 +885,25 @@ function shownUntil(text: string, from: number): number {
 	return at;
 }
 
+/**
+ * A call whose input is still streaming. Copilot sends a call's arguments as input deltas and again whole with the
+ * message; until the deltas parse, `partialJson` holds them and marks the arguments as not yet final, which the
+ * tool-call flood check skips (row 385). The message replaces the block, so the mark never reaches the transcript.
+ */
+type StreamingToolCall = ToolCall & { partialJson?: string };
+const CLOSING_BRACE = /\}\s*$/u;
+
+function wholeArguments(text: string): ToolCall["arguments"] | undefined {
+	try {
+		const parsed: unknown = JSON.parse(text);
+		return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+			? (parsed as ToolCall["arguments"])
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** Drive one model step: forward root-agent output into the Clio stream and end it at the step boundary. */
 class Step {
 	readonly message: AssistantMessage & {
@@ -1023,10 +1042,24 @@ class Step {
 		if (index === undefined) {
 			index = this.message.content.length;
 			this.streamingToolCalls.set(id, index);
-			this.message.content.push({ type: "toolCall", id, name: name ?? "", arguments: {} });
+			const placeholder: StreamingToolCall = { type: "toolCall", id, name: name ?? "", arguments: {}, partialJson: "" };
+			this.message.content.push(placeholder);
 			this.stream.push({ type: "toolcall_start", contentIndex: index, partial: this.message });
 		}
-		if (delta.length > 0) this.stream.push({ type: "toolcall_delta", contentIndex: index, delta, partial: this.message });
+		if (delta.length === 0) return;
+		// The call's arguments become its parsed input once that input is whole JSON; until then the block carries the
+		// text so far as `partialJson`, the mark of a call whose arguments are not yet final (row 385).
+		const block = this.message.content[index] as StreamingToolCall;
+		if (block.partialJson !== undefined) {
+			block.partialJson += delta;
+			// Whole JSON input ends in a brace, so a long input is parsed only at the deltas that could close it.
+			const parsed = CLOSING_BRACE.test(delta) ? wholeArguments(block.partialJson) : undefined;
+			if (parsed !== undefined) {
+				block.arguments = parsed;
+				delete block.partialJson;
+			}
+		}
+		this.stream.push({ type: "toolcall_delta", contentIndex: index, delta, partial: this.message });
 	}
 
 	/** Text that arrives only with the message (narration, unstreamed content) still reads before the calls it introduces. */

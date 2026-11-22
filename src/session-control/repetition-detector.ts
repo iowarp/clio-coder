@@ -122,7 +122,11 @@ export type ToolCallFloodAssessment =
 	| { kind: "ok" }
 	| { kind: "flooding"; toolName: string; repeats: number; path?: string };
 
-/** Judge the first `completeBlocks` content blocks of a streamed message, the ones whose arguments are final. */
+/**
+ * Judge the first `completeBlocks` content blocks of a streamed message, the ones whose arguments are final. A call
+ * that still carries `partialJson` is streaming its arguments (the copilot-sdk adapter keeps a call's streamed input
+ * there until it parses) and waits: its arguments are judged once final, by the time its message lands (row 385).
+ */
 export function assessToolCallFlood(message: unknown, completeBlocks: number): ToolCallFloodAssessment {
 	const content = (message as { content?: unknown } | null | undefined)?.content;
 	if (!Array.isArray(content)) return { kind: "ok" };
@@ -131,8 +135,9 @@ export function assessToolCallFlood(message: unknown, completeBlocks: number): T
 		type?: unknown;
 		name?: unknown;
 		arguments?: unknown;
+		partialJson?: unknown;
 	}>) {
-		if (block?.type !== "toolCall" || typeof block.name !== "string") continue;
+		if (block?.type !== "toolCall" || typeof block.name !== "string" || typeof block.partialJson === "string") continue;
 		const args = (JSON.stringify(block.arguments ?? {}) ?? "").replace(/\s+/gu, " ").slice(0, FLOOD_ARGUMENT_CHARS);
 		const key = `${block.name}\n${args}`;
 		const repeats = (counts.get(key) ?? 0) + 1;
