@@ -152,9 +152,9 @@ The worker compiler runs after target capability and tool-profile admission. Can
 
 Project context, memory, bounded dispatch briefing, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. A briefing is a separately delimited message labeled as untrusted task context/data; it is never concatenated into the task or stable system prompt. Dynamic ordering is project, safety, memory, briefing, the agent board, then predecessor handoffs and pipeline input, with pipeline input last. The board follows everything a batch's members share because its roster lists the members admitted so far, so it differs per member; the shared-prefix stagger groups members by their prompt without the board. These messages do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.
 
-## Eight planes, forty-two builtin tools
+## Eight planes, forty-four builtin tools
 
-The canonical builtin catalog contains 42 tools organized in eight planes. A
+The canonical builtin catalog contains 44 tools organized in eight planes. A
 particular session or worker receives the subset whose dependencies and policy
 allow it to register. The policy table records each tool's plane, action class, size posture, and concurrency rule; tools within a plane can differ.
 [policy.ts](../../src/tools/policy.ts) asserts these invariants at bootstrap, so drift between
@@ -171,6 +171,7 @@ so a tool whose declared action class disagrees with its plane or with the safet
 | OBSERVE | `evidence`, `store` | read | sequential |
 | MUTATE | `write`, `edit` | write | sequential |
 | EXECUTE | `bash`, `verify`, `run_script` | execute | sequential |
+| EXECUTE | `browser` | execute | sequential |
 | EXECUTE | `git` | read | sequential |
 | ORCHESTRATE | `dispatch`, `steer`, `job` | dispatch | sequential |
 | ORCHESTRATE | `monitor` | read | parallel |
@@ -180,6 +181,7 @@ so a tool whose declared action class disagrees with its plane or with the safet
 | ORCHESTRATE | `music` | read | sequential |
 | ORCHESTRATE | `limitation`, `consult` | read | parallel |
 | ORCHESTRATE | `decide`, `finish` | read | sequential |
+| ORCHESTRATE | `memory_note` | read | sequential |
 | ORCHESTRATE | `self_compact` | read | sequential |
 | RETRIEVE | `web_read`, `web_fetch` | read | parallel |
 | INTERACT | `ask_user`, `report` | read | sequential |
