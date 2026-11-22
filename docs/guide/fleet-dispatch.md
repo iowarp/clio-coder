@@ -1184,7 +1184,7 @@ on macOS does not count as covering the run for this purpose
 
 A write worker whose change needs a path outside its write roots stops before editing
 and calls `limitation` with reason `write-root`, the paths it needs (relative to the
-run's working directory) and a scope. That attempt ends `worker_no_work`, and its detail
+run's working directory) and a scope. That attempt ends `worker_not_done`, and its detail
 names the paths. When the dispatch came from a main session that answers worker
 requests, the assignment stays open on a main-authority request whose `tool` is
 `write_roots`. The request is pushed like any worker ask (the `approval.requested` event
@@ -1876,7 +1876,7 @@ Independent quality evidence arrives late or never, so every entry also carries 
 | `settled` | Meaning for the operator |
 | --- | --- |
 | `success` | The run's outcome is `succeeded`. |
-| An outcome code | The run's `outcomeCode`, the most specific failure class: `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `result_contract_invalid`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_partial_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked` or `vram_capacity_fit_failure`. |
+| An outcome code | The run's `outcomeCode`, the most specific failure class: `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `result_contract_invalid`, `worker_final_output_missing`, `host_verification_rejected`, `obligation_unmet`, `worker_not_done`, `worker_partial_work`, `assurance_compromised`, `worker_run_timeout`, `exploration_stalled`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked` or `vram_capacity_fit_failure`. |
 | `permission_required` | No outcome code, and the outcome detail opens with `permission_required`: the worker ended on its refusal limit or the `fail` posture. |
 | `failure` | The outcome is `failed` with neither of the above. |
 | An outcome | Any other run outcome, unchanged: `timed_out`, `stalled`, `canceled`, `denied_by_policy` or `spawn_failed`. |
@@ -2039,9 +2039,11 @@ A finished run's record is its own telemetry scope at `<stateDir>/telemetry/runs
   `worker_final_output_missing` (an otherwise
   successful worker exited without a nonempty final answer),
   `host_verification_rejected` (a declared host check rejected the settled tree),
-  `worker_no_work` (an edit worker finished without doing its assignment),
-  `worker_partial_work` (an edit worker changed files but its report opens by saying
-  it could not finish),
+  `obligation_unmet` (the run left its evidence obligation unmet),
+  `worker_not_done` (an edit worker declared it did not finish and changed nothing),
+  `worker_partial_work` (an edit worker changed files but declared its assignment
+  partly done or not done),
+  `assurance_compromised` (a builder's own validation failed or a check it claimed never ran),
   `worker_mutation_blocked`, `merge_withheld` (a task worktree was preserved instead
   of merged because of one of the five gate cases above), `worker_removed_tests` (a
   run in the current checkout removed existing test cases that the task did not ask to

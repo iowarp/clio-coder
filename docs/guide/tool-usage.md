@@ -701,14 +701,14 @@ A fleet loop's `check` step without an explicit gate runs, after the registered 
 - When the runner for a changed test is known but cannot start, such as a derived Python runner that needs provisioning, the test is not run and the check fails. The message names the runner, the reason and any operator provisioning command, and the loop does not attempt a repair because no edit can make the runner start.
 - Identical runner and argv pairs run once. Each changed-test run is bounded by the time left in the registered command's timeout, and a nonzero exit fails the check.
 
-### Task gates in a verifier worker
+### Task gates in a checker worker
 
-A dispatched worker whose result is a verifier report, such as the `verifier` recipe, has no shell. Each inline code span in its task that reads as one plain command becomes a check it can run as `verify(check="gate-1")`, `gate-2` and so on, or by the command's exact text. Source: [task-gates.ts](../../src/tools/verify/task-gates.ts). No other role and no main session gets these checks.
+A dispatched checker, a worker whose result is a verifier or debugger report (the `verifier` and `debugger` recipes), has no shell. Each task line `check: <command>` and each inline code span in its task that reads as one plain command becomes a check it can run as `verify(check="gate-1")`, `gate-2` and so on, or by the command's exact text. A `check:` line always declares a command, so a line that is not one is refused with the reason; task prose is never scanned for commands. Source: [task-gates.ts](../../src/tools/verify/task-gates.ts). No other role and no main session gets these checks.
 
-- A task declares at most 8 gates. A span is at most 400 characters, every word is a bare word (letters, digits and `_ = . / : -`), and fenced code blocks are not read. A one-word span counts only for `pytest`, `tox`, `nox`, `make`, `ctest`, `ninja`, `just`, `mypy` and `ruff`.
+- A task declares at most 8 gates. A span is at most 400 characters and parses as one plain command; a quoted argument stays one word, because the safety scan judges the argv shell-quoted, and a word holding a control character is refused. Fenced code blocks are not read. A one-word inline span counts only for `pytest`, `tox`, `nox`, `make`, `ctest`, `ninja`, `just`, `mypy` and `ruff`.
 - A span that starts with an environment assignment, or with a program that changes Git or the file tree, reaches the network or wraps another command (`git`, `sudo`, `env`, `xargs`, `rm`, `mv`, `cp`, `curl`, `ssh`, `bash`, `sh` and similar), is not a gate. Calling it by its text returns the reason.
 - A gate runs from the workspace root with no extra arguments. `timeout_ms` can shorten its time limit and is capped at 600000 ms.
-- A gate gets the admission `bash` would give the same command. One that `bash` would run contained runs in the same sandbox. One that `bash` would ask about never runs, and the refusal tells the worker to report it unverified with the reason. In a `--read-only` verifier run a gate executes inside a sandbox that writes nothing.
+- A gate gets the admission `bash` would give the same command. One that `bash` would run contained runs in the same sandbox. When the worker's OS sandbox confines every write to its own write roots, a gate whose source hides its paths (a `python3 -c` check) runs there, as main `bash` runs it at default; that applies to the hidden-content ask only. A gate `bash` would ask about for any other reason never runs, and the refusal tells the worker to report it unverified with the reason. In a `--read-only` checker run a gate executes inside a sandbox that writes nothing.
 
 ### Project verifier catalog
 
