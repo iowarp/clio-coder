@@ -11,7 +11,7 @@ import { inlineShellScript, type ShellToken, scanShellLikeDeep } from "./protect
 export const SETTINGS_AUTHORITY_RULE_ID = "settings-authority";
 
 export const SETTINGS_AUTHORITY_REASON =
-	"Clio's settings, credentials and trust change only through the operator: propose a settings change with configure_clio, which shows the operator the exact diff, and ask the operator to run credential commands such as `clio-coder auth login` themselves";
+	"CLIO Coder's settings, credentials and trust change only through the operator: propose a settings change with configure_clio, which shows the operator the exact diff, and ask the operator to run credential commands such as `clio-coder auth login` themselves";
 
 const LAUNCHER_PATH =
 	/(?:^|\/)(?:@iowarp\/)?clio-coder[^/]*\/(?:.*\/)?(?:dist\/cli\/index\.js|src\/cli\/index\.ts|bin\/clio-coder\.cjs)$/u;

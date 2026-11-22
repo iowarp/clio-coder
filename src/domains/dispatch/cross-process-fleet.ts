@@ -471,7 +471,7 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 		}
 		for (const run of [...followed.values()]) {
 			if (probe(run.owner) === "gone") {
-				endRun(run, "dead", "the Clio process that owned this run exited");
+				endRun(run, "dead", "the CLIO Coder process that owned this run exited");
 				continue;
 			}
 			if (readFeed(run)) continue;
@@ -514,7 +514,7 @@ export function createCrossProcessFleet(deps: CrossProcessFleetDeps): CrossProce
 		},
 		cancelForeign(runId, reason) {
 			if (!followed.has(runId)) return false;
-			writeRunCancelRequest(runId, reason ?? `canceled from another Clio session (pid ${process.pid})`);
+			writeRunCancelRequest(runId, reason ?? `canceled from another CLIO Coder session (pid ${process.pid})`);
 			return true;
 		},
 		poll,

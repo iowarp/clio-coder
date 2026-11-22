@@ -4574,7 +4574,7 @@ export function createDispatchBundle(
 	 */
 	const answeredElsewhere = new Map<string, ForeignAnswerOrigin>();
 	const answeredElsewhereReason = (decision: "approve" | "deny", origin: ForeignAnswerOrigin): string =>
-		`${decision === "approve" ? "approved" : "denied"} by the operator in another Clio process (pid ${origin.pid}${origin.host !== null ? ` on ${origin.host}` : ""})`;
+		`${decision === "approve" ? "approved" : "denied"} by the operator in another CLIO Coder process (pid ${origin.pid}${origin.host !== null ? ` on ${origin.host}` : ""})`;
 	const publishGrantChange = (record: GrantRecord, previous: GrantState | null): void => {
 		const origin = `worker:${record.runId}`;
 		const fallback = grantRunFallbacks.get(record.runId) ?? "deny";

@@ -18,9 +18,9 @@ export function captureWorkspaceCheckpoint(cwd: string, ref: string, message: st
 	const directory = mkdtempSync(join(tmpdir(), "clio-coder-checkpoint-index-"));
 	const env = buildSafeToolEnv({
 		GIT_INDEX_FILE: join(directory, "index"),
-		GIT_AUTHOR_NAME: "Clio checkpoint",
+		GIT_AUTHOR_NAME: "CLIO Coder checkpoint",
 		GIT_AUTHOR_EMAIL: "checkpoint@clio.invalid",
-		GIT_COMMITTER_NAME: "Clio checkpoint",
+		GIT_COMMITTER_NAME: "CLIO Coder checkpoint",
 		GIT_COMMITTER_EMAIL: "checkpoint@clio.invalid",
 	});
 	const config = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"];
