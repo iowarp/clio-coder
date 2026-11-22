@@ -432,9 +432,14 @@ function toolResultObservation(
 	const isError = obj?.isError === true || obj?.error === true;
 	const isBlocked = (obj !== null && isRefusedVerdict(obj)) || chainStepBlocked(obj);
 	const path = observedPath(op, args, context.cwd);
-	const surfaced = shouldParseSurfaced(op, args, isError)
-		? surfacedPaths(op, args, toolResultText(obj?.result ?? entry.payload), path, context.cwd)
-		: [];
+	// A read naming several files (`paths`) has no one path; its files are indexed as surfaced, like a listing's.
+	const named = op === "read" && Array.isArray(args?.paths) ? args.paths : null;
+	const surfaced =
+		named !== null
+			? named.filter((item): item is string => typeof item === "string").map((item) => canonicalize(item, context.cwd))
+			: shouldParseSurfaced(op, args, isError)
+				? surfacedPaths(op, args, toolResultText(obj?.result ?? entry.payload), path, context.cwd)
+				: [];
 	return {
 		ref: { entry: entry.turnId },
 		toolCallId,

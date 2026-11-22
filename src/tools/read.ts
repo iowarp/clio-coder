@@ -26,7 +26,7 @@ import {
 } from "./observation.js";
 import { resolveReadPath } from "./path-utils.js";
 import type { DocumentKind } from "./read-documents/index.js";
-import { READ_PATHS_MAX, readPathsShapeError } from "./read-fan-out.js";
+import { MALFORMED_READ_PATHS, READ_PATHS_MAX, readPathsShapeError } from "./read-fan-out.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { toolResultContextText } from "./result-disposition.js";
 import { isSessionOffloadPath } from "./result-shaping.js";
@@ -891,6 +891,8 @@ export const readTool: ToolSpec = {
 	async run(args, options): Promise<ToolResult> {
 		// The registry expands `paths` into single-path reads before admission, so each path meets the safety
 		// policy as its own call. A caller that reaches the body with the array still set never went through that.
+		const malformed = args[MALFORMED_READ_PATHS];
+		if (typeof malformed === "string") return { kind: "error", message: malformed };
 		if (Array.isArray(args.paths) && args.paths.length > 0) {
 			return {
 				kind: "error",

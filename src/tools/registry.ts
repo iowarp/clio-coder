@@ -93,11 +93,14 @@ import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js"
 import { settleObservationCharge } from "./observation.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
 import {
+	createReadFanOutBudget,
 	joinReadFanOut,
+	malformedReadPathsCall,
 	READ_PATHS_MIN_SLICE_BYTES,
 	type ReadFanOutEntry,
 	readFanOut,
 	readFanOutCapBytes,
+	readFanOutText,
 } from "./read-fan-out.js";
 import { type ToolResultDigest, type ToolResultDisposition, toolResultContextText } from "./result-disposition.js";
 import { DEFAULT_TOOL_RESULT_MAX_BYTES, shapeToolResult, toolResultDigestFor } from "./result-shaping.js";
@@ -3105,23 +3108,27 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		async invoke(call, options) {
 			// A multi-path read is N single-path reads: each takes the single-call entry, so admission, the safety
 			// policy, denial memory, hooks and the observation pool all see one path per call, as they always have.
-			const fanOut = call.tool === ToolNames.Read ? readFanOut(call.args) : null;
+			if (call.tool !== ToolNames.Read) return invokeSingle(call, options);
+			// A malformed `paths` never travels on: admission and the loop middleware see a read with no path.
+			const malformed = malformedReadPathsCall(call.args);
+			if (malformed !== null) return invokeSingle({ tool: ToolNames.Read, args: malformed }, options);
+			const fanOut = readFanOut(call.args);
 			if (fanOut === null) return invokeSingle(call, options);
+			const cap = readFanOutCapBytes();
+			const budget = createReadFanOutBudget(fanOut.paths, cap);
 			const reads: ReadFanOutEntry[] = [];
-			let left = readFanOutCapBytes();
 			for (const path of fanOut.paths) {
-				if (reads.length > 0 && (left < READ_PATHS_MIN_SLICE_BYTES || options?.signal?.aborted === true)) {
-					reads.push({ path, verdict: null });
-					continue;
-				}
-				const verdict = await invokeSingle(
-					{ tool: ToolNames.Read, args: { ...fanOut.shared, path } },
-					{ ...options, readCapBytes: left },
-				);
-				reads.push({ path, verdict });
-				if (verdict.kind === "ok" && verdict.result.kind === "ok") left -= Buffer.byteLength(verdict.result.output);
+				const room = budget.open(path);
+				const verdict =
+					(reads.length > 0 && room < READ_PATHS_MIN_SLICE_BYTES) || options?.signal?.aborted === true
+						? null
+						: await invokeSingle(
+								{ tool: ToolNames.Read, args: { ...fanOut.shared, path } },
+								{ ...options, readCapBytes: Math.max(room, READ_PATHS_MIN_SLICE_BYTES) },
+							);
+				reads.push({ path, verdict, text: budget.settle(readFanOutText(verdict)) });
 			}
-			return joinReadFanOut(reads);
+			return joinReadFanOut(reads, cap);
 		},
 		async requestReadRootApproval(root, options, task) {
 			return withRegistryScope(options, async () => {
