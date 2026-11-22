@@ -226,6 +226,7 @@ function writeOutputFile(resolved: string, bytes: string): boolean {
 function settledAnswer(seen: SeenFrames): string {
 	const main = mainRunNote.answer?.();
 	if (main !== undefined) return main;
+	if (agentAnswer !== undefined) return agentAnswer;
 	const answer = turnAnswer(seen.answerEntries);
 	return answer.text.length > 0 ? answer.text : answer.narration;
 }
@@ -336,6 +337,14 @@ export function noteRunCompletion(completion: RunCompletionV2): void {
 
 /** A `run --agent` run's completion from its sealed receipt (CLI-P58); the envelope carries it, `--exit-code` does not read it. */
 let agentCompletion: RunCompletionV2 | undefined;
+
+/** A settled `run --agent` run's answer in words (row 362); its sealed report stays on the receipt. */
+let agentAnswer: string | undefined;
+
+/** The settled `run --agent` run hands over the answer text mode prints; a no-op for v1 runs. */
+export function noteAgentAnswer(text: string): void {
+	if (v2Started !== null) agentAnswer = text;
+}
 
 /** The settled `run --agent` run hands over its completion; a no-op for v1 runs. */
 export function noteAgentRunCompletion(completion: RunCompletionV2): void {
@@ -645,6 +654,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	runPlan = undefined;
 	runCompletion = undefined;
 	agentCompletion = undefined;
+	agentAnswer = undefined;
 	let written = false;
 	let outputTarget: string | undefined;
 	const envelopeLines = (code: number, extra: RunExitFact[] = []): { lines: string; exitCode: number } => {

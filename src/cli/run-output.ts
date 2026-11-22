@@ -217,13 +217,21 @@ export function sealedReportAnswer(
 }
 
 /** The human answer, settled evidence limits, and the run result line in that order. */
-export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunResult): string {
-	// A worker whose last words were its sealed JSON report reads in the words the report holds, as the card does.
+/**
+ * A `run --agent` worker's answer in words, as text mode prints it and the v2 envelope's `result.text` holds it. A
+ * worker whose last words were its sealed JSON report reads in the words the report holds, as the card does; the
+ * report itself stays on the receipt's `output.structured`.
+ */
+export function dispatchAnswerText(streamedAnswer: string, receipt: RunResult): string {
 	const streamedReport = receipt.output?.structured !== undefined && /^\s*\{[\s\S]*\}\s*$/u.test(streamedAnswer);
 	const whole = streamedAnswer.length > 0 && !streamedReport ? streamedAnswer : sealedResultAnswer(receipt);
 	// A run that never settled a final message can have stopped inside a URL, so what it holds stays hidden (#446).
 	const cutOff = receipt.output === undefined ? receipt.exitCode !== 0 : receipt.output.state === "partial";
-	const answer = cutOff ? holdCutOffText(whole) : whole;
+	return redactUrlCredentials(cutOff ? holdCutOffText(whole) : whole);
+}
+
+export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunResult): string {
+	const answer = dispatchAnswerText(streamedAnswer, receipt);
 	const limitations = sealedResultLimitations(receipt);
 	const verifier = verifierVerdict(receipt);
 	const executed = [...(verifier?.failedChecks ?? []), ...executedCodeFailures(receipt)];

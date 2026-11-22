@@ -33,6 +33,7 @@ import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } 
 import { loadScriptedAnswers } from "./run-answers.js";
 import {
 	completionExitCode,
+	noteAgentAnswer,
 	noteAgentRunCompletion,
 	noteStructuredV2,
 	noteTextAnswer,
@@ -856,7 +857,9 @@ async function runDispatch(
 	const { TelemetryDomainModule } = await import("../domains/telemetry/index.js");
 	const { assistantTextFromEvent } = await import("../tools/dispatch-event-text.js");
 	const { createJsonCredentialScrub, projectDispatchJsonEvent } = await import("./modes/json-stream.js");
-	const { agentRunCompletion, formatDispatchHumanOutput, verifierVerdict } = await import("./run-output.js");
+	const { agentRunCompletion, dispatchAnswerText, formatDispatchHumanOutput, verifierVerdict } = await import(
+		"./run-output.js"
+	);
 	const { createCliWorkerHooks } = await import("./worker-extension-hooks.js");
 
 	ensureClioState();
@@ -1157,8 +1160,10 @@ async function runDispatch(
 				? null
 				: await schemaCheck.finish.validateStructuredAnswer(
 						schemaCheck.schema,
+		const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
 						redactUrlCredentials(receipt.output?.state === "final" ? receipt.output.text : ""),
 					);
+			noteAgentAnswer(dispatchAnswerText(answer, receipt));
 		const schemaMismatch = structuredVerdict !== null && !structuredVerdict.ok;
 		if (schemaCheck !== undefined) {
 			noteStructuredV2({
@@ -1179,7 +1184,6 @@ async function runDispatch(
 			}))
 				writeAgentFrame(frame);
 		} else {
-			const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
 			// CLI-P22: `-o` holds the validated JSON or the worker's redacted answer, as it does under v2.
 			noteTextAnswer(structuredVerdict?.ok === true ? structuredVerdict.json : redactUrlCredentials(answer));
 			if (structuredVerdict?.ok === true) process.stdout.write(`${structuredVerdict.json}\n`);
