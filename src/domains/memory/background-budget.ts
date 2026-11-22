@@ -68,7 +68,9 @@ export interface BackgroundRouteFacts {
 function backgroundRouteKind(route: BackgroundRouteFacts): BackgroundRouteKind {
 	const subscription =
 		route.runtime.auth === "oauth" || route.runtime.auth === "claude-cli" || route.runtime.tier === "subscription";
-	if (subscription && route.quotaProviderId !== null) return "quota";
+	// Copilot quota readings can be advisory or carry only unlimited buckets (windows: []); keep
+	// background memory admission on the endpoint-capacity path rather than gating on quota windows.
+	if (subscription && route.quotaProviderId !== null && route.quotaProviderId !== "copilot") return "quota";
 	if (route.pricedBy === "free") return "local";
 	// Chat and System One admission treat a Pi catalog estimate as paid, so an
 	// api-key cloud target without declared pricing is metered here too.

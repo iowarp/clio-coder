@@ -35,6 +35,7 @@ import { loadTaskBankSnapshot, saveTaskBankSnapshot } from "../../src/domains/me
 import type { MemoryClaim, MemoryRecord } from "../../src/domains/memory/types.js";
 import { resolveEffectivePricing } from "../../src/domains/providers/catalog.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
+import { quotaProviderIdForRuntime } from "../../src/domains/quota/registry.js";
 
 const roots: string[] = [];
 const VALIDATE = "node check.mjs --mode native";
@@ -550,6 +551,25 @@ describe("memory guardian gate", () => {
 			runtime: { auth: "api-key", tier: "protocol" },
 			quotaProviderId: null,
 		} as const;
+		const copilot = {
+			pricedBy: "none",
+			rates: null,
+			runtime: { auth: "none", tier: "subscription" },
+			quotaProviderId: quotaProviderIdForRuntime("copilot-sdk"),
+		} as const;
+		const copilotAllUnlimited = {
+			snapshot: {
+				providerId: "copilot",
+				displayName: "GitHub Copilot",
+				status: "ok" as const,
+				plan: null,
+				windows: [],
+				credits: { display: "Premium: unlimited (authoritative)", usedPct: null },
+				fetchedAt: "2026-10-06T11:58:00.000Z",
+			},
+			stale: false,
+			retryUntil: null,
+		};
 		const window = (usedPct: number) => ({
 			snapshot: {
 				providerId: "codex",
@@ -660,6 +680,16 @@ describe("memory guardian gate", () => {
 			[
 				"unpriced proxy",
 				{ route: unpriced, session: { spendUsd: 400, ceilingUsd: 5 } },
+				{ admit: true, kind: "unpriced", timeoutMs: 60_000 },
+			],
+			[
+				"copilot-sdk keeps v085 unpriced admission when unpolled",
+				{ route: copilot, quota: null },
+				{ admit: true, kind: "unpriced", timeoutMs: 60_000 },
+			],
+			[
+				"copilot-sdk keeps v085 unpriced admission on an all-unlimited seat",
+				{ route: copilot, quota: copilotAllUnlimited },
 				{ admit: true, kind: "unpriced", timeoutMs: 60_000 },
 			],
 		];

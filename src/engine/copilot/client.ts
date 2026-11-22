@@ -282,6 +282,14 @@ export async function copilotClient(): Promise<CopilotClient> {
 	return current.client;
 }
 
+/** Return the already-started shared client without spawning a runtime; `null` if none is connected. */
+export function heldCopilotClient(): CopilotClient | null {
+	if (!shared || disconnected(shared.client)) return null;
+	const internals = shared.client as unknown as PinnedClientInternals;
+	if (internals.state && internals.state !== "connected") return null;
+	return shared.client;
+}
+
 /**
  * Stop the shared runtime when nothing holds it, so the next use starts one that reads a login made since it
  * started (an interactive `copilot login` run by `auth login copilot-sdk`).

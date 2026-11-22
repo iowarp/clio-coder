@@ -10,6 +10,11 @@
  * - keeps advisory vs authoritative explicit in the rendered display
  */
 
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { readSettings } from "../../core/config.js";
+import { copilotKeychainAllowed } from "../../core/copilot-keychain.js";
 import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../core/xdg.js";
 import {
 	type CopilotQuotaAccount,
@@ -33,6 +38,8 @@ export const NANO_AIU_PER_AI_CREDIT = 1_000_000_000;
 export interface CopilotQuotaOptions {
 	readQuota?: (options?: CopilotQuotaReadOptions) => Promise<CopilotQuotaReadResult>;
 	readAccount?: (options?: CopilotQuotaReadOptions) => Promise<CopilotQuotaAccount | null>;
+	/** Override whether a `copilot-sdk` target is configured; defaults to checking settings. */
+	hasConfiguredTarget?: () => boolean;
 	timeoutMs?: number;
 	now?: () => Date;
 }
@@ -152,6 +159,34 @@ function formatBucketSegment(
 	return `${label}: ${core}${overagePart} (${details.join(", ")})`;
 }
 
+function unitSortKey(unit: CopilotQuotaEntry["unit"]): number {
+	switch (unit) {
+		case "ai_credits":
+		case "nano_aiu":
+			return 0;
+		case "requests":
+			return 1;
+		case "tokens":
+			return 2;
+		default:
+			return 3;
+	}
+}
+
+function unitDisambiguator(unit: CopilotQuotaEntry["unit"]): { key: string; label: string; short: string } {
+	switch (unit) {
+		case "ai_credits":
+		case "nano_aiu":
+			return { key: "credits", label: "AI credits", short: "cr" };
+		case "requests":
+			return { key: "requests", label: "requests", short: "req" };
+		case "tokens":
+			return { key: "tokens", label: "tokens", short: "tok" };
+		default:
+			return { key: "unknown", label: "unknown", short: "unk" };
+	}
+}
+
 /**
  * Pure mapper from parsed Copilot quota entries into existing `UsageSnapshot` fields.
  */
@@ -166,14 +201,24 @@ export function mapCopilotQuotaEntries(entries: ReadonlyArray<CopilotQuotaEntry>
 
 	const sorted = [...entries].sort((a, b) => {
 		const orderDiff = bucketSortKey(a.key) - bucketSortKey(b.key);
-		return orderDiff !== 0 ? orderDiff : a.key.localeCompare(b.key);
+		if (orderDiff !== 0) return orderDiff;
+		const keyDiff = a.key.localeCompare(b.key);
+		return keyDiff !== 0 ? keyDiff : unitSortKey(a.unit) - unitSortKey(b.unit);
 	});
+
+	const keyCounts = new Map<string, number>();
+	for (const entry of sorted) keyCounts.set(entry.key, (keyCounts.get(entry.key) ?? 0) + 1);
 
 	const windows: UsageWindow[] = [];
 	const segments: string[] = [];
 
 	for (const entry of sorted) {
-		const { label, short } = bucketLabel(entry.key);
+		const baseLabel = bucketLabel(entry.key);
+		const sharedKey = (keyCounts.get(entry.key) ?? 0) > 1;
+		const suffix = sharedKey ? unitDisambiguator(entry.unit) : null;
+		const windowKey = suffix ? `${entry.key}:${suffix.key}` : entry.key;
+		const label = suffix ? `${baseLabel.label} (${suffix.label})` : baseLabel.label;
+		const short = suffix ? `${baseLabel.short}-${suffix.short}` : baseLabel.short;
 		const unit = unitLabel(entry);
 		const authoritative = isAuthoritativeEntry(entry);
 		const entitlement = entry.unlimited ? null : scaleNativeQuantity(entry.entitlement, entry.unit);
@@ -196,7 +241,7 @@ export function mapCopilotQuotaEntries(entries: ReadonlyArray<CopilotQuotaEntry>
 						: null;
 			if (numerator !== null) {
 				windows.push({
-					key: entry.key,
+					key: windowKey,
 					label,
 					short,
 					usedPct: roundPct(numerator, entitlement),
@@ -225,15 +270,57 @@ function copilotDiscoveryAllowed(): boolean {
 	return !isClioHomeRelocated() && !interopDisabled();
 }
 
+function hasConfiguredCopilotTarget(): boolean {
+	try {
+		return readSettings().targets.some((target) => target.runtime === "copilot-sdk");
+	} catch {
+		return false;
+	}
+}
+
+function statStamp(path: string): string | null {
+	try {
+		const info = statSync(path);
+		return `${info.ino}:${info.size}:${Math.trunc(info.mtimeMs)}`;
+	} catch {
+		return null;
+	}
+}
+
+interface CopilotLocalSignal {
+	stamp: string;
+	mayBeSignedIn: boolean;
+}
+
+/**
+ * Local non-secret signal for detection and shared-state cache scope: stats only config metadata
+ * (never reads file bytes or credentials) and never spawns the Copilot CLI daemon.
+ */
+function copilotLocalSignal(): CopilotLocalSignal {
+	const copilotHome = explicitAgentHome("COPILOT_HOME") ?? join(homedir(), ".copilot");
+	const ghConfigDir =
+		process.env.GH_CONFIG_DIR?.trim() || join(process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"), "gh");
+	const markers = [
+		join(copilotHome, "config.json"),
+		join(copilotHome, "hosts.json"),
+		join(copilotHome, "apps.json"),
+		join(ghConfigDir, "hosts.yml"),
+	];
+	const stamps = markers.map((marker) => `${marker}=${statStamp(marker) ?? "missing"}`);
+	const hasMarker = stamps.some((entry) => !entry.endsWith("=missing"));
+	const keychain = copilotKeychainAllowed();
+	return {
+		stamp: [`home=${copilotHome}`, `gh=${ghConfigDir}`, `keychain=${keychain ? "1" : "0"}`, ...stamps].join("\n"),
+		mayBeSignedIn: hasMarker || keychain,
+	};
+}
+
 export function createCopilotQuotaProvider(options: CopilotQuotaOptions = {}): QuotaProvider {
 	const now = options.now ?? (() => new Date());
 	const readOptions: CopilotQuotaReadOptions = options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {};
-	const readAccount =
-		options.readAccount ??
-		(async (opts?: CopilotQuotaReadOptions) => {
-			if (!copilotDiscoveryAllowed()) return null;
-			return copilotSdkSignedInAccount(opts);
-		});
+	const hasTarget =
+		options.hasConfiguredTarget ??
+		(options.readQuota !== undefined || options.readAccount !== undefined ? () => true : hasConfiguredCopilotTarget);
 	const readQuota =
 		options.readQuota ??
 		(async (opts?: CopilotQuotaReadOptions): Promise<CopilotQuotaReadResult> => {
@@ -245,6 +332,7 @@ export function createCopilotQuotaProvider(options: CopilotQuotaOptions = {}): Q
 			}
 			return readCopilotSdkQuota(opts);
 		});
+	let lastNoCredentialsStamp: string | null = null;
 
 	const snapshot = (
 		status: UsageSnapshot["status"],
@@ -266,16 +354,46 @@ export function createCopilotQuotaProvider(options: CopilotQuotaOptions = {}): Q
 		id: COPILOT_QUOTA_PROVIDER_ID,
 		displayName: "GitHub Copilot",
 		async detect(): Promise<boolean> {
-			return (await readAccount(readOptions)) !== null;
+			if (!hasTarget()) return false;
+			if (options.readAccount) return (await options.readAccount(readOptions)) !== null;
+			if (!copilotDiscoveryAllowed()) return false;
+			const signal = copilotLocalSignal();
+			if (lastNoCredentialsStamp === signal.stamp) return false;
+			if (signal.mayBeSignedIn) return true;
+			return (await copilotSdkSignedInAccount(readOptions)) !== null;
 		},
 		async credentialScope(): Promise<string | null> {
-			const account = await readAccount(readOptions);
-			if (!account) return null;
-			return credentialFingerprint(COPILOT_QUOTA_PROVIDER_ID, `${account.host}\0${account.login}`);
+			if (!hasTarget()) return null;
+			if (options.readAccount) {
+				const account = await options.readAccount(readOptions);
+				if (!account) return null;
+				return credentialFingerprint(COPILOT_QUOTA_PROVIDER_ID, `${account.host}\0${account.login}`);
+			}
+			if (!copilotDiscoveryAllowed()) return null;
+			const signal = copilotLocalSignal();
+			if (signal.mayBeSignedIn) return credentialFingerprint(COPILOT_QUOTA_PROVIDER_ID, signal.stamp);
+			const held = await copilotSdkSignedInAccount(readOptions);
+			if (!held) return null;
+			return credentialFingerprint(COPILOT_QUOTA_PROVIDER_ID, `${held.host}\0${held.login}`);
 		},
 		async fetch(): Promise<UsageSnapshot> {
+			if (!hasTarget()) return snapshot("no_credentials", "No GitHub Copilot target is configured");
+			const signal = options.readAccount ? null : copilotLocalSignal();
+			if (!options.readQuota) {
+				if (!copilotDiscoveryAllowed()) {
+					return snapshot("no_credentials", "GitHub Copilot quota discovery is disabled in an isolated CLIO_CODER_HOME");
+				}
+				if (signal && !signal.mayBeSignedIn && (await copilotSdkSignedInAccount(readOptions)) === null) {
+					lastNoCredentialsStamp = signal.stamp;
+					return snapshot("no_credentials", "GitHub Copilot is not signed in");
+				}
+			}
 			const result = await readQuota(readOptions);
-			if (result.kind === "no_credentials") return snapshot("no_credentials", result.message);
+			if (result.kind === "no_credentials") {
+				if (signal) lastNoCredentialsStamp = signal.stamp;
+				return snapshot("no_credentials", result.message);
+			}
+			lastNoCredentialsStamp = null;
 			if (result.kind === "unsupported") return snapshot("error", result.message);
 			if (result.kind === "error") return snapshot("error", result.message);
 			const mapped = mapCopilotQuotaEntries(result.entries);

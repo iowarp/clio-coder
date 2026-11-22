@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { createQuotaCache } from "../../src/domains/quota/cache.js";
 import { createClaudeCodeQuotaProvider } from "../../src/domains/quota/claude-code-provider.js";
 import { createCodexQuotaProvider } from "../../src/domains/quota/codex-provider.js";
 import {
@@ -10,8 +13,13 @@ import {
 import { quotaReadingFromSnapshot } from "../../src/domains/quota/reading.js";
 import { quotaProviderIdForRuntime } from "../../src/domains/quota/registry.js";
 import type { QuotaProvider, UsageSnapshot } from "../../src/domains/quota/types.js";
-import { parseCopilotQuotaResponse, readCopilotQuota } from "../../src/engine/copilot/quota.js";
+import {
+	parseCopilotQuotaResponse,
+	readCopilotQuota,
+	readCopilotSignedInAccount,
+} from "../../src/engine/copilot/quota.js";
 import { jsonResponse, stubFetch } from "../harness/quota-fetch.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 
@@ -355,4 +363,216 @@ test("copilot quota RPC probe capability-detects absence, bounds timeout, and ne
 	});
 	assert.equal(signedOut.kind, "no_credentials");
 	assert.equal(authCalls, 0);
+});
+
+test("copilot quota keeps combined credit and legacy request buckets distinct and rejects mismatched monthlyUsage units", () => {
+	// 1. Combined payload: providerQuotas credit bucket + legacy quotaSnapshots request bucket sharing compatibilityKey.
+	const combined = parseCopilotQuotaResponse({
+		providerQuotas: [
+			{
+				quotaId: "ai_credits_monthly",
+				compatibilityKey: "premium_interactions",
+				unit: "nano_aiu",
+				quantityKind: "authoritative_budget",
+				observationKind: "account_snapshot",
+				capacityState: "available",
+				accessState: "allowed",
+				entitledQuantity: 500_000_000_000,
+				availableQuantity: 375_000_000_000,
+				budgetMetadata: {
+					entitlement: 500_000_000_000,
+					consumed: 125_000_000_000,
+					remainingPercentage: 75,
+					resetAtEpochMs: Date.parse("2026-12-01T00:00:00.000Z"),
+				},
+			},
+		],
+		quotaSnapshots: {
+			premium_interactions: {
+				entitlementRequests: 300,
+				usedRequests: 60,
+				remainingPercentage: 80,
+				resetDate: "2026-12-01",
+			},
+		},
+	});
+	assert.ok(combined !== null);
+	assert.equal(combined.length, 2, "credit and legacy request buckets sharing a key must both be retained");
+	const mappedCombined = mapCopilotQuotaEntries(combined);
+	assert.deepEqual(
+		mappedCombined.windows.map((w) => ({ key: w.key, label: w.label, usedPct: w.usedPct })),
+		[
+			{ key: "premium_interactions:credits", label: "Premium (AI credits)", usedPct: 25 },
+			{ key: "premium_interactions:requests", label: "Premium (requests)", usedPct: 20 },
+		],
+	);
+	assert.match(mappedCombined.credits?.display ?? "", /Premium \(AI credits\): 125\/500 AI credits used/);
+	assert.match(mappedCombined.credits?.display ?? "", /Premium \(requests\): 60\/300 premium requests used/);
+
+	// 2. monthlyUsage.consumedQuantity fallback requires monthlyUsage.unit === entry.unit (never scales or mixes units).
+	const mismatchedMonthly = parseCopilotQuotaResponse({
+		providerQuotas: [
+			{
+				quotaId: "nano_aiu_with_credit_monthly",
+				unit: "nano_aiu",
+				quantityKind: "authoritative_budget",
+				observationKind: "account_snapshot",
+				capacityState: "available",
+				accessState: "allowed",
+				entitledQuantity: 500_000_000_000,
+				monthlyUsage: {
+					state: "available",
+					unit: "ai_credits",
+					consumedQuantity: 125,
+				},
+			},
+			{
+				quotaId: "credits_with_missing_monthly_unit",
+				unit: "ai_credits",
+				quantityKind: "authoritative_budget",
+				observationKind: "account_snapshot",
+				capacityState: "available",
+				accessState: "allowed",
+				entitledQuantity: 500,
+				monthlyUsage: {
+					state: "available",
+					consumedQuantity: 125,
+				},
+			},
+			{
+				quotaId: "credits_with_matching_monthly_unit",
+				unit: "ai_credits",
+				quantityKind: "authoritative_budget",
+				observationKind: "account_snapshot",
+				capacityState: "available",
+				accessState: "allowed",
+				entitledQuantity: 500,
+				monthlyUsage: {
+					state: "available",
+					unit: "ai_credits",
+					consumedQuantity: 125,
+				},
+			},
+		],
+	});
+	assert.ok(mismatchedMonthly !== null);
+	assert.equal(mismatchedMonthly[0]?.used, null, "mismatched monthlyUsage.unit must leave used unknown");
+	assert.equal(mismatchedMonthly[1]?.used, null, "missing monthlyUsage.unit must leave used unknown");
+	assert.equal(mismatchedMonthly[2]?.used, 125, "matching monthlyUsage.unit may supply used");
+	const mappedMonthly = mapCopilotQuotaEntries(mismatchedMonthly);
+	assert.deepEqual(
+		mappedMonthly.windows.map((w) => ({ key: w.key, usedPct: w.usedPct })),
+		[{ key: "credits_with_matching_monthly_unit", usedPct: 25 }],
+	);
+});
+
+test("copilot quota detect/credentialScope avoid spawning daemons, skip unconfigured targets, and hit shared-state cache", async () => {
+	const env = await isolateClioEnv();
+	try {
+		delete process.env.CLIO_CODER_INTEROP_HOME;
+		const copilotHome = join(env.dir, "copilot-home");
+		mkdirSync(copilotHome, { recursive: true });
+		writeFileSync(join(copilotHome, "config.json"), JSON.stringify({ logged_in_users: [{ login: "octocat" }] }));
+		process.env.COPILOT_HOME = copilotHome;
+
+		// Without a running Copilot client, readCopilotSignedInAccount must return null without spawning.
+		assert.equal(await readCopilotSignedInAccount(), null);
+
+		// Without a configured copilot-sdk target, detect/credentialScope/fetch do zero discovery and zero RPCs.
+		let unconfiguredReads = 0;
+		const unconfigured = createCopilotQuotaProvider({
+			hasConfiguredTarget: () => false,
+			readQuota: async () => {
+				unconfiguredReads += 1;
+				return { kind: "ok", account: { login: "octocat", host: "https://github.com" }, entries: [] };
+			},
+			now: () => NOW,
+		});
+		assert.equal(await unconfigured.detect(), false);
+		assert.equal(await unconfigured.credentialScope?.(), null);
+		assert.equal((await unconfigured.fetch()).status, "no_credentials");
+		assert.equal(unconfiguredReads, 0);
+
+		// With a configured copilot-sdk target, shared-state cache hits never call readQuota or spawn a daemon.
+		const sharedStatePath = join(env.dir, "quota-shared-state.json");
+		let clock = NOW.getTime();
+		let process1Reads = 0;
+		const provider1 = createCopilotQuotaProvider({
+			hasConfiguredTarget: () => true,
+			readQuota: async () => {
+				process1Reads += 1;
+				return {
+					kind: "ok",
+					account: { login: "octocat", host: "https://github.com" },
+					entries: [
+						{
+							key: "premium_interactions",
+							unit: "requests",
+							quantityKind: "authoritative_budget",
+							observationKind: "account_snapshot",
+							unlimited: false,
+							entitlement: 300,
+							used: 30,
+							remaining: 270,
+							overage: null,
+							remainingPercentage: 90,
+							exhausted: false,
+							tokenBasedBilling: false,
+							usageAllowedWhenExhausted: null,
+							overageAllowedWhenExhausted: null,
+							resetsAt: "2026-02-01T00:00:00.000Z",
+							reason: null,
+						},
+					],
+				};
+			},
+			now: () => new Date(clock),
+		});
+		assert.equal(await provider1.detect(), true);
+		const scope1 = await provider1.credentialScope?.();
+		assert.ok(scope1 !== null);
+		assert.equal(process1Reads, 0, "detect() and credentialScope() must not invoke readQuota");
+
+		const cache1 = createQuotaCache({ ttlMs: 60_000, now: () => clock, sharedStatePath });
+		const snap1 = await cache1.resolve(provider1);
+		assert.equal(snap1.status, "ok");
+		assert.equal(snap1.windows[0]?.usedPct, 10);
+		assert.equal(process1Reads, 1);
+
+		// Fresh provider + fresh cache simulating a second process: shared-state hit with zero readQuota calls.
+		let process2Reads = 0;
+		const provider2 = createCopilotQuotaProvider({
+			hasConfiguredTarget: () => true,
+			readQuota: async () => {
+				process2Reads += 1;
+				throw new Error("shared-state cache hit must not invoke readQuota");
+			},
+			now: () => new Date(clock),
+		});
+		const scope2 = await provider2.credentialScope?.();
+		assert.equal(scope2, scope1);
+		const cache2 = createQuotaCache({ ttlMs: 60_000, now: () => clock, sharedStatePath });
+		const snap2 = await cache2.resolve(provider2);
+		assert.equal(snap2.status, "ok");
+		assert.equal(snap2.windows[0]?.usedPct, 10);
+		assert.equal(process2Reads, 0);
+
+		// Repeated no_credentials with unchanged local stamp does not re-trigger fetch via detect().
+		let missReads = 0;
+		const signedOutProvider = createCopilotQuotaProvider({
+			hasConfiguredTarget: () => true,
+			readQuota: async () => {
+				missReads += 1;
+				return { kind: "no_credentials", message: "Not logged in" };
+			},
+			now: () => new Date(clock),
+		});
+		const missCache = createQuotaCache({ ttlMs: 60_000, now: () => clock });
+		assert.equal((await missCache.resolve(signedOutProvider)).status, "no_credentials");
+		clock += 1_000;
+		assert.equal((await missCache.resolve(signedOutProvider)).status, "no_credentials");
+		assert.equal(missReads, 1, "unchanged local stamp must hold no_credentials without re-polling");
+	} finally {
+		env.restore();
+	}
 });

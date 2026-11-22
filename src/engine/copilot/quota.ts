@@ -6,7 +6,7 @@
  * retries in a loop, and never reads external credential files.
  */
 
-import { COPILOT_LOGIN_MESSAGE, copilotClient, holdCopilotClient } from "./client.js";
+import { COPILOT_LOGIN_MESSAGE, copilotClient, heldCopilotClient, holdCopilotClient } from "./client.js";
 
 export const COPILOT_QUOTA_TIMEOUT_MS = 15_000;
 
@@ -151,7 +151,11 @@ function parseProviderQuotaState(raw: unknown): CopilotQuotaEntry | null {
 	const entitlement = unlimited
 		? null
 		: (finiteNonNegative(budget?.entitlement) ?? finiteNonNegative(raw.entitledQuantity));
-	const monthlyConsumed = monthly?.state === "available" ? finiteNonNegative(monthly.consumedQuantity) : null;
+	const monthlyUnit = parseUnit(monthly?.unit);
+	const monthlyConsumed =
+		monthly?.state === "available" && unit !== "unknown" && monthlyUnit === unit
+			? finiteNonNegative(monthly.consumedQuantity)
+			: null;
 	const used = finiteNonNegative(budget?.consumed) ?? monthlyConsumed;
 	const remaining = finiteNonNegative(raw.availableQuantity);
 	const overage = finiteNonNegative(budget?.overage);
@@ -235,6 +239,14 @@ function parseLegacyQuotaSnapshot(key: string, raw: unknown): CopilotQuotaEntry 
 	};
 }
 
+function unitDedupeFamily(unit: CopilotQuotaUnit): string {
+	return unit === "nano_aiu" || unit === "ai_credits" ? "credits" : unit;
+}
+
+function entryDedupeKey(entry: CopilotQuotaEntry): string {
+	return `${unitDedupeFamily(entry.unit)}\0${entry.key}`;
+}
+
 /**
  * Parse a raw `account.getQuota` payload into normalized entries without inventing defaults.
  * Returns `null` when the payload does not carry a recognized quota container.
@@ -251,18 +263,22 @@ export function parseCopilotQuotaResponse(raw: unknown): CopilotQuotaEntry[] | n
 	if (hasProviderQuotas) {
 		for (const item of raw.providerQuotas as unknown[]) {
 			const entry = parseProviderQuotaState(item);
-			if (!entry || seen.has(entry.key)) continue;
-			seen.add(entry.key);
+			if (!entry) continue;
+			const dedupeKey = entryDedupeKey(entry);
+			if (seen.has(dedupeKey)) continue;
+			seen.add(dedupeKey);
 			entries.push(entry);
 		}
 	}
 
 	if (hasSnapshots) {
 		for (const [key, value] of Object.entries(raw.quotaSnapshots as Record<string, unknown>)) {
-			if (!key.trim() || seen.has(key)) continue;
+			if (!key.trim()) continue;
 			const entry = parseLegacyQuotaSnapshot(key, value);
 			if (!entry) continue;
-			seen.add(entry.key);
+			const dedupeKey = entryDedupeKey(entry);
+			if (seen.has(dedupeKey)) continue;
+			seen.add(dedupeKey);
 			entries.push(entry);
 		}
 	}
@@ -316,18 +332,18 @@ function isAuthError(error: unknown): boolean {
 }
 
 /**
- * Inspect the signed-in GitHub Copilot account via the SDK client without spawning on missing SDK
- * and without reading external credential files.
+ * Inspect the signed-in GitHub Copilot account ONLY from an already-running SDK client
+ * (never spawns a Copilot runtime daemon and never reads external credential files).
  */
 export async function readCopilotSignedInAccount(
 	options: CopilotQuotaReadOptions = {},
 ): Promise<CopilotQuotaAccount | null> {
 	const timeoutMs = options.timeoutMs ?? COPILOT_QUOTA_TIMEOUT_MS;
-	const release = options.client ? null : holdCopilotClient();
+	const client = options.client ? await options.client() : (heldCopilotClient() as CopilotQuotaRpcClient | null);
+	if (!client) return null;
 	try {
 		return await withTimeout(
 			(async () => {
-				const client = options.client ? await options.client() : ((await copilotClient()) as CopilotQuotaRpcClient);
 				const auth = await client.getAuthStatus();
 				if (!auth.isAuthenticated || !auth.login) return null;
 				return { login: auth.login, host: auth.host ?? DEFAULT_HOST };
@@ -336,8 +352,6 @@ export async function readCopilotSignedInAccount(
 		);
 	} catch {
 		return null;
-	} finally {
-		release?.();
 	}
 }
 
