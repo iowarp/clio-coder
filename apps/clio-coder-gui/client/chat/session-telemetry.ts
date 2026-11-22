@@ -1,6 +1,6 @@
 // Pushed context and totals share the session snapshot; settled accounting still supplies model and quota details.
 
-import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ContextLedger } from "../../contracts/context-ledger.js";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
@@ -126,12 +126,19 @@ export function useSessionUsage(client: Client, sessionId: string, _settled: num
 			enabled: false,
 			select: usageReadable,
 		}).data ?? false;
-	return useQuery({
+	return useQuery({ ...sessionUsageQuery(client, sessionId, settled, scope), enabled: enabled && readable });
+}
+
+/**
+ * The usage read under one settle key. It takes no abort signal: the key moves at every turn's end, and TanStack
+ * aborts a read that consumed its signal once the last observer leaves, so a read in flight across the settle failed
+ * net::ERR_ABORTED. Unaborted, the retired read completes into its own cache entry and the new key reads on its own.
+ */
+export function sessionUsageQuery(client: Client, sessionId: string, settled: string, scope: number) {
+	return queryOptions({
 		meta: { errorSurface: "inline" },
 		queryKey: ["session-usage", sessionId, settled, scope],
-		queryFn: ({ signal }) =>
-			client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }, undefined, signal),
-		enabled: enabled && readable,
+		queryFn: () => client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }),
 		retry: false,
 		retryOnMount: false,
 		placeholderData: (previous, previousQuery) =>

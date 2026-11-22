@@ -5,9 +5,10 @@ import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
-import { QueryClient } from "@tanstack/react-query";
-import { createClient } from "../client/api/client.js";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { type Client, createClient } from "../client/api/client.js";
 import { subscribe } from "../client/api/events.js";
+import { sessionUsageQuery } from "../client/chat/session-telemetry.js";
 import { TELEMETRY_REFRESH_MS, telemetryInvalidations, telemetryRefresh } from "../client/telemetry/live-model.js";
 import type { Event } from "../contracts/events.js";
 import { routes } from "../contracts/routes.js";
@@ -336,6 +337,40 @@ test("a task start's control events, each in its own frame, read the session ove
 	assert.equal(pending.length, 1, "the burst shares one trailing overview read");
 	pending[0]?.run();
 	assert.equal(overview(invalidated.mock.calls), 1);
+});
+
+test("a usage read in flight when its turn ends completes; the move to the new settle key aborts nothing", async (t) => {
+	const queries = new QueryClient();
+	t.after(() => queries.clear());
+	const stream = await liveStream(t, queries);
+	const turn = (id: string) => ({ id, status: "completed" });
+	queries.setQueryData(["session", "ending"], { turns: [turn("turn-0")] });
+	let settled = "turn-0";
+	const aborted: string[] = [];
+	const usage = {
+		call: (_route: unknown, _input: unknown, _options: unknown, signal?: AbortSignal) => {
+			const key = settled;
+			signal?.addEventListener("abort", () => aborted.push(key));
+			return setTimeout(20, { settled: key });
+		},
+	} as unknown as Client;
+	const observer = new QueryObserver(queries, sessionUsageQuery(usage, "ending", "turn-0", 0));
+	t.after(observer.subscribe(() => {}));
+	const idle = async () => {
+		for (let wait = 0; wait < 200 && queries.isFetching({ queryKey: ["session-usage"] }) > 0; wait += 1)
+			await setTimeout(1);
+	};
+	await idle();
+	// A push refresh starts a read of the settled key; the turn ends while it is still on the wire.
+	stream.deliver(telemetryUpdate("ending", 1));
+	assert.equal(observer.getCurrentResult().isFetching, true);
+	settled = "turn-1";
+	queries.setQueryData(["session", "ending"], { turns: [turn("turn-0"), turn("turn-1")] });
+	stream.deliver(finishedTurn("ending", 2));
+	observer.setOptions(sessionUsageQuery(usage, "ending", "turn-1", 0));
+	await idle();
+	assert.deepEqual(aborted, [], "no usage read is aborted across the settle");
+	assert.deepEqual(observer.getCurrentResult().data, { settled: "turn-1" }, "the new key reads its own answer");
 });
 
 test("a malformed event frame is skipped and the stream carries on", async (t) => {
