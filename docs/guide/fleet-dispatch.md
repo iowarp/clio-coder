@@ -619,6 +619,12 @@ admitted. The round applies to a mutation-report contract on a run that is not
 read-only, has an advisory budget, admits `edit` or `write`, and is not already in its
 synthesis lock. A second reply with no tool call leaves the builder obligation unmet and the grader settles the run as `obligation_unmet` ([grading.ts](../../src/domains/dispatch/grading.ts)). The old outcome code `worker_no_work` is retired and survives only so old journals still read ([run-vocabulary.ts](../../src/core/telemetry/run-vocabulary.ts)).
 
+### Worker capability envelope
+
+Each dispatched run gets one sealed capability envelope that decides what it may touch: its tools (direct and behind the gateway), bound skills, read and write scope, shell and check reach, network, approval route and sandbox facts ([envelope.ts](../../src/domains/dispatch/envelope.ts)). Admission, the plan card, the worker spec, the worker's prompt and the receipt all read that one envelope, and the worker refuses a spec whose envelope wraps a permit with another digest. Layers only subtract, in a fixed order: the run's role in the work graph (not its recipe id), which also adds the tools every run in that role holds, such as `code_nav`; the request's tool profile and deny list; what the selected runtime offers; and the host facts of the placement (network, shell, write confinement). A tool beyond the dispatching turn's own ceiling is not subtracted: dispatch refuses the request and names the recipes that fit.
+
+The write mode is `none`, `roots` (writes only under its write roots), `worktree` (its own task worktree, merging back only its roots when it has any) or `workspace`. Each capability a layer took away that the caller could act on is a `withheld` entry with its reason (`role`, `tool-profile`, `denied`, `runtime`, `no-network`, `no-shell`, `write-roots-unconfined`, `judge-unseated` or `main-route-unavailable`) and, where one exists, a remedy; the plan card prints one `withheld:` line per entry and the receipt keeps them. Orchestrator-only tools such as `ask_user` and `consult` never reach a worker and get no entry. `clio-coder run` reports each run's sealed envelope at `run_end.dispatch.runs[].safety.envelope`.
+
 ### Worker permission refusals
 
 A worker has no operator by default, so `fleet.permissions.mode` (`/settings safety`, Worker
