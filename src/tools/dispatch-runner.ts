@@ -3203,13 +3203,17 @@ export async function runDispatchTool(
 	// judge, and synthesis requests copy it from their base explicitly.
 	const decisionRefs = activeDecisionRefs(deps.getDecisionBoard?.() ?? []);
 	if (decisionRefs.length > 0) requests = requests.map((request) => ({ ...request, decisionRefs }));
-	// An operator-approved or Scout-sealed plan fixes the route it shows, so the parser's route freedom ends here.
-	if (authenticatedApproval !== undefined || (resolvedPlan?.source ?? null) !== null)
+	// A plan admission sealed as all read-only on this machine ran without the plan stop (`isReadOnlyPlan`); the
+	// judgement is the sealed snapshot's, never the call's arguments, and holds only with the sealed plan present.
+	const readOnlyPlan = planView.readOnlyPlan === true && resolvedPlan !== null;
+	// An operator-approved, Scout-sealed or read-only-exempt plan fixes the route it shows (failover none), so the
+	// parser's route freedom ends here.
+	if (authenticatedApproval !== undefined || (resolvedPlan?.source ?? null) !== null || readOnlyPlan)
 		requests = requests.map(({ routeFree: _free, ...request }) => request);
 	if (planView.planScale && deps.dispatch.preview !== undefined && resolvedPlan === null) {
 		return { kind: "error", message: "dispatch: resolved plan is missing after admission" };
 	}
-	if (planView.planScale && autonomy !== "yolo" && authenticatedApproval === undefined) {
+	if (planView.planScale && autonomy !== "yolo" && authenticatedApproval === undefined && !readOnlyPlan) {
 		return {
 			kind: "error",
 			message: "dispatch: resolved plan requires a registry-authenticated operator approval",
@@ -3260,7 +3264,7 @@ export async function runDispatchTool(
 			hash: planView.hash,
 			topology: planView.topology,
 			taskCount: planView.taskCount,
-			approval: authenticatedApproval !== undefined ? "operator" : "yolo",
+			approval: authenticatedApproval !== undefined ? "operator" : autonomy === "yolo" ? "yolo" : "read-only",
 			source:
 				resolvedPlan?.source === null || resolvedPlan?.source === undefined
 					? null

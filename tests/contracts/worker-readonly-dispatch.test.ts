@@ -1,13 +1,16 @@
-import { doesNotMatch, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { test } from "node:test";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
+import type { RunPlanProvenance } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { startClaudeSdkWorkerRun } from "../../src/engine/claude/sdk-runtime.js";
 import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { workerEnvelopeDigest, workerPermitDigest } from "../../src/worker/protocol.js";
 import {
@@ -397,4 +400,71 @@ test("an ACP read-only worker receives the default posture and its run restricti
 	match(posture, /workspace edits are not permitted in this run; read-only inspection runs/u);
 	doesNotMatch(posture, /workspace edits and recognized commands run/u);
 	match(messages.find(({ id }) => id === "dispatch-read-only")?.body ?? "", /inspection inside the workspace/u);
+});
+
+test("default autonomy fans out a sealed all-scout plan without a plan stop and still stops a writer plan (L9)", async () => {
+	const env = await isolateClioEnv("clio-readonly-plan-");
+	const context = dispatchStubContext();
+	const bundle = makeDispatchBundle(context);
+	const previousCwd = process.cwd();
+	try {
+		await bundle.extension.start();
+		process.chdir(env.dir);
+		const plans: Array<RunPlanProvenance | undefined> = [];
+		const routeFree: Array<true | undefined> = [];
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }), autonomy: () => "default" });
+		registry.register(
+			createDispatchTool({
+				dispatch: {
+					...bundle.contract,
+					dispatchBatch: async (requests: ReadonlyArray<DispatchRequest>) => {
+						plans.push(...requests.map((request) => request.plan));
+						routeFree.push(...requests.map((request) => request.routeFree));
+						throw new Error("stub workers");
+					},
+				},
+				getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
+				getAutonomy: () => "default",
+			}),
+		);
+		let asks = 0;
+		// A headless run denies every ask.
+		registry.onPermissionRequired((_call, _decision, meta) => {
+			asks += 1;
+			registry.cancelParkedCall(meta.requestId, "headless denial");
+		});
+		const scouts = (intent?: Record<string, unknown>) =>
+			[1, 2, 3].map((n) => ({ task: `Inspect module ${n} and report.`, ...(intent ? { intent } : {}) }));
+		const fanned = await registry.invoke({
+			tool: "dispatch",
+			args: { agent: "scout", mode: "parallel", tasks: scouts() },
+		});
+		strictEqual(asks, 0);
+		strictEqual(fanned.kind, "ok");
+		strictEqual(plans.length, 3, JSON.stringify(fanned));
+		strictEqual(plans[0]?.approval, "read-only");
+		// The exempt plan runs the route it showed: failover none, no retry onto another model.
+		deepStrictEqual(routeFree, [undefined, undefined, undefined]);
+		for (const args of [
+			{
+				agent: "coder",
+				mode: "parallel",
+				tasks: [
+					{ task: "Edit a/.", intent: { write_roots: ["a/"] } },
+					{ task: "Edit b/.", intent: { write_roots: ["b/"] } },
+				],
+			},
+			{ agent: "scout", mode: "parallel", tasks: scouts({ write_roots: ["notes/"] }) },
+			// `.` normalizes to no write roots, but it still declares a whole-workspace write scope.
+			{ agent: "scout", mode: "parallel", tasks: scouts({ write_roots: ["."] }) },
+		]) {
+			strictEqual((await registry.invoke({ tool: "dispatch", args })).kind, "blocked");
+		}
+		strictEqual(asks, 3);
+		strictEqual(plans.length, 3);
+	} finally {
+		process.chdir(previousCwd);
+		await bundle.extension.stop?.();
+		env.restore();
+	}
 });

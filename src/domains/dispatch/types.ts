@@ -303,7 +303,8 @@ export interface RunPlanProvenance {
 	hash: string;
 	topology: "parallel" | "sequential" | "pipeline" | "review" | "compete" | "council" | "detached" | "fleet";
 	taskCount: number;
-	approval: "operator" | "yolo";
+	/** `read-only`: an all read-only plan admitted at default autonomy without the plan stop. */
+	approval: "operator" | "yolo" | "read-only";
 	source: null | {
 		kind: "scout-transition";
 		runId: string;

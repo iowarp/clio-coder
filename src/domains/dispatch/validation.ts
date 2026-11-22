@@ -780,7 +780,7 @@ const VALID_PLAN_TOPOLOGIES = new Set([
 	"detached",
 	"fleet",
 ]);
-const VALID_PLAN_APPROVALS = new Set(["operator", "yolo"]);
+const VALID_PLAN_APPROVALS = new Set(["operator", "yolo", "read-only"]);
 
 function isValidGate(value: unknown): value is RunGateProvenance {
 	if (!isPlainObject(value)) return false;
