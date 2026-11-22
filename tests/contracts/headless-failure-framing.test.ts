@@ -976,4 +976,22 @@ test("run --agent coder whose own check failed, or who claimed a check it never 
 		strictEqual(end.dispatch?.runs?.[0]?.exitCode, 1);
 		match(end.dispatch?.runs?.[0]?.outcomeDetail ?? "", cause);
 	}
+	// Row 371: a limitation the worker recorded through its tool reaches completion.limitations, though its report's
+	// own completion listed none.
+	const limitedRoot = join(env.dir, "limited");
+	mkdirSync(limitedRoot, { recursive: true });
+	const limitation = { scope: "test/b.test.js only covers one case", reason: "environment" };
+	const { receipt: limited } = await settleStubBuilder({
+		cwd: limitedRoot,
+		report: { mutatedPaths: [], validations: [], completion: { state: "done", limitations: [], unverified: [] } },
+		events: [
+			{ type: "tool_execution_start", toolCallId: "lim-1", toolName: "limitation", args: limitation },
+			{ type: "tool_execution_end", toolCallId: "lim-1", toolName: "limitation", isError: false, result: {} },
+			{ type: "clio_coder_tool_finish", payload: { tool: "limitation", outcome: "ok", durationMs: 1 } },
+		],
+	});
+	deepStrictEqual(limited.recordedLimitations, [limitation]);
+	deepStrictEqual(agentRunCompletion(limited).limitations, [
+		{ what: "test/b.test.js only covers one case", why: "tool_unavailable" },
+	]);
 });

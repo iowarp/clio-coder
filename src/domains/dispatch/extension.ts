@@ -672,6 +672,7 @@ import type { WriteBoundaryAttribution, WriteBoundaryAttributionDowngrade } from
 import {
 	createWriteRootPark,
 	evaluateWriteRootGrant,
+	recordedLimitationsFromEntries,
 	resolveWriteRootRequest,
 	WRITE_ROOTS_GRANT_TOOL,
 	type WriteRootContinuation,
@@ -11041,6 +11042,9 @@ export function createDispatchBundle(
 					validationGrounding === null ? null : { ...validationGrounding, ungrounded: [...validationGrounding.ungrounded] },
 				);
 				receiptDraft.verdict = runVerdict;
+				// What the run's limitation calls recorded, which its own report can leave out (row 371).
+				const recordedLimitationCalls = recordedLimitationsFromEntries(finishContractEntries);
+				if (recordedLimitationCalls.length > 0) receiptDraft.recordedLimitations = recordedLimitationCalls;
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
 				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));

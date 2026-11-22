@@ -389,6 +389,12 @@ export interface RunResultContractFact {
 	quality: "pass" | "fail" | "unmeasured";
 }
 
+/** One `limitation` call a run recorded: what could not be verified and the tool's reason for it. */
+export interface RunRecordedLimitation {
+	scope: string;
+	reason: string;
+}
+
 /**
  * A terminal result's passing validation claims, measured against the commands
  * the run's own tool calls show it ran. Present only when the result carried at
@@ -1265,6 +1271,12 @@ export interface RunResult {
 	delegation?: RunResultDelegation;
 	/** Passing validation claims measured against executed commands; absent when none were claimed. */
 	validationGrounding?: RunValidationGrounding;
+	/**
+	 * The limitations the run recorded through its `limitation` tool, each call whose result was not an error, in call
+	 * order (row 371). A worker's own report can leave its completion's limitations empty after it recorded one, so the
+	 * host keeps what the tool recorded. Absent when none was recorded.
+	 */
+	recordedLimitations?: ReadonlyArray<RunRecordedLimitation>;
 	/**
 	 * Calls the check classifier could not read (neither check, inspection nor mutation) that ran after the run's
 	 * oldest check outcome still standing, and any that ran and failed with or without one (x8-2). They neither settled

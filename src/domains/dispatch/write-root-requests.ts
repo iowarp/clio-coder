@@ -76,6 +76,37 @@ export function writeRootRequestFromEntries(entries: ReadonlyArray<unknown>): Wr
 }
 
 /**
+ * Every limitation a run's tool-call feed recorded, in call order: a `limitation` call whose result was not an error,
+ * the same rule as {@link writeRootRequestFromEntries}. Its scope and reason are the call's own arguments (row 371).
+ */
+export function recordedLimitationsFromEntries(
+	entries: ReadonlyArray<unknown>,
+): Array<{ scope: string; reason: string }> {
+	const calls = new Map<string, { scope: string; reason: string }>();
+	const recorded: Array<{ scope: string; reason: string }> = [];
+	for (const entry of entries) {
+		if (!isRecord(entry) || entry.kind !== "message" || !isRecord(entry.payload)) continue;
+		const payload = entry.payload;
+		const toolCallId = typeof payload.toolCallId === "string" ? payload.toolCallId : null;
+		if (toolCallId === null) continue;
+		if (entry.role === "tool_call") {
+			if (payload.name !== ToolNames.Limitation) continue;
+			const args = isRecord(payload.args) ? payload.args : {};
+			const scope = typeof args.scope === "string" ? args.scope.trim() : "";
+			const reason = typeof args.reason === "string" ? args.reason.trim() : "";
+			calls.set(toolCallId, { scope: scope || "unspecified", reason: reason || "other" });
+			continue;
+		}
+		if (entry.role !== "tool_result" || payload.isError === true) continue;
+		const call = calls.get(toolCallId);
+		if (call === undefined) continue;
+		calls.delete(toolCallId);
+		if (!recorded.some((item) => item.scope === call.scope && item.reason === call.reason)) recorded.push(call);
+	}
+	return recorded;
+}
+
+/**
  * Check a request against the run it came from: each path must name a place
  * inside the run's working directory that its write roots do not already
  * cover, and the widened roots must still fit the boundary grammar.
