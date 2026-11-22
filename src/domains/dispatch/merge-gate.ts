@@ -42,9 +42,17 @@ export function taskWorktreeCommitMessage(input: {
 	return input.commitMessage ?? taskCommitSubject(input.summary ?? null) ?? taskCommitSubject(input.task);
 }
 
+/**
+ * How an agent lands a kept branch: the host puts a Land card to the operator, so the agent never runs fleet land
+ * itself, which a sandboxed shell cannot finish.
+ */
+export function landCardClause(branch: string): string {
+	return `an agent lands it with \`dispatch land="${branch}"\`, a field dispatch accepts beyond its attached schema (gateway describe dispatch), which asks the operator on a Land card`;
+}
+
 /** The failure detail suffix naming where a preserved partial result is and how to land it. */
 export function partialResultDetail(branch: string): string {
-	return `its partial work is committed, unmerged on ${branch}; review or continue it there, \`clio-coder fleet land ${branch}\` previews the merge and \`clio-coder fleet land ${branch} --yes\` lands it`;
+	return `its partial work is committed, unmerged on ${branch}; review or continue it there, \`clio-coder fleet land ${branch}\` previews the merge and \`clio-coder fleet land ${branch} --yes\` lands it; ${landCardClause(branch)}`;
 }
 
 const DECLARED_CHECK_DETAIL_MAX_CHARS = 120;
@@ -238,5 +246,5 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 export function mergeWithheldDetail(input: MergeGateInput): string | null {
 	const verdict = mergeGateVerdict(input);
 	if (verdict === null) return null;
-	return `merge withheld: ${verdict.reason}; its work is committed on the preserved branch ${input.branch}, \`clio-coder fleet land ${input.branch}\` previews the merge and \`clio-coder fleet land ${input.branch} --yes\` lands it ${verdict.appliesWhen}`;
+	return `merge withheld: ${verdict.reason}; its work is committed on the preserved branch ${input.branch}, \`clio-coder fleet land ${input.branch}\` previews the merge and \`clio-coder fleet land ${input.branch} --yes\` lands it ${verdict.appliesWhen}; ${landCardClause(input.branch)}`;
 }

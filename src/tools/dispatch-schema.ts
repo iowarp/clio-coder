@@ -497,6 +497,12 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 					),
 				}
 			: {}),
+		land: Type.Optional(
+			Type.String({
+				description:
+					"Kept task branch to land, as its run id or clio-coder/task/<run id>: the operator answers a Land card and CLIO Coder lands it on the host with the checks fleet land runs. Use this, never fleet land through a shell.",
+			}),
+		),
 		agent: Type.Optional(
 			Type.String({
 				description: composition.council

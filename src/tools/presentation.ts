@@ -159,9 +159,13 @@ export interface ToolRowSpec {
 	verbs: readonly [running: string, settled: string];
 	/**
 	 * Verbs that depend on the call's arguments: a steer that cancels, a fetch
-	 * that posts, a monitor call that waits. Null keeps `verbs`.
+	 * that posts, a monitor call that waits. `details` is the settled result's,
+	 * null while the call runs. Null keeps `verbs`.
 	 */
-	verbsFor?: (args: ToolRowArgs) => readonly [running: string, settled: string] | null;
+	verbsFor?: (
+		args: ToolRowArgs,
+		details: Readonly<Record<string, unknown>> | null,
+	) => readonly [running: string, settled: string] | null;
 	/**
 	 * The row's object, from the arguments: a path, a command, a pattern, a
 	 * host and path. `code` renders in backticks; `url` is shortened to its host
@@ -356,6 +360,8 @@ function dispatchObject(args: ToolRowArgs, context: ToolRowContext): string | nu
 	if (args.list === true) return "fleet agents";
 	const winner = record(args.apply_winner);
 	if (winner !== null) return joinDefined("winner", text(winner, "branch"));
+	const land = text(args, "land");
+	if (land !== null) return joinDefined("task branch", land);
 	const scout = record(args.from_scout);
 	if (scout !== null) return joinDefined("from scout run", text(scout, "run_id"));
 	const tasks = Array.isArray(args.tasks) ? args.tasks : null;
@@ -706,16 +712,31 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 	[ToolNames.Dispatch]: {
 		class: "delegate",
 		verbs: CLASS_VERBS.delegate,
-		verbsFor: (args) =>
+		verbsFor: (args, details) =>
 			args.list === true
 				? ["listing", "listed"]
 				: record(args.apply_winner) !== null
 					? ["applying", "applied"]
-					: record(args.from_scout) !== null
-						? ["planning", "planned"]
-						: null,
+					: typeof args.land === "string"
+						? // Only a Land the operator accepted lands; a kept or refused branch stays where it was.
+							["landing", details?.outcome === "landed" ? "landed" : "kept"]
+						: record(args.from_scout) !== null
+							? ["planning", "planned"]
+							: null,
 		object: (args, context) => plain(dispatchObject(args, context)),
-		consumes: ["agent", "task", "tasks", "list", "mode", "roster", "members", "candidates", "from_scout", "apply_winner"],
+		consumes: [
+			"agent",
+			"task",
+			"tasks",
+			"list",
+			"mode",
+			"roster",
+			"members",
+			"candidates",
+			"from_scout",
+			"apply_winner",
+			"land",
+		],
 	},
 	[ToolNames.Monitor]: {
 		class: "delegate",
@@ -946,11 +967,11 @@ export function resolveToolRow(
 	}
 	const builtin = TOOL_ROWS[toolName];
 	if (builtin !== undefined) {
-		const verbs = builtin.verbsFor?.(record) ?? builtin.verbs;
+		const settledDetails =
+			details !== null && typeof details === "object" ? (details as Readonly<Record<string, unknown>>) : null;
+		const verbs = builtin.verbsFor?.(record, settledDetails) ?? builtin.verbs;
 		const settled =
-			builtin.settledArgs !== undefined && details !== null && typeof details === "object"
-				? builtin.settledArgs(record, details as Readonly<Record<string, unknown>>)
-				: record;
+			builtin.settledArgs !== undefined && settledDetails !== null ? builtin.settledArgs(record, settledDetails) : record;
 		return {
 			spec: verbs === builtin.verbs ? builtin : { ...builtin, verbs },
 			toolName,

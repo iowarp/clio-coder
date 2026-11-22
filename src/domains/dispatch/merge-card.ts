@@ -8,11 +8,14 @@ import type { RunHostVerification } from "./types.js";
 /**
  * The operator's answer to a withheld task-worktree merge. The gate in
  * merge-gate.ts decides that a merge is held; this card lets an attached
- * operator overrule that for one branch. A headless run has no operator, and an
- * ACP session has one only when its client advertised interviews. Without one
- * no card is built and the merge stays withheld.
+ * operator overrule that for one branch. Land is the operator's own action: the
+ * host lands the branch with the checks `clio-coder fleet land` runs, outside
+ * the agent's sandbox, so landing an approved branch never needs a sandbox
+ * escape. A headless run has no operator, and an ACP session has one only when
+ * its client advertised interviews. Without one no card is built and the merge
+ * stays withheld.
  */
-export type MergeCardChoice = "merge" | "keep" | "discard";
+export type MergeCardChoice = "land" | "keep" | "discard";
 
 /** Why the card settled: an answer, or the fallback that applies Keep branch. */
 export type MergeCardCause = "answered" | "unlisted" | "escaped" | "aborted";
@@ -41,7 +44,7 @@ export interface MergeCardInput {
 	hostVerification?: RunHostVerification;
 	workerFailedChecks?: ReadonlyArray<string>;
 	branch: string;
-	/** The branch Merge would land on, as the source checkout has it checked out now. */
+	/** The branch Land would land on, as the source checkout has it checked out now. */
 	destination?: string;
 	changedPaths: ReadonlyArray<string>;
 	/** The gate's reason clause, as `mergeGateVerdict` words it. */
@@ -62,7 +65,7 @@ export interface MergeCardDeps {
 	retryMs?: number;
 }
 
-const MERGE = "Merge";
+const LAND = "Land";
 const KEEP = "Keep branch";
 const DISCARD = "Discard";
 const DELETE = "Delete";
@@ -88,19 +91,23 @@ function mergeCardPresentation(title: string, authorization: string, reversibili
 	};
 }
 
-function destinationOf(input: MergeCardInput): string {
+function destinationOf(input: { destination?: string }): string {
 	return input.destination ?? "your current branch";
 }
 
+function landAuthorization(destination: { destination?: string }): string {
+	return `Land is your action, carried out by CLIO Coder on the host outside the agent's sandbox: it lands the branch on ${destinationOf(destination)} with the checks \`clio-coder fleet land\` runs, and is refused if that checkout has since moved to another branch or the branch moved after this card was shown.`;
+}
+
 function choosePresentation(input: MergeCardInput): DecisionPresentation {
-	const offerMerge = offersMerge(input);
+	const offerLand = offersLand(input);
 	return mergeCardPresentation(
-		"Merge task branch?",
-		offerMerge
-			? `Merge lands the branch on ${destinationOf(input)} through the same guarded path as an ordinary merge, and is withheld if that checkout has since moved to another branch. Keep branch merges nothing. Discard asks once more before deleting.`
-			: "Keep branch merges nothing. Discard asks once more before deleting. Merge is not offered because the branch changes protected paths.",
-		offerMerge
-			? "Reversible: Merge and Keep branch can be undone or redone with git. Discard deletes the branch and cannot be undone."
+		"Land task branch?",
+		offerLand
+			? `${landAuthorization(input)} Keep branch merges nothing. Discard asks once more before deleting.`
+			: "Keep branch merges nothing. Discard asks once more before deleting. Land is not offered because the branch changes protected paths.",
+		offerLand
+			? "Reversible: Land and Keep branch can be undone or redone with git. Discard deletes the branch and cannot be undone."
 			: "Reversible: Keep branch can be undone with git. Discard deletes the branch and cannot be undone.",
 	);
 }
@@ -111,7 +118,7 @@ const CONFIRM_PRESENTATION = mergeCardPresentation(
 	"Reversible: no. The deleted branch is not recoverable from CLIO Coder.",
 );
 
-function offersMerge(input: MergeCardInput): boolean {
+function offersLand(input: MergeCardInput): boolean {
 	return (input.protectedPaths?.length ?? 0) === 0;
 }
 
@@ -122,15 +129,12 @@ function mergeCardQuestion(input: MergeCardInput): AskUserQuestion {
 	const noun = total === 1 ? "path" : "paths";
 	const protectedPaths = input.protectedPaths ?? [];
 	const options = [
-		...(offersMerge(input) ? [{ label: MERGE, description: `Land it on ${destinationOf(input)} now.` }] : []),
-		{
-			label: KEEP,
-			description: `Leave it on ${input.branch}; \`clio-coder fleet land ${input.branch}\` lands it later.`,
-		},
+		...(offersLand(input) ? [{ label: LAND, description: `CLIO Coder lands it on ${destinationOf(input)} now.` }] : []),
+		{ label: KEEP, description: keepDescription(input.branch) },
 		{ label: DISCARD, description: "Delete the branch and its worktree after one more confirmation." },
 	];
 	return {
-		header: "Merge task branch?",
+		header: "Land task branch?",
 		// Opens on Keep branch: an Enter that lands as the card appears must not merge.
 		defaultOption: options.findIndex((option) => option.label === KEEP),
 		question: [
@@ -150,12 +154,16 @@ function mergeCardQuestion(input: MergeCardInput): AskUserQuestion {
 				.map((check) => `Host check '${check.check}': ${hostCheckBaseNote(check)}.`) ?? []),
 			...(protectedPaths.length > 0
 				? [
-						`Merge is not offered: the branch changes protected ${protectedPaths.length === 1 ? "path" : "paths"} ${protectedPaths.map(boundedCheck).join(", ")}, which a merge never lands.`,
+						`Land is not offered: the branch changes protected ${protectedPaths.length === 1 ? "path" : "paths"} ${protectedPaths.map(boundedCheck).join(", ")}, which a merge never lands.`,
 					]
 				: []),
 		].join("\n"),
 		options,
 	};
+}
+
+function keepDescription(branch: string): string {
+	return `Leave it on ${branch}; the agent's \`dispatch land\` or \`clio-coder fleet land ${branch}\` lands it later.`;
 }
 
 function discardConfirmQuestion(branch: string): AskUserQuestion {
@@ -177,22 +185,20 @@ function chose(result: AskUserResult, label: string): boolean {
 	return result.answers[0]?.options?.includes(label) === true;
 }
 
-/**
- * Put the merge card to the operator. Esc and an abort both settle on Keep
- * branch, the behavior of a surface with no operator. Esc on the discard
- * confirm is Back.
- */
-export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): Promise<MergeCardOutcome> {
+interface CardSession {
+	put(question: AskUserQuestion, presentation: DecisionPresentation): Promise<AskUserResult | null>;
+	close(): void;
+}
+
+function openCardSession(deps: MergeCardDeps): CardSession {
 	const controller = new AbortController();
 	const onParentAbort = (): void => controller.abort();
 	if (deps.signal?.aborted === true) controller.abort();
 	deps.signal?.addEventListener("abort", onParentAbort, { once: true });
-	// Both rounds of the card, and the card again after Back, hold the screen
+	// Every round of the card, and the card again after Back, holds the screen
 	// together: a waiting model question must not slip in between them.
 	const hold = createHarnessHold();
 	const options = { origin: "harness" as const, signal: controller.signal, harnessHold: hold };
-	const keep = (cause: MergeCardCause): MergeCardOutcome => ({ choice: "keep", cause });
-	const stopped = (): MergeCardOutcome => keep("aborted");
 	const waitForScreen = (): Promise<void> =>
 		new Promise((resolve) => {
 			const settle = (): void => {
@@ -205,33 +211,108 @@ export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): 
 			controller.signal.addEventListener("abort", settle, { once: true });
 			if (controller.signal.aborted) settle();
 		});
-	// A round another overlay refused is retried until the card's own window
-	// closes, so a permission prompt on screen delays the card rather than
-	// silently settling it.
-	const put = async (question: AskUserQuestion, presentation: DecisionPresentation): Promise<AskUserResult | null> => {
-		for (;;) {
-			if (controller.signal.aborted) return null;
-			const result = await deps.ask([question], { ...options, decisionPresentation: presentation });
-			if (controller.signal.aborted) return null;
-			if (result.unavailable !== true) return result;
-			await waitForScreen();
-		}
+	return {
+		// A round another overlay refused is retried until the card's own window
+		// closes, so a permission prompt on screen delays the card rather than
+		// silently settling it.
+		async put(question, presentation) {
+			for (;;) {
+				if (controller.signal.aborted) return null;
+				const result = await deps.ask([question], { ...options, decisionPresentation: presentation });
+				if (controller.signal.aborted) return null;
+				if (result.unavailable !== true) return result;
+				await waitForScreen();
+			}
+		},
+		close() {
+			hold.release();
+			deps.signal?.removeEventListener("abort", onParentAbort);
+		},
 	};
+}
+
+/**
+ * Put the merge card to the operator. Esc and an abort both settle on Keep
+ * branch, the behavior of a surface with no operator. Esc on the discard
+ * confirm is Back.
+ */
+export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): Promise<MergeCardOutcome> {
+	const session = openCardSession(deps);
+	const keep = (cause: MergeCardCause): MergeCardOutcome => ({ choice: "keep", cause });
 	try {
 		for (;;) {
-			const picked = await put(mergeCardQuestion(input), choosePresentation(input));
-			if (picked === null) return stopped();
+			const picked = await session.put(mergeCardQuestion(input), choosePresentation(input));
+			if (picked === null) return keep("aborted");
 			if (picked.cancelled === true) return keep("escaped");
-			if (offersMerge(input) && chose(picked, MERGE)) return { choice: "merge", cause: "answered" };
+			if (offersLand(input) && chose(picked, LAND)) return { choice: "land", cause: "answered" };
 			if (!chose(picked, DISCARD)) return { choice: "keep", cause: chose(picked, KEEP) ? "answered" : "unlisted" };
-			const confirmed = await put(discardConfirmQuestion(input.branch), CONFIRM_PRESENTATION);
-			if (confirmed === null) return stopped();
+			const confirmed = await session.put(discardConfirmQuestion(input.branch), CONFIRM_PRESENTATION);
+			if (confirmed === null) return keep("aborted");
 			// Esc, Back, and anything but a labelled Delete return to the card.
 			if (confirmed.cancelled !== true && chose(confirmed, DELETE)) return { choice: "discard", cause: "answered" };
 		}
 	} finally {
-		hold.release();
-		deps.signal?.removeEventListener("abort", onParentAbort);
+		session.close();
+	}
+}
+
+export interface LandCardInput {
+	branch: string;
+	/** The branch Land would land on, as the source checkout has it checked out now. */
+	destination?: string;
+	/** `<short> <subject>` for the branch's own commits, newest first, as fleet land plans them. */
+	commits: ReadonlyArray<string>;
+	/** The landing's `git diff --shortstat`. */
+	changed: string;
+	/** Paths in the kept worktree that Land commits onto the branch first. */
+	uncommitted: number;
+}
+
+/**
+ * The Land card for a task branch an earlier run kept, reopened by the agent's
+ * `dispatch land`. It offers Land and Keep branch only; deleting a kept branch
+ * stays with the operator. Esc and an abort settle on Keep branch.
+ */
+export async function askLandCard(deps: MergeCardDeps, input: LandCardInput): Promise<MergeCardOutcome> {
+	const session = openCardSession(deps);
+	const listed = input.commits.slice(0, LISTED_PATHS).map((line) => `- ${boundedCheck(line)}`);
+	const omitted = input.commits.length - listed.length;
+	const options = [
+		{ label: LAND, description: `CLIO Coder lands it on ${destinationOf(input)} now.` },
+		{ label: KEEP, description: keepDescription(input.branch) },
+	];
+	const question: AskUserQuestion = {
+		header: "Land task branch?",
+		// Opens on Keep branch: an Enter that lands as the card appears must not merge.
+		defaultOption: 1,
+		question: [
+			`The agent asks to land kept branch ${input.branch} (${boundedCheck(input.changed)}):`,
+			...listed,
+			...(omitted > 0 ? [`- … and ${omitted} more`] : []),
+			...(input.uncommitted > 0
+				? [
+						`Land first commits ${input.uncommitted} uncommitted ${input.uncommitted === 1 ? "path" : "paths"} in its worktree onto the branch.`,
+					]
+				: []),
+		].join("\n"),
+		options,
+	};
+	const presentation: DecisionPresentation = {
+		...mergeCardPresentation(
+			"Land task branch?",
+			`${landAuthorization(input)} Keep branch merges nothing.`,
+			"Reversible: Land and Keep branch can be undone or redone with git.",
+		),
+		requestedByCopy: "the agent's dispatch land request",
+	};
+	try {
+		const picked = await session.put(question, presentation);
+		if (picked === null) return { choice: "keep", cause: "aborted" };
+		if (picked.cancelled === true) return { choice: "keep", cause: "escaped" };
+		if (chose(picked, LAND)) return { choice: "land", cause: "answered" };
+		return { choice: "keep", cause: chose(picked, KEEP) ? "answered" : "unlisted" };
+	} finally {
+		session.close();
 	}
 }
 

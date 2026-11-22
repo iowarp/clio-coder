@@ -11,6 +11,7 @@ import {
 import type { AgentTrait } from "../domains/agents/spec.js";
 import { sealedAnswerBudgetBytes } from "../domains/dispatch/handback.js";
 import { hostCheckBaseNote, hostCheckNotRunNote } from "../domains/dispatch/host-verification-note.js";
+import { landCardClause } from "../domains/dispatch/merge-gate.js";
 import { settleFinishedRun } from "../domains/dispatch/run-settlement.js";
 import type { RunResult, RunResultDraft } from "../domains/dispatch/types.js";
 import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
@@ -110,13 +111,14 @@ function taskWorktreeLines(run: FinishedRun): string[] {
 	const worktree = run.delivered?.worktree;
 	if (worktree === undefined || worktree === null) return [];
 	const commit = worktree.commit !== undefined ? ` at ${worktree.commit.slice(0, 7)}` : "";
+	const land = landCardClause(worktree.branch);
 	const held = `branch ${worktree.branch}${commit}, worktree ${worktree.path}`;
 	const landing =
 		run.facts.worktree?.applied === true
 			? (worktree.detail ?? "merged")
 			: worktree.reason !== undefined
-				? `not merged, ${worktree.reason}${worktree.detail !== undefined ? ` (${worktree.detail})` : ""}; the work is on ${held}`
-				: `preserved, not merged; the work is on ${held}`;
+				? `not merged, ${worktree.reason}${worktree.detail !== undefined ? ` (${worktree.detail})` : ""}; the work is on ${held}${worktree.detail?.includes(land) ? "" : `; ${land}`}`
+				: `preserved, not merged; the work is on ${held}; ${land}`;
 	return [
 		`  ${[
 			`task worktree: ${landing}`,

@@ -41,9 +41,9 @@ test("the card opens on Keep branch and the discard confirm opens on Back", asyn
 	deepStrictEqual(asked.map(labelAt), ["Keep branch", "Back", "Keep branch"]);
 });
 
-test("Merge and a confirmed Delete are the only destructive outcomes; Esc keeps the branch", async () => {
-	deepStrictEqual(await askMergeCard({ ask: scripted([pick("Merge")]).ask }, INPUT), {
-		choice: "merge",
+test("Land and a confirmed Delete are the only destructive outcomes; Esc keeps the branch", async () => {
+	deepStrictEqual(await askMergeCard({ ask: scripted([pick("Land")]).ask }, INPUT), {
+		choice: "land",
 		cause: "answered",
 	});
 	deepStrictEqual(await askMergeCard({ ask: scripted([pick("Discard"), pick("Delete")]).ask }, INPUT), {
@@ -57,9 +57,9 @@ test("Merge and a confirmed Delete are the only destructive outcomes; Esc keeps 
 });
 
 test("a screen another overlay holds delays the card instead of settling it", async () => {
-	const { ask, asked } = scripted([{ answers: [], cancelled: true, unavailable: true }, pick("Merge")]);
+	const { ask, asked } = scripted([{ answers: [], cancelled: true, unavailable: true }, pick("Land")]);
 	const outcome = await askMergeCard({ ask, retryMs: 1 }, INPUT);
-	strictEqual(outcome.choice, "merge");
+	strictEqual(outcome.choice, "land");
 	strictEqual(asked.length, 2);
 });
 
@@ -84,8 +84,8 @@ test("elapsed screen retries release their abort listeners", async () => {
 	}
 });
 
-test("a branch that changes protected paths is not offered a Merge, and the card says why", async () => {
-	const { ask, asked } = scripted([pick("Merge")]);
+test("a branch that changes protected paths is not offered a Land, and the card says why", async () => {
+	const { ask, asked } = scripted([pick("Land")]);
 	const outcome = await askMergeCard({ ask }, { ...INPUT, protectedPaths: ["docs/policy.md"] });
 	deepStrictEqual(
 		asked[0]?.options?.map((option) => option.label),

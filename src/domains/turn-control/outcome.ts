@@ -115,6 +115,7 @@ export function dispatchKeysFromArgs(
 		args.list === true ||
 		args.from_scout !== undefined ||
 		args.apply_winner !== undefined ||
+		args.land !== undefined ||
 		(args.review !== undefined && args.review !== false)
 	)
 		return [];

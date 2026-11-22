@@ -164,7 +164,9 @@ export type ExtensionDispatchCall =
 			candidates?: number;
 	  }
 	| { kind: "list" }
-	| { kind: "apply-winner"; branch: string; cwd: string };
+	| { kind: "apply-winner"; branch: string; cwd: string }
+	/** A kept task branch, by run id or branch name, that the operator lands from a Land card. */
+	| { kind: "land"; ref: string; cwd: string };
 
 /**
  * Facts Clio resolves for a tool hook, present with `args` (access: tool-args)

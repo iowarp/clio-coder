@@ -3077,7 +3077,9 @@ export async function runDispatchTool(
 	const snapshot = admissionState.trustedExecutionSnapshots.get(args);
 	if (
 		options?.turnConstraints?.allowedTools !== undefined &&
-		(snapshot?.kind === "apply-winner" || (snapshot?.kind === "dispatch" && snapshot.mode === "compete"))
+		(snapshot?.kind === "apply-winner" ||
+			snapshot?.kind === "land" ||
+			(snapshot?.kind === "dispatch" && snapshot.mode === "compete"))
 	) {
 		return {
 			kind: "error",
@@ -3091,6 +3093,29 @@ export async function runDispatchTool(
 			return { kind: "error", message: "dispatch: no agent catalog is available in this context" };
 		}
 		return { kind: "ok", output: catalog };
+	}
+	if (snapshot?.kind === "land") {
+		// Boot recovery settles a dead run's claim; until then fleet land reads its branch as running.
+		await deps.dispatch.awaitStartupRecovery?.();
+		if (deps.dispatch.landKeptTask === undefined) {
+			return {
+				kind: "error",
+				message: `dispatch: land is unavailable here; the operator can land it with \`clio-coder fleet land ${snapshot.ref}\``,
+			};
+		}
+		const landing = await deps.dispatch.landKeptTask({
+			ref: snapshot.ref,
+			cwd: snapshot.cwd,
+			...(options?.signal !== undefined ? { signal: options.signal } : {}),
+		});
+		const details = {
+			mode: "land",
+			outcome: landing.outcome,
+			...(landing.branch !== undefined ? { branch: landing.branch } : {}),
+		};
+		return landing.outcome === "refused"
+			? { kind: "error", message: `dispatch: land ${snapshot.ref}: ${landing.detail}`, details }
+			: { kind: "ok", output: `dispatch land ${landing.branch ?? snapshot.ref}: ${landing.detail}.`, details };
 	}
 	// Gate evidence and compete recovery below must not race the boot's own recovery of the same groups.
 	await deps.dispatch.awaitStartupRecovery?.();
