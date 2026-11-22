@@ -70,6 +70,63 @@ function normalizePaths(value: unknown): string[] | null {
 	return paths;
 }
 
+const LIMITATION_REASON_MEANINGS: Readonly<Record<LimitationReason, string>> = {
+	"no-runner": "no runner exists or no project check applies to this change",
+	blocked: "a gate or denial stopped the check",
+	"out-of-scope": "the task excluded it",
+	environment: "it cannot run here",
+	"write-root":
+		"the change needs the listed paths, which lie outside your write roots, so stop before editing and the coordinator can widen the roots and continue",
+	other: "none of the above",
+};
+
+const LIMITATION_REASON_TEXT = LIMITATION_REASONS.map((reason) =>
+	reason === "other" ? reason : `${reason}: ${LIMITATION_REASON_MEANINGS[reason]}`,
+);
+
+/**
+ * Where preparation keeps an off-enum reason's text after filing it under the closest value, so `run` can tell a
+ * filed reason from a typed one. Preparation runs on the direct path, again on the gateway path and again in the
+ * registry, so the key survives every pass and never doubles the scope.
+ */
+const OFF_ENUM_REASON = "offEnumReason";
+
+function prepareLimitationArguments(args: Record<string, unknown>): Record<string, unknown> {
+	const reason = args.reason;
+	if (typeof reason !== "string" || isLimitationReason(reason)) return args;
+	const text = reason.trim();
+	if (isLimitationReason(text)) return { ...args, reason: text };
+	const scope = trimString(args.scope);
+	return {
+		...args,
+		scope: scope === null ? text : text.length > 0 ? `${scope} (${text})` : scope,
+		reason: /\b(block|den(y|ied)|permission|policy|safety|approval)/iu.test(text) ? "blocked" : "other",
+		[OFF_ENUM_REASON]: text,
+	};
+}
+
+/**
+ * Sessions that already had one off-enum reason refused (row 382). The first refusal teaches the values; a later
+ * one is filed so a small model never loops on the refusal. Oldest keys drop first past the cap.
+ */
+const offEnumRefusedSessions = new Set<string>();
+const OFF_ENUM_SESSION_CAP = 1024;
+
+function firstOffEnumReason(sessionKey: string): boolean {
+	if (offEnumRefusedSessions.has(sessionKey)) return false;
+	if (offEnumRefusedSessions.size >= OFF_ENUM_SESSION_CAP) {
+		const oldest = offEnumRefusedSessions.values().next().value;
+		if (oldest !== undefined) offEnumRefusedSessions.delete(oldest);
+	}
+	offEnumRefusedSessions.add(sessionKey);
+	return true;
+}
+
+function offEnumRefusal(text: string): string {
+	const values = LIMITATION_REASONS.map((reason) => `${reason} (${LIMITATION_REASON_MEANINGS[reason]})`).join("; ");
+	return `limitation: reason ${JSON.stringify(text)} is not a reason value and nothing was recorded. The reason must be one of: ${values}. Call limitation again with reason set to exactly one of these values and the explanation in scope.`;
+}
+
 export const limitationTool: ToolSpec = {
 	name: ToolNames.Limitation,
 	description:
@@ -77,8 +134,7 @@ export const limitationTool: ToolSpec = {
 	parameters: Type.Object({
 		scope: Type.String({ description: "What could not be verified, in one sentence." }),
 		reason: StringEnum(LIMITATION_REASONS, {
-			description:
-				"no-runner: no runner exists; blocked: a gate or denial stopped the check; out-of-scope: the task excluded it; environment: it cannot run here; write-root: the change needs the listed paths, which lie outside your write roots, so stop before editing and the coordinator can widen the roots and continue; other.",
+			description: `${LIMITATION_REASON_TEXT.join("; ")}.`,
 		}),
 		paths: Type.Optional(
 			Type.Array(Type.String(), {
@@ -91,20 +147,11 @@ export const limitationTool: ToolSpec = {
 	// Small models write the reason as prose ("safety posture restricts git"),
 	// fail validation, repeat it, and then invent a report file in the task
 	// worktree instead. Keep the prose in scope and file it under the closest
-	// category so the one call that records the limitation lands.
-	prepareArguments(args) {
-		const reason = args.reason;
-		if (typeof reason !== "string" || isLimitationReason(reason)) return args;
-		const text = reason.trim();
-		if (isLimitationReason(text)) return { ...args, reason: text };
-		const scope = trimString(args.scope);
-		return {
-			...args,
-			scope: scope === null ? text : text.length > 0 ? `${scope} (${text})` : scope,
-			reason: /\b(block|den(y|ied)|permission|policy|safety|approval)/iu.test(text) ? "blocked" : "other",
-		};
-	},
-	async run(args): Promise<ToolResult> {
+	// category so the call passes the schema; run then refuses the first such
+	// reason in a session with the reason list (row 382) and files later ones.
+	prepareArguments: prepareLimitationArguments,
+	async run(rawArgs, options): Promise<ToolResult> {
+		const { [OFF_ENUM_REASON]: offEnum, ...args } = prepareLimitationArguments(rawArgs);
 		const scope = trimString(args.scope);
 		if (scope === null) return { kind: "error", message: "limitation: scope is required" };
 		if (claimsToolsGone(scope)) {
@@ -112,6 +159,9 @@ export const limitationTool: ToolSpec = {
 		}
 		if (!isLimitationReason(args.reason)) {
 			return { kind: "error", message: `limitation: reason must be one of ${LIMITATION_REASONS.join(", ")}` };
+		}
+		if (typeof offEnum === "string" && firstOffEnumReason(options?.sessionId ?? options?.runId ?? "")) {
+			return { kind: "error", message: offEnumRefusal(offEnum), details: { refusal: "reason_off_enum" } };
 		}
 		const paths = normalizePaths(args.paths);
 		if (paths === null) return { kind: "error", message: "limitation: paths must be an array of non-empty strings" };
