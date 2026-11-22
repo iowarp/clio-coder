@@ -14,6 +14,7 @@ named in `release-manifest.json` also ship in the npm package.
 | `pnpm test:package` | Exercise the installed package explicitly. |
 | `pnpm library:check` / `pnpm skills:check` | Verify local catalog content and generated projections against committed pins. |
 | `pnpm library:pin` / `pnpm skills:pin` | Refresh generated catalogs. Library pinning also fetches blessed remote packages. |
+| `pnpm economy:check` | Validate the public API reference tariff in `models/economy-rates.json` (units, sources, tier thresholds, overlapping or missing dated rows, future-only models) and print witness quotes. `-- --as-of <YYYY-MM-DD>` audits another day. Reads only the packaged file. |
 | `pnpm pi:surface-diff` / `pnpm pi:surface-snapshot` | Review consumed Pi declarations or refresh their snapshot during dependency maintenance. |
 | `pnpm run check` | Run `typecheck` and Biome (errors only) at once: the few-second loop before `pnpm run lint`. |
 | `pnpm run typecheck` / `pnpm run typecheck:tsc` / `pnpm run typecheck:compare` | Typecheck source, tests and scripts with the Rust port `tsrs --fast` (the default, about 1 s, falling back to `tsc` with a notice where tsrs cannot run), with TypeScript 7's own `tsc` as the reference (about 6 s), or run both over the same project and fail if their diagnostics differ; release preparation runs the last. See "Typechecking" in `CONTRIBUTING.md`. |
