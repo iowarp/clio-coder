@@ -21,6 +21,7 @@ import {
 	quotaReadingFingerprint,
 	quotaReadingFromMessage,
 } from "../../src/domains/quota/index.js";
+import { footerQuotaSegment } from "../../src/domains/quota/presentation.js";
 import type { QuotaProvider } from "../../src/domains/quota/types.js";
 import { foldAccountQuota, quotaAccount } from "../../src/domains/telemetry/read-model.js";
 import { codexAccountScope, parseCodexQuotaEvent } from "../../src/engine/apis/codex-quota.js";
@@ -47,13 +48,13 @@ function provider(fetch: typeof globalThis.fetch, credentials: CodexCredentials 
 	});
 }
 
-it("reads both rate limit windows, using limit_window_seconds to pick their keys", async () => {
+it("reads both rate limit windows, keyed and labeled by limit_window_seconds", async () => {
 	const { fetch, calls } = stubFetch(() =>
 		jsonResponse({
 			plan_type: "plus",
 			rate_limit: {
 				primary_window: { used_percent: 91, reset_at: 1_767_225_600, limit_window_seconds: 604_800 },
-				secondary_window: { used_percent: 12, reset_at: 1_767_000_000, limit_window_seconds: 300 },
+				secondary_window: { used_percent: 12, reset_at: 1_767_000_000, limit_window_seconds: 10_800 },
 			},
 		}),
 	);
@@ -66,12 +67,13 @@ it("reads both rate limit windows, using limit_window_seconds to pick their keys
 	assert.deepEqual(
 		snapshot.windows.map((window) => [window.key, window.label, window.short, window.usedPct]),
 		[
-			["session", "5h", "5h", 12],
+			["session", "3h", "3h", 12],
 			["weekly", "Weekly", "wk", 91],
 		],
 	);
 	assert.equal(snapshot.windows[0]?.resetsAt, new Date(1_767_000_000 * 1000).toISOString());
 	assert.equal(snapshot.windows[1]?.resetsAt, new Date(1_767_225_600 * 1000).toISOString());
+	assert.equal(footerQuotaSegment([snapshot]), "OpenAI 3h 12% used/wk 91% used");
 
 	assert.equal(calls.length, 1);
 	assert.equal(calls[0]?.url, CODEX_USAGE_URL);
@@ -80,7 +82,7 @@ it("reads both rate limit windows, using limit_window_seconds to pick their keys
 	assert.equal(calls[0]?.headers.originator, "clio-coder");
 });
 
-it("defaults primary to session and secondary to weekly when limit_window_seconds is absent", async () => {
+it("keys primary as session and secondary as weekly, naming the slot, when limit_window_seconds is absent", async () => {
 	const { fetch } = stubFetch(() =>
 		jsonResponse({
 			rate_limit: {
@@ -94,8 +96,8 @@ it("defaults primary to session and secondary to weekly when limit_window_second
 
 	assert.equal(snapshot.status, "ok");
 	assert.deepEqual(snapshot.windows, [
-		{ key: "session", label: "5h", short: "5h", usedPct: 40, resetsAt: null },
-		{ key: "weekly", label: "Weekly", short: "wk", usedPct: 60, resetsAt: null },
+		{ key: "session", label: "Primary", short: "pri", usedPct: 40, resetsAt: null },
+		{ key: "weekly", label: "Secondary", short: "sec", usedPct: 60, resetsAt: null },
 	]);
 });
 

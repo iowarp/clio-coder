@@ -118,7 +118,11 @@ export function createCodexCliQuotaProvider(options: CodexCliQuotaOptions = {}):
 				timeoutMs,
 				identity: { "User-Agent": "codex-cli" },
 			});
-			if (usage.status !== "ok") return snapshot(usage.status, usage.message ?? "Sign in with Codex again");
+			if (usage.status !== "ok") {
+				return snapshot(usage.status, usage.message ?? "Sign in with Codex again", {
+					retryAfterSeconds: usage.retryAfterSeconds,
+				});
+			}
 			return snapshot("ok", null, { windows: usage.windows, credits: usage.credits, plan: usage.plan });
 		},
 	};

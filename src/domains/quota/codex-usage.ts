@@ -9,12 +9,13 @@
  */
 
 import type { UsageCredits, UsageSnapshot, UsageWindow } from "./types.js";
-import { formatPlan } from "./types.js";
+import { formatPlan, parseRetryAfterSeconds } from "./types.js";
 
 export const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
 const WINDOW_ORDER: Record<string, number> = { session: 0, weekly: 1 };
 const WEEKLY_THRESHOLD_SECONDS = 86_400;
+const WEEK_SECONDS = 604_800;
 
 /** The token and account a usage read sends. */
 export interface CodexAccountToken {
@@ -29,6 +30,7 @@ export interface CodexUsageOutcome {
 	windows: UsageWindow[];
 	credits: UsageCredits | null;
 	plan: string | null;
+	retryAfterSeconds: number | null;
 }
 
 export interface CodexUsageDependencies {
@@ -43,10 +45,13 @@ function outcome(
 	message: string | null,
 	extra: Partial<CodexUsageOutcome> = {},
 ): CodexUsageOutcome {
-	return { status, message, windows: [], credits: null, plan: null, ...extra };
+	return { status, message, windows: [], credits: null, plan: null, retryAfterSeconds: null, ...extra };
 }
 
-/** Read current Codex usage for one account, reporting failure as a status. */
+/**
+ * Read current Codex usage for one account, reporting failure as a status. The timeout covers the body as well as the
+ * headers: a response whose body stalls would otherwise hold the caller, and its sibling adapter queued behind it.
+ */
 export async function fetchCodexUsage(
 	token: CodexAccountToken,
 	dependencies: CodexUsageDependencies,
@@ -59,38 +64,60 @@ export async function fetchCodexUsage(
 
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), dependencies.timeoutMs);
-	let response: Response;
 	try {
-		response = await dependencies.fetch(CODEX_USAGE_URL, { method: "GET", headers, signal: controller.signal });
-	} catch (error) {
-		return outcome("error", describeError(error, dependencies.timeoutMs));
+		let response: Response;
+		try {
+			response = await dependencies.fetch(CODEX_USAGE_URL, { method: "GET", headers, signal: controller.signal });
+		} catch (error) {
+			return outcome("error", describeError(error, dependencies.timeoutMs));
+		}
+
+		if (response.status === 401 || response.status === 403) {
+			await discardBody(response);
+			return outcome("expired", null);
+		}
+		if (response.status === 429) {
+			await discardBody(response);
+			return outcome("error", "HTTP 429", {
+				retryAfterSeconds: parseRetryAfterSeconds(response.headers.get("Retry-After")),
+			});
+		}
+		if (response.status !== 200) {
+			await discardBody(response);
+			return outcome("error", `HTTP ${response.status}`);
+		}
+
+		let body: unknown;
+		try {
+			body = await untilAborted(response.json(), controller.signal);
+		} catch {
+			return outcome(
+				"error",
+				controller.signal.aborted ? `timeout after ${dependencies.timeoutMs}ms` : "Unexpected usage response",
+			);
+		}
+		if (!isRecord(body)) {
+			return outcome("error", "Unexpected usage response");
+		}
+
+		return outcome("ok", null, {
+			windows: usageWindows(body.rate_limit),
+			credits: usageCredits(body.credits),
+			plan: formatPlan(typeof body.plan_type === "string" ? body.plan_type : null),
+		});
 	} finally {
 		clearTimeout(timer);
 	}
+}
 
-	if (response.status === 401 || response.status === 403) {
-		await discardBody(response);
-		return outcome("expired", null);
-	}
-	if (response.status !== 200) {
-		await discardBody(response);
-		return outcome("error", `HTTP ${response.status}`);
-	}
-
-	let body: unknown;
-	try {
-		body = await response.json();
-	} catch {
-		return outcome("error", "Unexpected usage response");
-	}
-	if (!isRecord(body)) {
-		return outcome("error", "Unexpected usage response");
-	}
-
-	return outcome("ok", null, {
-		windows: usageWindows(body.rate_limit),
-		credits: usageCredits(body.credits),
-		plan: formatPlan(typeof body.plan_type === "string" ? body.plan_type : null),
+/** Settle with `work`, or reject once `signal` aborts; a body read the abort outran is left to settle unobserved. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+	work.catch(() => undefined);
+	if (signal.aborted) return Promise.reject(new Error("aborted"));
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = (): void => reject(new Error("aborted"));
+		signal.addEventListener("abort", onAbort, { once: true });
+		work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
 	});
 }
 
@@ -108,15 +135,35 @@ function usageWindows(raw: unknown): UsageWindow[] {
 	});
 }
 
-/** One `rate_limit` window slot, with the key defaulting when `limit_window_seconds` is absent. */
+/**
+ * One `rate_limit` window slot. The key defaults by slot when `limit_window_seconds` is absent; the label always comes
+ * from the reported duration, and names the slot rather than a guessed duration when none is reported.
+ */
 function buildWindow(raw: unknown, defaultKey: "session" | "weekly"): UsageWindow | null {
 	if (!isRecord(raw)) return null;
 	const usedPct = asNumber(raw.used_percent);
 	if (usedPct === null) return null;
 	const key = windowKey(raw.limit_window_seconds, defaultKey);
-	const label = key === "weekly" ? "Weekly" : "5h";
-	const short = key === "weekly" ? "wk" : "5h";
+	const { label, short } = windowLabel(raw.limit_window_seconds, defaultKey);
 	return { key, label, short, usedPct, resetsAt: epochSecondsToIso(raw.reset_at) };
+}
+
+/** "Weekly" for exactly seven days, otherwise the largest whole unit of the reported duration, such as "3h". */
+function windowLabel(limitWindowSeconds: unknown, slot: "session" | "weekly"): { label: string; short: string } {
+	const reported = asNumber(limitWindowSeconds);
+	const seconds = reported === null ? 0 : Math.round(reported);
+	if (seconds <= 0)
+		return slot === "session" ? { label: "Primary", short: "pri" } : { label: "Secondary", short: "sec" };
+	if (seconds === WEEK_SECONDS) return { label: "Weekly", short: "wk" };
+	const compact =
+		seconds % 86_400 === 0
+			? `${seconds / 86_400}d`
+			: seconds % 3_600 === 0
+				? `${seconds / 3_600}h`
+				: seconds % 60 === 0
+					? `${seconds / 60}m`
+					: `${seconds}s`;
+	return { label: compact, short: compact };
 }
 
 function windowKey(limitWindowSeconds: unknown, defaultKey: "session" | "weekly"): "session" | "weekly" {

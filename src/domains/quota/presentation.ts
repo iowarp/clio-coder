@@ -107,8 +107,8 @@ export function footerQuotaSegment(snapshots: ReadonlyArray<UsageSnapshot>): str
 		const weekly = windowByKey(snapshot, "weekly");
 		const session = windowByKey(snapshot, "session");
 		const shown: string[] = [];
-		if (session) shown.push(`5h ${formatPct(session.usedPct)} used`);
-		if (weekly) shown.push(`wk ${formatPct(weekly.usedPct)} used`);
+		if (session) shown.push(`${session.short ?? session.label} ${formatPct(session.usedPct)} used`);
+		if (weekly) shown.push(`${weekly.short ?? "wk"} ${formatPct(weekly.usedPct)} used`);
 		const binding = primaryWindow(snapshot);
 		if (shown.length > 0 && binding?.scope && binding !== session && binding !== weekly) {
 			shown.push(

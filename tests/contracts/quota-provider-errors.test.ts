@@ -31,6 +31,7 @@ const PROVIDERS: Record<Provider, (fetch: typeof globalThis.fetch, signedIn: boo
 				signedIn ? { accessToken: "sk-codex-test", accountId: "acct-123", expiresAtMs: null, hasRefreshToken: true } : null,
 			fetch,
 			now: () => NOW,
+			timeoutMs: 100,
 		}),
 };
 
@@ -39,6 +40,7 @@ const FAULTS = {
 	auth403: () => new Response("", { status: 403 }),
 	rateLimited: () => new Response("", { status: 429, headers: { "Retry-After": "42" } }),
 	http503: () => new Response("", { status: 503 }),
+	stalledBody: () => new Response(new ReadableStream({ start() {} }), { status: 200 }),
 	badJson: () => new Response("not json{", { status: 200, headers: { "content-type": "application/json" } }),
 	nonObject: () => jsonResponse([1, 2, 3]),
 	transport: (): Response => {
@@ -74,6 +76,18 @@ const rows: Row[] = [
 		provider: "claude-code",
 		fault: "rateLimited",
 		expect: { status: "error", message: "HTTP 429", retryAfterSeconds: 42 },
+	},
+	{
+		name: "captures Retry-After when the usage endpoint rate limits the read",
+		provider: "codex",
+		fault: "rateLimited",
+		expect: { status: "error", message: "HTTP 429", retryAfterSeconds: 42 },
+	},
+	{
+		name: "times out a body that stalls after the headers",
+		provider: "codex",
+		fault: "stalledBody",
+		expect: { status: "error", message: "timeout after 100ms" },
 	},
 	{ name: statuses, provider: "claude-code", fault: "http503", expect: { status: "error", message: "HTTP 503" } },
 	{ name: statuses, provider: "codex", fault: "http503", expect: { status: "error", message: "HTTP 503" } },
