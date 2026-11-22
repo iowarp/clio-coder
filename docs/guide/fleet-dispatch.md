@@ -900,7 +900,13 @@ places a clause of the task that asks for tests to be removed exempts the remova
 clause that tells the worker not to validate (for example "do not run the tests") means an
 unrun check does not withhold. A withheld merge ends the run `failed` with outcome code
 `merge_withheld`, which suppresses automatic retry; its work stays committed on the preserved
-branch, and the detail names the `clio-coder fleet land` command that applies it.
+branch, and the detail names the `clio-coder fleet land` command that applies it. In an
+attended session the held-merge card also offers Land, and `dispatch` with `land` set to the
+kept branch's run id reopens that card. CLIO Coder then lands the branch on the host as the
+operator's action, with the checks `fleet land` runs, so a sandboxed session lands approved
+work without a sandbox escape ([task-land.ts](../../src/tools/task-land.ts)). Land is bound to
+the branch tip and the destination the card showed, and it refuses uncommitted work that no
+commit accounts for and protected paths.
 
 When a worker claimed passing checks but executed no command and no host verification ran,
 the dispatch result names the parent's next step. For a run that can change code, under a
