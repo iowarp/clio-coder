@@ -510,14 +510,24 @@ describe("dispatch admission boundary", () => {
 	});
 
 	it("admits verification work and read-only inspection of test files", () => {
-		const specs = [agent("verifier", "verification"), agent("scout", "read-only"), agent("coder", "workspace-edit")];
-		const assess = (agentId: string, capabilityClass: "verification" | "read-only", task: string) =>
+		const specs = [
+			agent("verifier", "verification"),
+			agent("debugger", "verification"),
+			agent("scout", "read-only"),
+			agent("coder", "workspace-edit"),
+		];
+		const contracts = { verifier: "verifier-report", debugger: "debugger-report", scout: "scout-report" } as const;
+		const assess = (
+			agentId: "verifier" | "debugger" | "scout",
+			capabilityClass: "verification" | "read-only",
+			task: string,
+		) =>
 			assessCapabilityMismatch({
 				agentId,
 				capabilityClass,
 				task,
 				autoSelected: false,
-				resultContractKind: agentId === "verifier" ? "verifier-report" : "scout-report",
+				resultContractKind: contracts[agentId],
 				specs,
 			});
 		strictEqual(assess("verifier", "verification", "Check whether the retry tests pass"), null);
@@ -525,6 +535,24 @@ describe("dispatch admission boundary", () => {
 		strictEqual(assess("scout", "read-only", "Inspect tests/retry.test.ts and report what it covers"), null);
 		strictEqual(assess("scout", "read-only", "Read src/retry.test.ts and summarize it"), null);
 		strictEqual(assess("verifier", "verification", "Write new retry tests")?.verdict, "refuse");
+		// M-40: a build-and-verify batch. The check task's `m.add(1,1)` is a method call, not the verb "add".
+		const batch = [
+			'Without editing any file, verify m.add(1,1)==2 by running python3 -c "import m; assert m.add(1,1)==2" and report',
+			"Add a function sub(a, b) returning a - b to m.py",
+		] as const;
+		strictEqual(assess("debugger", "verification", batch[0]), null);
+		strictEqual(
+			assessCapabilityMismatch({
+				agentId: "coder",
+				capabilityClass: "workspace-edit",
+				task: batch[1],
+				autoSelected: false,
+				resultContractKind: "mutation-report",
+				specs,
+			}),
+			null,
+		);
+		strictEqual(assess("debugger", "verification", "Fix the bug in m.py")?.verdict, "refuse");
 	});
 
 	it("reads 'change nothing' and 'leave X unchanged' as prohibitions, not mutation requests", () => {

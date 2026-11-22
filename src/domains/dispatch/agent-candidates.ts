@@ -116,6 +116,19 @@ const MUTATION_PROHIBITION =
 	/(?:\b(?:change|edit|modify|touch|write|alter|update)\s+(?:nothing|no\s+(?:files?|code|sources?)|none\s+of\s+(?:it|them|the\s+\w+))\b(?:\s+else\b)?|\bleave\s+(?:(?!\b(?:and|then|but|except|also|unchanged|untouched|as[\s-]is|alone|intact)\b)[^.;,\n]){0,60}?\b(?:unchanged|untouched|as[\s-]is|alone|intact)\b)(?=(?:(?!\b(?:except|but|other\s+than|besides|apart\s+from|aside\s+from|save\s+for|beyond|unless)\b|[.!?](?:\s|$))[^;\n])*(?:[.!?](?:\s|$)|[;\n]|$))/gi;
 
 /**
+ * A member name in code (`m.add(1,1)`, `cache.update`) is an identifier, not a verb: its dot would otherwise
+ * open a clause for IMPERATIVE_MUTATION and its name would win the ordered `code_write` scan, so "verify
+ * m.add(1,1)==2" read as a request to add something (M-40). Masked are a method call of any name and a
+ * mutation verb reached through a dot; a file extension (`m.py`, `app.config.ts`) is neither and stays.
+ */
+const CODE_MEMBER =
+	/(?<=[\w$)\]]\.)(?:[A-Za-z_$][\w$]*(?=\()|(?:write|implement|add|create|build|develop|fix|repair|resolve|patch|address|correct|edit|change|modify|refactor|update)\b)/gi;
+
+function withoutCodeMembers(task: string): string {
+	return task.replace(CODE_MEMBER, "member");
+}
+
+/**
  * Each sentence as the request it makes, polite lead removed, and whether it
  * asks for an answer: a sentence ending in "?" does, unless a polite lead
  * makes it a request.
@@ -133,7 +146,7 @@ function taskSentences(task: string): Array<{ request: string; question: boolean
 
 /** Judged per sentence: a question ("which dependency do we need to patch?") asks for an answer, not a change. */
 export function asksForMutation(task: string): boolean {
-	return taskSentences(task.replace(MUTATION_PROHIBITION, " ")).some(
+	return taskSentences(withoutCodeMembers(task).replace(MUTATION_PROHIBITION, " ")).some(
 		(sentence) => !sentence.question && IMPERATIVE_MUTATION.test(sentence.request),
 	);
 }
@@ -180,7 +193,7 @@ function jobForTaskShape(taskType: AgentTaskType, mutates: boolean, readOnly: bo
 }
 
 export function classifyAgentTask(task: string): AgentTaskFeatures {
-	const text = task.trim();
+	const text = withoutCodeMembers(task.trim());
 	const request = text.replace(POLITE_REQUEST_LEAD, "");
 	const mutates = asksForMutation(text);
 	const readOnly =
