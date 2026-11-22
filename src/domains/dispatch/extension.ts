@@ -644,7 +644,7 @@ import {
 	workerMcpScopeRefusal,
 } from "./worker-mcp.js";
 import { adoptWorkerModelLoad } from "./worker-model-loads.js";
-import { prepareWorkerModelMetadata } from "./worker-model-metadata.js";
+import { prepareWorkerModelListing, prepareWorkerModelMetadata } from "./worker-model-metadata.js";
 import {
 	type AgentLedgerBody,
 	computeSettingsFingerprint,
@@ -6726,6 +6726,15 @@ export function createDispatchBundle(
 				targets.targetOrder,
 				providers,
 			);
+		// The route the listing serves is the one resolution would pick now, else the named target.
+		const listingTargetId = (): string | null => {
+			try {
+				return resolveTarget().target.id;
+			} catch {
+				return req.target ?? null;
+			}
+		};
+		await prepareWorkerModelListing(providers, listingTargetId, metadataDeadlineAt, signal, now);
 		let target = resolveTarget();
 		// Before the SDK install ask: a runtime that cannot carry the recipe's MCP
 		// capabilities is refused whether or not its SDK is present.

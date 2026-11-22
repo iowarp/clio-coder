@@ -22,7 +22,8 @@ import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir, resolveClioDirs } from "../../src/core/xdg.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
-import { prepareWorkerModelMetadata } from "../../src/domains/dispatch/worker-model-metadata.js";
+import { prepareWorkerModelListing } from "../../src/domains/dispatch/worker-model-metadata.js";
+import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createBackgroundMemoryModelClient } from "../../src/domains/memory/background-route.js";
 import type { MemoryRouteText } from "../../src/domains/memory/secret-text.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
@@ -66,6 +67,7 @@ import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-contr
 import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
+import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -995,7 +997,7 @@ test("every Copilot worker path resolves the main agent's thinking levels, budge
 		bundles.push(cold);
 		strictEqual(resolve(cold.contract, "dispatch").capabilities.reasoning, false, "nothing listed yet");
 		// Dispatch's own preparation, which every worker (dispatch, run --agent, a playbook step) passes.
-		await prepareWorkerModelMetadata(cold.contract, target.id, Date.now() + 60_000);
+		await prepareWorkerModelListing(cold.contract, () => target.id, Date.now() + 60_000);
 		const listedLive = resolve(cold.contract, "dispatch");
 
 		const persisted = await freshProcess();
@@ -1015,6 +1017,62 @@ test("every Copilot worker path resolves the main agent's thinking levels, budge
 		deepStrictEqual(fromCache, mainAgent);
 	} finally {
 		for (const bundle of bundles) await bundle.extension.stop?.();
+		models.splice(0, models.length, ...original);
+	}
+});
+
+test("a cold Copilot worker lists before its route is chosen, so an id the listing canonicalizes is admitted (row 357)", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "row357-b.5",
+		capabilities: { supports: { vision: false }, limits: { max_context_window_tokens: 72000, max_output_tokens: 8000 } },
+	});
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	const target = { id: "copilot-row357", runtime: "copilot-sdk", defaultModel: "row357-a" };
+	settings.targets = [target];
+	settings.fleet.default.target = target.id;
+	const context = dispatchStubContext({ settings });
+	const providers = createProvidersBundle(context, { getSettings: () => settings });
+	await providers.extension.start();
+	const specs: WorkerSpec[] = [];
+	const dispatch = makeDispatchBundle(
+		{
+			bus: context.bus,
+			getContract: ((name: string) =>
+				name === "providers" ? providers.contract : context.getContract(name as never)) as typeof context.getContract,
+		},
+		{
+			spawnWorker: (spec) => {
+				specs.push(spec);
+				throw new Error("fixture captured worker launch");
+			},
+		},
+	);
+	await dispatch.extension.start();
+	try {
+		strictEqual(readTargetModelSnapshot(target), null);
+		// Cold, the only candidate is the default, so `row357-b` stays as typed; the listing makes it `row357-b.5`.
+		await rejects(
+			dispatch.contract.dispatch({
+				agentId: "oracle",
+				executionRole: "explorer",
+				task: "Compute 17 times 19.",
+				model: "row357-b",
+				thinkingLevel: "off",
+				cwd: env.dir,
+			}),
+			/fixture captured worker launch/u,
+		);
+		const spec = specs[0];
+		ok(spec);
+		strictEqual(spec.target.id, target.id);
+		strictEqual(spec.wireModelId, "row357-b.5");
+		strictEqual(spec.runtimeResolution?.capabilities.contextWindow, 72000);
+	} finally {
+		await dispatch.extension.stop?.();
+		await providers.extension.stop?.();
 		models.splice(0, models.length, ...original);
 	}
 });
