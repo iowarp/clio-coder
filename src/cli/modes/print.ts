@@ -370,6 +370,11 @@ interface HeadlessMainAgentRunStats {
 	 * applies only when it did.
 	 */
 	changeAsked: boolean;
+	/**
+	 * Recorded limitations that leave the task incomplete: every successful `limitation` call except one whose typed
+	 * reason is `no-runner`, which says only that no check exists to run (row 382).
+	 */
+	incompleteLimitations: number;
 }
 
 /**
@@ -577,6 +582,12 @@ function recordRunEffect(recorder: RunEffectsRecorder, event: ChatLoopEvent): vo
 	recordToolExecutionEffects(recorder, event);
 }
 
+/** The typed reason a `limitation` result recorded in its details, or undefined when it carries none. */
+function recordedLimitationReason(result: unknown): unknown {
+	const details = (result as { details?: { limitation?: { reason?: unknown } } } | null | undefined)?.details;
+	return details?.limitation?.reason;
+}
+
 function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): void {
 	if (event.type === "tool_execution_start") {
 		const call = effectiveToolCall(event.toolName, event.args);
@@ -617,6 +628,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	// errors (bt-14); a chain none of whose steps settled still counts once.
 	if (children.length === 0) {
 		const stat = stats.toolStats.get(tool) ?? blankToolStat(tool);
+		const okBefore = stat.ok;
 		stat.count += 1;
 		const durationMs = durationMsFromEvent(event);
 		if (durationMs !== undefined) stat.totalDurationMs += durationMs;
@@ -632,6 +644,8 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 			else stat.ok += 1;
 		}
 		stats.toolStats.set(tool, stat);
+		if (tool === ToolNames.Limitation && stat.ok > okBefore && recordedLimitationReason(event.result) !== "no-runner")
+			stats.incompleteLimitations += 1;
 	}
 	if (tool === ToolNames.Verify) {
 		stats.verifyCalls.push(
@@ -1356,6 +1370,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			options.constraints?.readOnly !== true &&
 			options.constraints?.mode !== "answer" &&
 			options.constraints?.mode !== "proposal",
+		incompleteLimitations: 0,
 	};
 	// The ledger row is this run's accounting, so it has to exist on the costly
 	// failure paths too. Two callers can reach it: the turn's own completion
@@ -1921,7 +1936,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// A normal provider stop does not erase an explicit limitation or a
 		// block with no applied change. Judge settled tool outcomes, not prose
 		// or the presence of a validation contract. Recovered failures may succeed.
-		const limited = (runStats.toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0;
+		// A no-runner limitation stays in the declaration's limitations and fails nothing (row 382).
+		const limited = runStats.incompleteLimitations > 0;
 		const blockedWithoutChange = runStats.changeAsked && unmetWithoutChange(runStats);
 		if (limited || blockedWithoutChange || (options.failOnNoop === true && headlessNoop(runStats))) {
 			const failureMessage = limited

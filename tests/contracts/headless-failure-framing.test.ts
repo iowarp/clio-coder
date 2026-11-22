@@ -568,6 +568,45 @@ test("a declared not_done or partly_done keeps exit 0, rides the envelope, and -
 	});
 });
 
+test("a no-runner limitation stays in completion.limitations without failing the run; a blocked one still fails (row 382)", async (t) => {
+	const env = await isolateClioEnv("headless-no-runner-");
+	t.after(() => env.restore());
+	type Envelope = { exitCode?: number; outcome?: string; outcomeDetail?: string; completion?: unknown };
+	const last = (stdout: string): Envelope => JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}") as Envelope;
+	const limitationRun = (reason: string) => {
+		const limitation = { scope: "no project check covers hello.txt", reason, paths: [] };
+		const declared = {
+			state: "done",
+			limitations: [{ what: limitation.scope, why: "tool_unavailable" }],
+			unverified: [],
+		};
+		return writtenCallRun("json", answerMessage("Created hello.txt containing hi; read it back.") as never, undefined, {
+			declared,
+			before: [
+				{ type: "tool_execution_start", toolCallId: "lim-1", toolName: "limitation", args: limitation },
+				{
+					type: "tool_execution_end",
+					toolCallId: "lim-1",
+					toolName: "limitation",
+					isError: false,
+					outcome: "ok",
+					result: { content: [{ type: "text", text: "limitation recorded" }], details: { limitation } },
+				},
+			],
+		});
+	};
+	const noRunner = await limitationRun("no-runner");
+	strictEqual(noRunner.code, 0, noRunner.stderr);
+	strictEqual(last(noRunner.stdout).outcome, "succeeded");
+	deepStrictEqual((last(noRunner.stdout).completion as { limitations?: unknown }).limitations, [
+		{ what: "no project check covers hello.txt", why: "tool_unavailable" },
+	]);
+	const blocked = await limitationRun("blocked");
+	strictEqual(blocked.code, 1, blocked.stderr);
+	strictEqual(last(blocked.stdout).outcome, "failed");
+	strictEqual(last(blocked.stdout).outcomeDetail, "limitation");
+});
+
 test("run --agent's run_end carries its sealed receipt's completion; a refused execute call makes a done partly_done (CLI-P58)", async (t) => {
 	const env = await isolateClioEnv("headless-agent-completion-");
 	t.after(() => env.restore());
