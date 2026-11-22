@@ -165,13 +165,17 @@ export function validationClause(status: Pick<CanonicalTrustStatus, "validationG
  * reading different canonical input.
  */
 export function formatTrustSummary(status: CanonicalTrustStatus): string {
+	return trustSummaryClauses(status).join("; ");
+}
+
+function trustSummaryClauses(status: CanonicalTrustStatus): string[] {
 	return [
 		integrityClause(status),
 		validationClause(status),
 		trustStateWord("independentReview", status.independentReview.state),
 		trustStateWord("contextProvenance", status.contextProvenance.state),
 		trustStateWord("completionEvidence", status.completionEvidence.state),
-	].join("; ");
+	];
 }
 
 /** Human wording names the failed axis while preserving the canonical verdict for machine consumers. */
@@ -241,7 +245,10 @@ export function plainTrustVerdict(summary: Pick<TrustSummaryProjection, "verdict
 
 /** The tier and body under one versioned label for receipt-facing surfaces. */
 export function formatTrustSummaryLine(status: CanonicalTrustStatus): string {
-	return `trust v${TRUST_SUMMARY_VERSION}: ${trustVerdictWord(status)}; ${formatTrustSummary(status)}`;
+	const verdict = trustVerdictWord(status);
+	// A compromised verdict names its deciding axis; the axis list does not say it a second time.
+	const body = trustSummaryClauses(status).filter((clause) => clause !== verdict);
+	return `trust v${TRUST_SUMMARY_VERSION}: ${verdict}; ${body.join("; ")}`;
 }
 
 /**

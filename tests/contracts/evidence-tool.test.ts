@@ -6,7 +6,12 @@ import { clioStateDir } from "../../src/core/xdg.js";
 import { materializePendingGateDecision, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
 import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import { evidenceDetailSnapshot, evidenceInspectRecord } from "../../src/domains/evidence/detail.js";
-import { formatTrustSummary, inspectRunEvidence, TRUST_STATUS_AXES } from "../../src/domains/evidence/index.js";
+import {
+	formatTrustSummary,
+	formatTrustSummaryLine,
+	inspectRunEvidence,
+	TRUST_STATUS_AXES,
+} from "../../src/domains/evidence/index.js";
 import { EVIDENCE_INVENTORY_MAX_ARTIFACTS } from "../../src/domains/evidence/inventory.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { telemetryJournalPath, telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
@@ -142,6 +147,25 @@ describe("evidence tool", () => {
 		deepStrictEqual(snapshot, await evidenceDetailSnapshot("fixture", () => 0));
 		deepStrictEqual(JSON.parse(JSON.stringify(record)), inspected);
 		strictEqual(trustSummary, formatTrustSummary(run.trust));
+	});
+
+	it("names the axis that compromised a run once on its trust line", async () => {
+		await fixture();
+		const run = await inspectRunEvidence(clioStateDir(), "fixture");
+		const correlated = {
+			...run.trust,
+			validationGrounding: { ...run.trust.validationGrounding, state: "absent" },
+			independentReview: { ...run.trust.independentReview, state: "not_independent" },
+		} as typeof run.trust;
+		for (const [status, verdict] of [
+			[run.trust, "inferred: validation claimed, none observed"],
+			[correlated, "review not independent"],
+		] as const) {
+			const line = formatTrustSummaryLine(status);
+			const clauses = line.slice("trust v1: ".length).split("; ");
+			strictEqual(clauses[0], verdict, line);
+			strictEqual(new Set(clauses).size, clauses.length, line);
+		}
 	});
 
 	it("states the stored result-contract quality and the validations the result reported as failed", async () => {
