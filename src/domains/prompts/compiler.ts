@@ -762,7 +762,8 @@ const COMPACT_CONTEXT_WINDOW_TOKENS = 48_000;
 export const PROMPT_BUDGET_CHARS = {
 	attended: 26_000,
 	acp: 25_000,
-	headless: 19_000,
+	// Measured total once the safety text names the all read-only local plan that runs without the plan stop.
+	headless: 19_244,
 	headlessYolo: 21_000,
 	worker: 11_500,
 } as const;
