@@ -149,6 +149,7 @@ import {
 	createMiddlewareDomain,
 	createMiddlewareToolChoiceControl,
 	createSkillsReminderRegistration,
+	createTurnPlanCueRegistration,
 	formatRegistrationConflict,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
@@ -2552,6 +2553,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		readStreakStall: (detail) => autonomyWindow.haltFor("exploration", detail),
 	}))
 		middlewareRegistrar.registerHook(registration);
+	// Main session only: a worker's turns run their own bundle and never see the turn-plan cue.
+	middlewareRegistrar.registerHook(createTurnPlanCueRegistration());
 	middlewareRegistrar.registerHook(createUnbackedWorkerClaimRegistration());
 	middlewareRegistrar.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),

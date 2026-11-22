@@ -866,6 +866,7 @@ export const BUILTIN_EVIDENCE: ReadonlySet<string> = new Set([
 	"build:replaced@self-repository",
 	"check:completion-evidence@turn-end",
 	"check:uncited-line-numbers@final-answer",
+	"count:enumerated-parts@operator-request",
 	"count:enumerated-steps@operator-request",
 	"count:failure-recurrence@task-memory",
 	"count:open-tasks@turn-end",

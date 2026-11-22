@@ -11,6 +11,7 @@ import { createPlanCloseRegistration } from "../../src/domains/middleware/plan-c
 import { createReadStreakRegistration } from "../../src/domains/middleware/read-streak.js";
 import { createScoutNudgeRegistration } from "../../src/domains/middleware/scout-nudge.js";
 import { createTaskBoardReminderRegistration } from "../../src/domains/middleware/task-board-reminder.js";
+import { createTurnPlanCueRegistration } from "../../src/domains/middleware/turn-plan-cue.js";
 import { createCitationGroundingRegistration } from "../../src/domains/safety/citation-grounding.js";
 import { callChangesTree } from "../../src/domains/safety/index.js";
 import { callRepeatsAsRead } from "../../src/engine/loop-guard.js";
@@ -362,5 +363,86 @@ describe("reminders gate on the turn's callable tools", () => {
 		// The message also says to grep the symbol first.
 		deepStrictEqual(turnEnd(surface(ToolNames.Read)), []);
 		ok(turnEnd(surface(ToolNames.Read, ToolNames.Grep)).length > 0);
+	});
+
+	it("turn-plan cue names a parallel dispatch for separate parts and map calls before a first edit, only when callable", () => {
+		const PARTS =
+			"Please handle these:\n1. add a retry flag to the upload command\n2. document the cache settings page\n3. fix the date parsing in the report exporter";
+		const FULL = surface(ToolNames.Dispatch, ToolNames.CodeNav, ToolNames.Context, ToolNames.Read, ToolNames.Edit);
+		const start = (text: string, metadata: NonNullable<MiddlewareHookInput["metadata"]> = {}) => {
+			const rule = createTurnPlanCueRegistration();
+			return rule.evaluate({
+				hook: "turn_start",
+				sessionId: "s1",
+				text,
+				metadata: {
+					activeCapabilityNames: FULL,
+					activeToolNames: "dispatch,read,edit,gateway",
+					conversationMessages: 0,
+					turnOrigin: "operator",
+					...metadata,
+				},
+			});
+		};
+		const message = (effects: ReturnType<typeof start>) => {
+			const effect = effects[0];
+			return effect?.kind === "inject_reminder" ? effect.message : "";
+		};
+		const both = message(start(PARTS));
+		ok(both.includes("request lists 3 parts") && both.includes("one parallel `dispatch`"), both);
+		// The note counts the parts; it never re-emits the operator's words.
+		ok(!both.includes("retry flag") && !both.includes("upload command"));
+		// Map tools reached only through gateway are named in their gateway form.
+		ok(both.includes('gateway(op="call", capability="code_nav"') && both.includes('capability="context"'));
+		// Sequential steps, a no-delegation request or a surface without dispatch get no parallel note.
+		const absent = (text: string, metadata = {}) => !message(start(text, metadata)).includes("parallel");
+		ok(absent("1) read the config file now\n2) then fix the parser bug there"));
+		ok(absent(`${PARTS}\nDo not delegate any of it.`));
+		ok(absent(PARTS, { activeCapabilityNames: surface(ToolNames.CodeNav, ToolNames.Edit) }));
+		// Read-only, answer, step-policy, continuation and host-originated turns, and an unreported surface: nothing.
+		for (const metadata of [
+			{ turnReadOnly: true },
+			{ turnMode: "answer" },
+			{ turnStepPolicy: true },
+			{ requestContinuation: true },
+			{ turnOrigin: "yolo" },
+		])
+			deepStrictEqual(start(PARTS, metadata), [], JSON.stringify(metadata));
+		deepStrictEqual(
+			createTurnPlanCueRegistration().evaluate({
+				hook: "turn_start",
+				text: PARTS,
+				metadata: { turnOrigin: "operator", conversationMessages: 0 },
+			}),
+			[],
+		);
+		deepStrictEqual(start(`${PARTS}\nThis is a read-only task.`), []);
+		// Priming: once, on a fresh session's substantive request that can edit; never after the workspace was read.
+		const prose = "Rename the session cache helper and update every caller across the storage package";
+		const rule = createTurnPlanCueRegistration();
+		const turn = (text: string) =>
+			rule.evaluate({
+				hook: "turn_start",
+				sessionId: "s1",
+				text,
+				metadata: { activeCapabilityNames: FULL, conversationMessages: 0, turnOrigin: "operator" },
+			});
+		ok(message(turn(prose)).includes("Before the first edit") && !message(turn(prose)).includes("parallel"));
+		deepStrictEqual(turn(prose), []);
+		const read = createTurnPlanCueRegistration();
+		read.evaluate({ hook: "turn_start", sessionId: "s2", text: "hi", metadata: { conversationMessages: 0 } });
+		read.evaluate({ hook: "after_tool", sessionId: "s2", toolName: ToolNames.Read, metadata: { resultKind: "ok" } });
+		deepStrictEqual(
+			read.evaluate({
+				hook: "turn_start",
+				sessionId: "s2",
+				text: prose,
+				metadata: { activeCapabilityNames: FULL, conversationMessages: 2 },
+			}),
+			[],
+		);
+		deepStrictEqual(start("Fix the typo in the readme"), []);
+		deepStrictEqual(start(prose, { activeCapabilityNames: surface(ToolNames.Read, ToolNames.Edit) }), []);
+		deepStrictEqual(start(prose, { conversationMessages: 4 }), []);
 	});
 });
