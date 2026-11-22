@@ -2026,6 +2026,7 @@ test("fleet status reads unknown journal facts even when the ledger holds token 
 		version: 1,
 		id,
 		agentId: "scout",
+		executionRole: "explorer",
 		task: "t",
 		status: "completed",
 		startedAt: "2026-10-30T00:00:00.000Z",

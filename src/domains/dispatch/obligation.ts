@@ -7,7 +7,7 @@
  * obligation. Pure: no I/O, no clock.
  */
 
-import type { RunObligation } from "../../core/telemetry/run-vocabulary.js";
+import { gatePositionRole, type RunObligation } from "../../core/telemetry/run-vocabulary.js";
 import { capabilityClassRole } from "../agents/role-class.js";
 import { isAgentCapabilityClass } from "../agents/spec.js";
 import type { GateTopologyRole } from "./execution-role.js";
@@ -36,9 +36,8 @@ export function resolveRunRole(input: {
 	capabilityClass: string | null;
 	readOnly: boolean;
 }): RunRole {
-	if (input.gateRole === "reviewer") return "reviewer";
-	if (input.gateRole === "judge" || input.gateRole === "synthesis") return "judge";
-	if (input.gateRole === "member") return "seat";
+	const gated = gatePositionRole(input.gateRole);
+	if (gated !== null) return gated;
 	// The role class table names the class a checker runs as; every other worker class reads or builds.
 	if (isAgentCapabilityClass(input.capabilityClass) && capabilityClassRole(input.capabilityClass) === "checker")
 		return "checker";

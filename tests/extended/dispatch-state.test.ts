@@ -4,7 +4,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
-import type { AgentRoleFacts } from "../../src/domains/dispatch/execution-role.js";
+import { type AgentRoleFacts, agentRunRoles } from "../../src/domains/dispatch/execution-role.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import { measuredRunSpend } from "../harness/receipt.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -107,7 +107,7 @@ describe("dispatch run ledger state", () => {
 				: { capabilityClass, resultContract: { kind: "text-report" } as AgentRoleFacts["resultContract"] };
 		};
 		const kept = ["debugger-checker", "coder-builder", "coder-explorer", "member-seat", "retry", "main", "live"];
-		const ledger = openLedger({ roleFacts });
+		const ledger = openLedger({ agentRoles: (agentId) => agentRunRoles(agentId, roleFacts) });
 		deepStrictEqual(
 			ledger
 				.list()

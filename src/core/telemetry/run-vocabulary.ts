@@ -166,6 +166,18 @@ export const EXECUTION_ROLE_VOCABULARY = [
 ] as const;
 
 /**
+ * The role a gate position fixes, whatever recipe sits in it (DESIGN 4.2): null for a builder, a candidate or no gate.
+ * Here, beside the vocabulary, so the run ledger judges a recorded gate row without loading the recipe-class rules in
+ * `src/domains/dispatch/obligation.ts`, which resolves every other role (row 363).
+ */
+export function gatePositionRole(gateRole: string | undefined): "reviewer" | "judge" | "seat" | null {
+	if (gateRole === "reviewer") return "reviewer";
+	if (gateRole === "judge" || gateRole === "synthesis") return "judge";
+	if (gateRole === "member") return "seat";
+	return null;
+}
+
+/**
  * The execution roles run journals held before fleet M12 (`run.settled` and `route.decided` version 1). Sealed
  * history reads in these names as recorded; nothing writes them and no live path matches them.
  */
