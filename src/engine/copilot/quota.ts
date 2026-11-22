@@ -56,8 +56,15 @@ export interface CopilotQuotaEntry {
 }
 
 /** A digest of the GitHub account (host and login), so every reading of one account names it and never a token. */
-function copilotAccountScope(account: CopilotQuotaAccount): string {
+export function copilotAccountScope(account: CopilotQuotaAccount): string {
 	return createHash("sha256").update(`${account.host}\0${account.login}`).digest("hex").slice(0, 16);
+}
+
+/** One `session.quota_observation` from the live stream: a bucket, as of when the runtime observed it, and whose. */
+export interface CopilotQuotaObservation extends CopilotQuotaEntry {
+	observedAt: string;
+	/** `copilotAccountScope` of the signed-in account the session runs as. */
+	accountScope: string;
 }
 
 export type CopilotQuotaReadResult =
@@ -237,6 +244,18 @@ function parseProviderQuotaState(raw: unknown): CopilotQuotaEntry | null {
 		resetsAt,
 		reason: nonEmptyString(raw.reason),
 	};
+}
+
+/** Parse one `session.quota_observation` payload; `null` when it names no bucket or no time to order it by. */
+export function parseCopilotQuotaObservation(
+	raw: unknown,
+	accountScope: string,
+	eventAt?: unknown,
+): CopilotQuotaObservation | null {
+	const entry = parseProviderQuotaState(raw);
+	// The runtime's own observation time, else when it emitted the event carrying it.
+	const observedAt = (isRecord(raw) ? toUtcIso(raw.observedAt) : null) ?? toUtcIso(eventAt);
+	return entry && observedAt ? { ...entry, observedAt, accountScope } : null;
 }
 
 function parseLegacyQuotaSnapshot(key: string, raw: unknown): CopilotQuotaEntry | null {

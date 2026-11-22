@@ -175,7 +175,7 @@ import { resolveModelReference } from "../domains/providers/resolver.js";
 import { LOCAL_API_KEY_FALLBACK, resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { resolveTarget, unpricedRunRoutes } from "../domains/providers/unpriced-routes.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
-import { anthropicQuotaNotice, onAnthropicQuotaChange } from "../domains/quota/index.js";
+import { anthropicQuotaNotice, onAnthropicQuotaChange, watchCopilotStreamQuota } from "../domains/quota/index.js";
 import { lazyReportTextHost, reportWiring } from "../domains/report/wiring.js";
 import {
 	createResourcesDomainModule,
@@ -1102,6 +1102,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		});
 	}
 
+	termination.onDrain(watchCopilotStreamQuota());
 	termination.onDrain(
 		onAnthropicQuotaChange((targetId, snapshot) => {
 			const notice = anthropicQuotaNotice(snapshot);

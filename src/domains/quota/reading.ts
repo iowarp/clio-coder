@@ -4,9 +4,11 @@ import { NATIVE_UNITS } from "../../core/telemetry/enums.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
+import { type CopilotQuotaObservation, onCopilotSdkQuotaObservations } from "../../engine/ai.js";
 import type { AnthropicResponseObservation, CodexQuotaObservation } from "../../engine/types.js";
 import { redactSecretString } from "../safety/redaction.js";
 import { parseAnthropicHeaders } from "./anthropic-headers.js";
+import { copilotStreamSnapshot } from "./copilot-provider.js";
 import { codexStreamSnapshot, STREAM_QUOTA_TTL_MS } from "./observed.js";
 import { withAnthropicEvidence } from "./pool-reading.js";
 import type {
@@ -206,6 +208,24 @@ export function quotaReadingFromMessage(message: unknown, runtimeId: string, tar
 	if (reading === null || !utc.test(reading.observedAt)) return null;
 	if (reading.windows.length > 0) return reading;
 	return reading.limitReached !== undefined || reading.access === "denied" ? { ...reading, limitOnly: true } : null;
+}
+
+/** The Copilot account quota the live stream reported, as of its oldest live bucket and fresh for the stream TTL. */
+export function copilotStreamReading(observations: ReadonlyArray<CopilotQuotaObservation>): QuotaReading | null {
+	const snapshot = copilotStreamSnapshot(observations, STREAM_QUOTA_TTL_MS);
+	if (snapshot?.fetchedAt == null) return null;
+	return { ...quotaReadingFromSnapshot(snapshot, snapshot.fetchedAt, STREAM_QUOTA_TTL_MS), source: "stream-event" };
+}
+
+/**
+ * Journal each Copilot stream quota observation as it arrives, independent of any call: a session that goes idle
+ * and exits still records what the runtime reported after its last step.
+ */
+export function watchCopilotStreamQuota(): () => void {
+	return onCopilotSdkQuotaObservations((observations) => {
+		const reading = copilotStreamReading(observations);
+		if (reading) journalAccountQuota(reading);
+	});
 }
 
 /**
