@@ -169,12 +169,17 @@ function priceExternalUsage(input: WorkerRunInput, facts: ExternalUsageFacts): E
 	const counts = Object.fromEntries(
 		keys.map((key) => [key, facts.usage[key].kind === "measured" ? facts.usage[key].value : 0]),
 	) as Record<(typeof keys)[number], number>;
+	// The 1h subset of the writes bills at its own rate, as the catalog prices it.
+	const longWrite = facts.usage.cacheWrite1h;
 	return {
 		...facts,
 		pricing: {
 			usd: {
 				kind: "measured" as const,
-				value: calculatePricingCostUsd(effective, counts),
+				value: calculatePricingCostUsd(effective, {
+					...counts,
+					...(longWrite.kind === "measured" ? { cacheWrite1h: longWrite.value } : {}),
+				}),
 				source: "local-count" as const,
 			},
 			pricedBy: "target-rates" as const,
