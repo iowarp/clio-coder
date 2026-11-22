@@ -1150,7 +1150,7 @@ describe("the finish declaration (fleet design 4.3)", () => {
 		// readable (absent when none was refused).
 		strictEqual(
 			finishTool.description,
-			"Declare how the turn ended. Write your reply to the user as text first; then, in that same response, call finish as the only tool call. finish adds no text of its own and ends the turn.",
+			"finish is only for a turn in which you called another tool: a reply that called none (a greeting, an answer, a question back) is complete as text and never calls finish. After such work, declare how the turn ended. Write your reply to the user as text first; then, in that same response, call finish as the only tool call. finish adds no text of its own and ends the turn.",
 		);
 		ok(FINISH_WITHOUT_REPLY_REFUSAL.includes("Write your reply to the user as text first; then, in that same response"));
 		for (const text of [

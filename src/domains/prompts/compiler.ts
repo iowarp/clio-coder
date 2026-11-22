@@ -868,7 +868,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: str
 		hasGateway
 			? "When asked what tools you have, copy the Direct tools line verbatim and add that gateway reaches the rest on demand; call nothing."
 			: "When asked what tools you have, copy the Direct tools line verbatim and call nothing.",
-		"Use attached schemas exactly. A greeting or question answerable from supplied context needs no tools.",
+		"Use attached schemas exactly. A greeting or an answer from supplied context calls no tool, not even finish.",
 		...(map.length > 0
 			? [
 					"",
