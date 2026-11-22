@@ -8,12 +8,14 @@
 
 import { createHash } from "node:crypto";
 import { ToolNames } from "../core/tool-names.js";
+import { redactCommandOutputSecrets } from "../domains/evidence/redact.js";
 import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import { askAxis } from "../domains/safety/approval-axis.js";
 import { describeMainCallConsequences, mainCallExposure } from "../domains/safety/call-consequence.js";
 import { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { escapeScopeOptionConsequence, escapeScopeOptionLabel } from "../domains/safety/escape-scope.js";
+import { redactSecretString } from "../domains/safety/redaction.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { isOperatorTypedUserPayload, operatorTextOfUserPayload } from "../domains/session/history.js";
@@ -217,7 +219,9 @@ function approvalTaskFact(
 		if (typed !== null && typed.trim().length > 0) text = typed;
 	}
 	if (text === null) return undefined;
-	const chars = Array.from(sanitizeCallTargetText(text));
+	// Scrubbed as the call's title is, and ahead of the clip, which could otherwise cut a token into a piece no pattern
+	// recognizes: the operator's words often carry the very credential the call uses (M-53).
+	const chars = Array.from(redactCommandOutputSecrets(redactSecretString(sanitizeCallTargetText(text))));
 	const bounded =
 		chars.length > APPROVAL_TASK_MAX_CHARS ? `${chars.slice(0, APPROVAL_TASK_MAX_CHARS - 1).join("")}…` : chars.join("");
 	if (bounded.trim().length === 0) return undefined;
