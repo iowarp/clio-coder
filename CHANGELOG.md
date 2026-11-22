@@ -271,7 +271,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - An answered `ask_user` interview closes when the next reply asks nothing more, and a question sent as a bare string is accepted.
 - A scheduled job command that bash would run contained is admitted contained.
 - A dispatch result gives each worker finding once, and workers post a claim only before writing a path a peer may also write.
-- A worker command whose source hides its paths, such as a `python3 -c` readback, runs when the worker's sandbox confines every write to its write roots, as main `bash` does at default.
+- A worker whose OS sandbox confines every write to its write roots runs a `bash` command that passes the scan but is not recognized (a `python3 -c` readback, for one) contained, as main `bash` does at default, unless it asks to leave the sandbox or reaches outward. A worker without such a sandbox still has it refused.
 - An explorer's report owes observed evidence: one sent before any read is refused, and the repair round reads first.
 - A playbook loop's agent check gets a verification task of its own instead of the builder's prompt, and a refused playbook literal names the values it accepts.
 
@@ -349,6 +349,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 - A worker whose only state-changing call was refused no longer reports changes on an unchanged tree, and a builder whose calls were all withheld is graded as having run no tool.
 - A read-scoped worker that reports without executing any tool settles failed, so the host retries it.
+- A standalone reviewer (`run --agent reviewer`, or a reviewer dispatched outside a review gate) whose pass rests on no successful observation settles `obligation_unmet`: "the reviewer passed the work without inspecting it".
 - A pytest or unittest run that collected no test counts as not run, never as a pass, and a run that collected no test is never sealed host-verified.
 - A worker that keeps recalling content it evicted, or fills 80% of its context without changing anything, is told once to write or report. A worker stopped by context exhaustion hands back its last message as partial output.
 - A dispatch to an endpoint full with worker leases queues for a slot instead of being refused as a deadlock.
@@ -376,6 +377,8 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 
 **Checks and safety classification**
 
+- `od`, `xxd`, `hexdump`, `cmp`, `sha256sum`, `md5sum` and `file` on workspace paths are read-only inspection, for the main session and workers. Options that write, read a list or magic file, decompress or follow links are not (`file -C`, `-f`, `-m`, `-L`, `-z`, `-Z`, `sha256sum -c`, `md5sum -c`, `hexdump -f`), and `xxd` counts only without `-r` and with at most one file.
+- A worker's verify task gate keeps its `verify-task-gate` rule in the journal when the worker's sandbox contains the call.
 - A later run of a check under another spelling (`npm test` after `verify test`) settles the earlier result. Checks behind `stdbuf`, `nohup`, `env -u`, `make -C`, `pnpm --filter`, `corepack` and `npx` or `pnpm exec` read as checks.
 - Shell redirects to `$TMPDIR`, git-ignored paths and paths outside the workspace no longer count as changed files in the exit summary and finish contract.
 - Text a command only prints (`python -c "print('sudo')"`, a print-only `sed` script, `git log --grep`) is no longer a system change, and a quoted heredoc body is judged as data.
@@ -413,7 +416,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - Inception `mercury-3` is priced at list rates, so `--require-priced` admits it and `--max-cost-usd` bounds it.
 - ACP re-runs the thinking probe when `set_config_option` changes the target or model, and a standard `session/fork` attaches the MCP servers the client names.
 - Settings load when a project `targets` list drops a target only the user settings define.
-- On Copilot, Claude's narration before a tool call reads as reply text instead of reasoning, and a tool-call channel marker the runtime returns as text is dropped.
+- On Copilot, Claude's narration before a tool call reads as reply text instead of reasoning, and a tool-call channel marker the runtime returns as text is dropped. Reply prose that quotes such a marker (`to=functions.read` in a sentence) is kept; only a marker followed by the call's shape is dropped.
 - A malformed `model-catalog.d` file is skipped alone, named by its path in one line, so the overlays beside it still merge.
 - First-run setup's test request on a signed-in Copilot seat reaches the model.
 - MCP images, such as a Playwright MCP screenshot, reach vision routes within the `read` image budget instead of being dropped, and the `frontend` check's screenshot attaches on vision routes.
