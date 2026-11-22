@@ -786,7 +786,10 @@ try {
 			);
 			await noticePage.route(`**/api/sessions/${noticeSessionId}{,/**}`, async (route) => {
 				const path = new URL(route.request().url()).pathname;
-				if (path === `/api/sessions/${noticeSessionId}`) {
+				// Opening a task first asks whether this server holds it. That read is the task's own load,
+				// not a read beside it, so it is answered for real: refusing it leaves the page with no task.
+				if (path === `/api/sessions/${noticeSessionId}/presence`) await route.continue();
+				else if (path === `/api/sessions/${noticeSessionId}`) {
 					await route.fulfill({
 						json: {
 							...h.supervisor.get(noticeSessionId),
