@@ -459,6 +459,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - The safety judge sees `$TMPDIR` and the scratch roots resolved, and an unsandboxed rerun the operator approved on an `ask_user` card.
 - On Windows the secret directory is made owner-only before a credential is written, and `doctor` reads its ACL by SID.
 - The desktop app signs its launch challenges, so an unauthenticated request cannot evict a launcher's challenge.
+- An ACP permission request scrubs credentials from the task line it quotes and from the call's `rawInput`, so a token typed in the prompt or a command reaches the client as `[redacted]`, as the title already did.
 
 ## 0.8.4 - 2026-11-19
 
