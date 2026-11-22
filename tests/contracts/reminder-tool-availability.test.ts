@@ -466,10 +466,43 @@ describe("reminders gate on the turn's callable tools", () => {
 				[createTaskBoardReminderRegistration(), turnPlan()],
 			);
 		const reminders = firstTurn(parts).effects.flatMap((e) => (e.kind === "inject_reminder" ? [e.message] : []));
-		strictEqual(reminders.length, 2);
-		ok(reminders.some((m) => m.includes('tasks action="plan"') && m.includes("parts dispatched together")));
-		ok(reminders.some((m) => m.includes("one parallel `dispatch`")));
+		// Lab L7: one note carries the board and the dispatch as steps of one plan; the board reminder stays silent.
+		strictEqual(reminders.length, 1);
+		const note = reminders[0] ?? "";
+		ok(note.indexOf('action="plan"') >= 0 && note.indexOf('action="plan"') < note.indexOf("one parallel `dispatch`"));
+		ok(note.includes('"start" on the board') && note.includes('"done" with a note'));
+		ok(!note.includes("[Tasks]"));
 		ok(!reminders.join("\n").includes("work them one at a time"));
+		// The files are unread when it dispatches, so each writing task's roots cover its part's area (lab D, wave 78).
+		ok(note.includes("`intent.write_roots` covering its part's whole area (its directory or module, and the tests"));
+		// Where the writing tasks would be refused (headless default: no approver, not yolo) only the board part stays.
+		const unapproved = (...extra: string[]): string[] =>
+			runMiddlewareRegistrations(
+				{
+					hook: "turn_start",
+					sessionId: "fresh",
+					text: parts,
+					metadata: {
+						activeCapabilityNames: surface(ToolNames.Tasks, ToolNames.Dispatch, ToolNames.CodeNav, ToolNames.Edit, ...extra),
+						conversationMessages: 0,
+						turnOrigin: "operator",
+					},
+				},
+				[
+					createTaskBoardReminderRegistration(),
+					createTurnPlanCueRegistration((args) => callChangesTree(ToolNames.Bash, args, process.cwd()), {
+						dispatchRuns: () => false,
+					}),
+				],
+			).effects.flatMap((e) => (e.kind === "inject_reminder" ? [e.message] : []));
+		const [boardOnly, ...more] = unapproved(ToolNames.Finish);
+		strictEqual(more.length, 0);
+		ok(boardOnly?.includes("request lists 3 parts") && boardOnly.includes('action="plan"'), boardOnly);
+		ok(!/dispatch|worker/u.test(boardOnly ?? ""), boardOnly);
+		ok(boardOnly?.includes("before you call finish") && boardOnly.includes("assessed as partly done"), boardOnly);
+		// Partly done is the assessment of a finish declaration, so a turn without finish is told only to close the board.
+		const noFinish = unapproved()[0] ?? "";
+		ok(noFinish.includes("before you end the turn") && !noFinish.includes("finish"), noFinish);
 		deepStrictEqual(firstTurn(`Plan only. Do not implement yet.\n${parts}`).effects, []);
 		for (const example of [
 			`\`\`\`text\n${parts}\n\`\`\``,

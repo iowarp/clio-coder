@@ -2555,9 +2555,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		readStreakStall: (detail) => autonomyWindow.haltFor("exploration", detail),
 	}))
 		middlewareRegistrar.registerHook(registration);
-	// Main session only: a worker's turns run their own bundle and never see the turn-plan cue.
+	// Main session only (workers never see the turn-plan cue). It names a parallel dispatch only where writing tasks can
+	// run: yolo, or an operator (TUI/ACP) to approve them; headless default denies approvals, so it keeps the board part.
 	middlewareRegistrar.registerHook(
-		createTurnPlanCueRegistration((args) => changesTree(ToolNames.Bash, args, memoryWorkspaceRoot())),
+		createTurnPlanCueRegistration((args) => changesTree(ToolNames.Bash, args, memoryWorkspaceRoot()), {
+			dispatchRuns: () => resolveEffectiveAutonomy() === "yolo" || interactive || acpMode,
+		}),
 	);
 	middlewareRegistrar.registerHook(createUnbackedWorkerClaimRegistration());
 	middlewareRegistrar.registerHook(
