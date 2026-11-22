@@ -232,11 +232,12 @@ function groundedByVerifyRun(
 }
 
 /**
- * A builder's passing claim that is inspection prose, not a validation: it names no command the grounding vocabulary
- * detects (in the whole claim or one of its parenthesised or listed parts) and no `verify`, and it reads as an
- * inspection ("Inspect supplied Scout findings", "read src/math.ts") or names neither a script path nor a check
- * ("fixture"). It neither grounds nor lowers assurance (DESIGN 4.8). "tests pass", "npm test: 12 passing" and
- * "./gradlew" stay claims, so a check claimed and never run is still ungrounded.
+ * A passing claim that is inspection prose, not a validation: it names no command the grounding vocabulary detects (in
+ * the whole claim or one of its parenthesised or listed parts) and no `verify`, and it reads as an inspection ("Inspect
+ * supplied Scout findings", "read src/math.ts", a reviewer's "clamp implementation and scope") or names neither a script
+ * path nor a check ("fixture"). It neither grounds nor lowers assurance (DESIGN 4.8): a builder's rests on its change,
+ * a reviewer's on the reads the cited-evidence obligation counts. "tests pass", "npm test: 12 passing" and "./gradlew"
+ * stay claims, so a check claimed and never run is still ungrounded.
  */
 function isInspectionProse(name: string): boolean {
 	if (/^(?:tool:)?verify$/iu.test(name.trim()) || namedVerifyChecks(name).length > 0) return false;
@@ -254,6 +255,9 @@ function isInspectionProse(name: string): boolean {
 	);
 }
 
+/** Contract kinds whose inspection prose is not a validation claim; a verifier's checks are all claims of runs. */
+const INSPECTION_CONTRACT_KINDS: ReadonlySet<ResultContract["kind"]> = new Set(["mutation-report", "review-verdict"]);
+
 /**
  * Fold a terminal result's passing validation claims against the run's executed
  * commands. Returns null when there is nothing to ground, which is every
@@ -269,8 +273,9 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 	const matched = (claim: ClaimedValidation): boolean =>
 		isExecuted(claim.name, executed) || groundedByVerifyRun(claim, input.verifyRuns ?? []);
 	// A claim an execution matches named that execution, whatever its wording.
+	const readsInspection = INSPECTION_CONTRACT_KINDS.has(input.contractKind);
 	const claims = claimedValidations(input.output).filter(
-		(claim) => input.contractKind !== "mutation-report" || matched(claim) || !isInspectionProse(claim.name),
+		(claim) => !readsInspection || matched(claim) || !isInspectionProse(claim.name),
 	);
 	if (claims.length === 0) return null;
 	const ungrounded: string[] = [];
