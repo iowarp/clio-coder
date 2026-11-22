@@ -9,8 +9,10 @@ import type { MiddlewareHookInput } from "../../src/domains/middleware/index.js"
 import { createMarketplaceOfferRegistration } from "../../src/domains/middleware/marketplace-offer.js";
 import { createPlanCloseRegistration } from "../../src/domains/middleware/plan-close.js";
 import { createReadStreakRegistration } from "../../src/domains/middleware/read-streak.js";
+import { runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
 import { createScoutNudgeRegistration } from "../../src/domains/middleware/scout-nudge.js";
 import { createTaskBoardReminderRegistration } from "../../src/domains/middleware/task-board-reminder.js";
+import { createTurnPlanCueRegistration } from "../../src/domains/middleware/turn-plan-cue.js";
 import { createCitationGroundingRegistration } from "../../src/domains/safety/citation-grounding.js";
 import { callChangesTree } from "../../src/domains/safety/index.js";
 import { callRepeatsAsRead } from "../../src/engine/loop-guard.js";
@@ -23,6 +25,7 @@ const SCOPED = "gateway,mcp_zulip__agent_message";
 const surface = (...tools: string[]): string => [ToolNames.Gateway, ...tools].join(",");
 
 const ENUMERATED = "Do this:\n1) read the config\n2) fix the parser\n3) run the tests\n4) report";
+const turnPlan = () => createTurnPlanCueRegistration((args) => callChangesTree(ToolNames.Bash, args, process.cwd()));
 
 describe("reminders gate on the turn's callable tools", () => {
 	it("task-board reminder is absent without tasks and gateway or under a step policy, present with both", () => {
@@ -362,5 +365,147 @@ describe("reminders gate on the turn's callable tools", () => {
 		// The message also says to grep the symbol first.
 		deepStrictEqual(turnEnd(surface(ToolNames.Read)), []);
 		ok(turnEnd(surface(ToolNames.Read, ToolNames.Grep)).length > 0);
+	});
+
+	it("turn-plan cue names a parallel dispatch for separate parts and map calls before a first edit, only when callable", () => {
+		const PARTS =
+			"Please handle these:\n1. add a retry flag to the upload command\n2. document the cache settings page\n3. fix the date parsing in the report exporter";
+		const FULL = surface(ToolNames.Dispatch, ToolNames.CodeNav, ToolNames.Context, ToolNames.Read, ToolNames.Edit);
+		const start = (text: string, metadata: NonNullable<MiddlewareHookInput["metadata"]> = {}) => {
+			const rule = turnPlan();
+			return rule.evaluate({
+				hook: "turn_start",
+				sessionId: "s1",
+				text,
+				metadata: {
+					activeCapabilityNames: FULL,
+					activeToolNames: "dispatch,read,edit,gateway",
+					conversationMessages: 0,
+					turnOrigin: "operator",
+					...metadata,
+				},
+			});
+		};
+		const message = (effects: ReturnType<typeof start>) => {
+			const effect = effects[0];
+			return effect?.kind === "inject_reminder" ? effect.message : "";
+		};
+		const both = message(start(PARTS));
+		ok(both.includes("request lists 3 parts") && both.includes("one parallel `dispatch`"), both);
+		// The note counts the parts; it never re-emits the operator's words.
+		ok(!both.includes("retry flag") && !both.includes("upload command"));
+		// Map tools reached only through gateway are named in their gateway form.
+		ok(both.includes('gateway(op="call", capability="code_nav"') && both.includes('capability="context"'));
+		// Sequential steps, a no-delegation request or a surface without dispatch get no parallel note.
+		const absent = (text: string, metadata = {}) => !message(start(text, metadata)).includes("parallel");
+		ok(absent("1) read the config file now\n2) then fix the parser bug there"));
+		ok(absent(`${PARTS}\nDo not delegate any of it.`));
+		ok(absent(`Do not launch any workers.\n${PARTS}`));
+		ok(absent(PARTS, { activeCapabilityNames: surface(ToolNames.CodeNav, ToolNames.Edit) }));
+		// Read-only, answer, step-policy, continuation and host-originated turns, and an unreported surface: nothing.
+		for (const metadata of [
+			{ turnReadOnly: true },
+			{ turnMode: "answer" },
+			{ turnStepPolicy: true },
+			{ requestContinuation: true },
+			{ turnOrigin: "yolo" },
+		])
+			deepStrictEqual(start(PARTS, metadata), [], JSON.stringify(metadata));
+		deepStrictEqual(
+			turnPlan().evaluate({
+				hook: "turn_start",
+				text: PARTS,
+				metadata: { turnOrigin: "operator", conversationMessages: 0 },
+			}),
+			[],
+		);
+		deepStrictEqual(start(`${PARTS}\nThis is a read-only task.`), []);
+		// Priming: once, on a fresh session's substantive request that can edit; never after the workspace was read.
+		const prose = "Rename the session cache helper and update every caller across the storage package";
+		const rule = turnPlan();
+		const turn = (text: string) =>
+			rule.evaluate({
+				hook: "turn_start",
+				sessionId: "s1",
+				text,
+				metadata: { activeCapabilityNames: FULL, conversationMessages: 0, turnOrigin: "operator" },
+			});
+		ok(message(turn(prose)).includes("Before the first edit") && !message(turn(prose)).includes("parallel"));
+		deepStrictEqual(turn(prose), []);
+		const read = turnPlan();
+		read.evaluate({ hook: "turn_start", sessionId: "s2", text: "hi", metadata: { conversationMessages: 0 } });
+		read.evaluate({ hook: "after_tool", sessionId: "s2", toolName: ToolNames.Read, metadata: { resultKind: "ok" } });
+		deepStrictEqual(
+			read.evaluate({
+				hook: "turn_start",
+				sessionId: "s2",
+				text: prose,
+				metadata: { activeCapabilityNames: FULL, conversationMessages: 2 },
+			}),
+			[],
+		);
+		deepStrictEqual(start("Fix the typo in the readme"), []);
+		deepStrictEqual(start(prose, { activeCapabilityNames: surface(ToolNames.Read, ToolNames.Edit) }), []);
+		deepStrictEqual(start(prose, { conversationMessages: 4 }), []);
+	});
+
+	it("the first turn's board tracks work without serializing the parallel dispatch", () => {
+		const parts = "1. Fix the shipping brackets\n2. Fix the inventory lookup\n3. Fix the notification digest";
+		const firstTurn = (text: string) =>
+			runMiddlewareRegistrations(
+				{
+					hook: "turn_start",
+					sessionId: "fresh",
+					text,
+					metadata: {
+						activeCapabilityNames: surface(ToolNames.Tasks, ToolNames.Dispatch, ToolNames.CodeNav, ToolNames.Edit),
+						conversationMessages: 0,
+						turnOrigin: "operator",
+					},
+				},
+				[createTaskBoardReminderRegistration(), turnPlan()],
+			);
+		const reminders = firstTurn(parts).effects.flatMap((e) => (e.kind === "inject_reminder" ? [e.message] : []));
+		strictEqual(reminders.length, 2);
+		ok(reminders.some((m) => m.includes('tasks action="plan"') && m.includes("parts dispatched together")));
+		ok(reminders.some((m) => m.includes("one parallel `dispatch`")));
+		ok(!reminders.join("\n").includes("work them one at a time"));
+		deepStrictEqual(firstTurn(`Plan only. Do not implement yet.\n${parts}`).effects, []);
+		for (const example of [
+			`\`\`\`text\n${parts}\n\`\`\``,
+			`  ~~~~\n~~~\n${parts}`,
+			"```\n1) document all reports; 2) migrate existing databases\n```",
+		])
+			deepStrictEqual(firstTurn(`Explain this checklist:\n${example}`).effects, []);
+		const dependent = firstTurn(
+			"1. Read the shipping code\n2. Then change its rounding\n3. Finally test that change",
+		).effects;
+		ok(dependent.some((e) => e.kind === "inject_reminder" && e.message.includes("for dependent steps")));
+		ok(!dependent.some((e) => e.kind === "inject_reminder" && e.message.includes("one parallel")));
+		const mixed = firstTurn(`\`\`\`\n${parts}\n\`\`\`\n${parts}`);
+		ok(mixed.effects.some((e) => e.kind === "inject_reminder" && e.message.includes("request lists 3 parts")));
+	});
+
+	it("a successful workspace bash write suppresses first-edit priming, but a failed write does not", () => {
+		const metadata = { conversationMessages: 0, activeCapabilityNames: surface(ToolNames.Edit, ToolNames.CodeNav) };
+		const afterWrite = (resultKind: "ok" | "error") => {
+			const cue = turnPlan();
+			cue.evaluate({ hook: "turn_start", sessionId: "s", text: "Hello", metadata });
+			cue.evaluate({
+				hook: "after_tool",
+				sessionId: "s",
+				toolName: ToolNames.Bash,
+				toolArgs: { command: "printf x > src/result.ts" },
+				metadata: { resultKind },
+			});
+			return cue.evaluate({
+				hook: "turn_start",
+				sessionId: "s",
+				text: "Update the parser and the tests to handle the new records",
+				metadata,
+			});
+		};
+		deepStrictEqual(afterWrite("ok"), []);
+		ok(afterWrite("error").some((e) => e.kind === "inject_reminder" && e.message.includes("Before the first edit")));
 	});
 });

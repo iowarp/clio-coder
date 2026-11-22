@@ -146,6 +146,7 @@ export {
 	type MiddlewareToolChoice,
 	type MiddlewareToolChoiceControl,
 } from "./tool-choice-control.js";
+export { createTurnPlanCueRegistration, TURN_PLAN_CUE_REGISTRATION_ID } from "./turn-plan-cue.js";
 export type {
 	CompletionFact,
 	MiddlewareAnnotationSeverity,
