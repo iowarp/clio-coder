@@ -125,6 +125,35 @@ describe("dispatch failure classification", () => {
 			resolveObligation(role(undefined, { capabilityClass: "verification", readOnly: true }), null, ["src"]),
 			"executed-checks",
 		);
+		// M-50: a standalone reviewer (a verification recipe returning a review verdict) owes cited evidence like a gate
+		// reviewer, so a pass that observed nothing is unmet, while the checker rule on claimed checks still holds.
+		const standalone = {
+			role: role(undefined, { capabilityClass: "verification", readOnly: true }),
+			obligation: resolveObligation(
+				role(undefined, { capabilityClass: "verification", readOnly: true }),
+				"review-verdict",
+				[],
+			),
+			contractKind: "review-verdict",
+			toolLaneObserved: true,
+		};
+		const verdict = (passed: boolean) => ({
+			verdict: passed ? ("pass" as const) : ("fail" as const),
+			checks: [{ name: "assigned task", cites: [], passed, command: false, ran: false }],
+		});
+		const looked = (observations: number) => ({
+			executed: 1,
+			observations,
+			mutatingSucceeded: false,
+			storeWritten: false,
+		});
+		const blind = gradeWork({ activity: looked(0), gateVerdict: verdict(true) }, standalone);
+		strictEqual(blind.outcomeCode, "obligation_unmet");
+		match(blind.detail ?? "", /^obligation cited-evidence unmet: the reviewer passed the work without inspecting it/u);
+		strictEqual(gradeWork({ activity: looked(2), gateVerdict: verdict(true) }, standalone).outcome, "succeeded");
+		strictEqual(gradeWork({ activity: looked(0), gateVerdict: verdict(false) }, standalone).outcome, "succeeded");
+		const claimed = { activity: looked(2), gateVerdict: verdict(false), ungroundedChecks: ["npm test"] };
+		strictEqual(gradeWork(claimed, standalone).outcomeCode, "obligation_unmet");
 		strictEqual(
 			resolveObligation(role(undefined, { capabilityClass: "workspace-edit", readOnly: false }), "mutation-report", []),
 			"change-or-declared",

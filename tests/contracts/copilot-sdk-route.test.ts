@@ -259,6 +259,15 @@ class FakeSession {
 		}
 		if (prompt.includes("op:late-namespace")) { await this.lateUsageTool("call_ns", "copilot-A", "msg_A", "msg_B"); return; }
 		if (prompt.includes("op:late-idless-tagged")) { await this.lateUsageTool("call_tag", null, "msg_A", "msg_B"); return; }
+		if (prompt.includes("op:quoted-marker")) {
+			// The wave-63 reply (M-52): prose that quotes a declared tool's marker, split across deltas.
+			this.usage({ model: "fake-model", inputTokens: 20, outputTokens: 2, cost: 1 });
+			const deltas = ["Docs note: the marker ", "to=funct", "ions.re", "ad", " appears in some logs, and to=functions.fin", "ish", ",", " which ends a turn. END-C"];
+			for (const deltaContent of deltas) this.emit("assistant.message_delta", { messageId: "m52", deltaContent });
+			this.emit("assistant.message", { messageId: "m52", content: deltas.join(""), toolRequests: [] });
+			this.emit("session.idle", {});
+			return;
+		}
 		if (prompt.includes("op:channel-marker")) {
 			// The wave-61 wire frame (M-47): gpt-6-luna wrote its finish call as a channel marker in the reply text.
 			this.usage({ model: "fake-model", inputTokens: 20, outputTokens: 2, cost: 1 });
@@ -1940,8 +1949,8 @@ test("a thinking block whose signature names it narration is the reply text befo
 
 test("a tool-call channel marker Copilot returns as reply text never reaches the reply when it names a declared tool (M-47)", async () => {
 	const finishTool = { name: "finish", description: "Declare the turn's end", parameters: { type: "object" } };
-	const run = async (tools: Array<typeof readTool | typeof finishTool>, key: string) => {
-		const stream = engineStreamSimple(model, normalizeContext({ tools, messages: [user("op:channel-marker")] }), {
+	const run = async (tools: Array<typeof readTool | typeof finishTool>, key: string, op = "op:channel-marker") => {
+		const stream = engineStreamSimple(model, normalizeContext({ tools, messages: [user(op)] }), {
 			sessionId: key,
 		});
 		let streamed = "";
@@ -1959,6 +1968,13 @@ test("a tool-call channel marker Copilot returns as reply text never reaches the
 	const undeclared = await run([readTool], "channel-marker-undeclared");
 	strictEqual(undeclared.streamed, 'resumed-ok\n\n to=functions.finish, commentary \u0abe\u0a9c\u0aaa {"state":"done"}');
 	strictEqual((undeclared.message as { copilotDroppedToolMarkers?: unknown }).copilotDroppedToolMarkers, undefined);
+	// Prose that quotes a declared tool's marker without the call shape after it is kept whole (M-52).
+	const quoted = await run([readTool, finishTool], "channel-marker-quoted", "op:quoted-marker");
+	const prose =
+		"Docs note: the marker to=functions.read appears in some logs, and to=functions.finish, which ends a turn. END-C";
+	strictEqual(quoted.streamed, prose);
+	deepStrictEqual(quoted.message.content, [{ type: "text", text: prose }]);
+	strictEqual((quoted.message as { copilotDroppedToolMarkers?: unknown }).copilotDroppedToolMarkers, undefined);
 });
 
 test("a reply that is only a tool call streams its first token before the call settles, so a held follower can start", async () => {
