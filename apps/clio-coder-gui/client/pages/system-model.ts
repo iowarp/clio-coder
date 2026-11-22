@@ -4,6 +4,7 @@ import type { ConnectionState } from "../api/events.js";
 import type { StatusTone } from "../design/status.js";
 
 type Finding = Static<typeof SystemReport>["findings"][number];
+type Severity = Pick<Finding, "level">;
 const LEVELS = ["error", "warn", "info", "ok"] as const;
 const LABELS = { error: "Needs attention", warn: "Review", info: "Information", ok: "Ready" } as const;
 const TONES: Record<Finding["level"], StatusTone> = { error: "fail", warn: "warn", info: "neutral", ok: "success" };
@@ -13,15 +14,38 @@ export function platformLabel(platform: string | undefined): string {
 	return os === "linux" ? "Linux" : os === "darwin" ? "macOS" : os === "win32" ? "Windows" : platform || "Local";
 }
 
+/**
+ * What a tab keeps of its last installation check, so a reload states that result at once instead of
+ * "Connecting" and "Checking" until the idle recheck lands. Severities and the time only: no path or detail.
+ */
+export function rememberedSystem(report: { checkedAt: string; findings: readonly Severity[] }): string {
+	return JSON.stringify({ checkedAt: report.checkedAt, levels: report.findings.map((finding) => finding.level) });
+}
+
+export function recalledSystem(raw: string | null): { checkedAt: string; findings: Severity[] } | undefined {
+	if (!raw) return undefined;
+	try {
+		const value: unknown = JSON.parse(raw);
+		if (!value || typeof value !== "object") return undefined;
+		const { checkedAt, levels } = value as { checkedAt?: unknown; levels?: unknown };
+		if (typeof checkedAt !== "string" || !Array.isArray(levels)) return undefined;
+		if (!levels.every((level) => (LEVELS as readonly unknown[]).includes(level))) return undefined;
+		return { checkedAt, findings: (levels as Finding["level"][]).map((level) => ({ level })) };
+	} catch {
+		return undefined;
+	}
+}
+
 /** A connected event stream alone cannot establish installation health. */
 export function systemStatus(
 	connection: ConnectionState,
-	findings: readonly Finding[] | undefined,
+	findings: readonly Severity[] | undefined,
 	failed: boolean,
 	/** The check is scheduled or running, so "Not checked" would undersell it. */
 	checking = false,
 ): { tone: StatusTone; label: string; detail: string } {
-	if (connection !== "Connected") {
+	// The first connection of a page that already holds a result is not news; a lost connection is.
+	if (connection !== "Connected" && !(connection === "Connecting…" && findings)) {
 		return connection === "Connecting…"
 			? { tone: "unverified", label: "Connecting", detail: "Connecting to the CLIO Coder runtime." }
 			: connection === "Reconnecting…"

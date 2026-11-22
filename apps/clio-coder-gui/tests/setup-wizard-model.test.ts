@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setupWorkspaceId } from "../client/pages/home-draft-model.js";
+import { setupWorkspaceId, workspaceNotice } from "../client/pages/home-draft-model.js";
 import { readMessages, stepFor, viewFor, workingLabel } from "../client/wizard/wizard-model.js";
 import type { SetupState } from "../contracts/setup.js";
 
@@ -152,4 +152,13 @@ test("the new-task screen checks the model connection only against a listed work
 	assert.equal(setupWorkspaceId("ws-gone", listed), null);
 	assert.equal(setupWorkspaceId("ws-gone", []), null);
 	assert.equal(setupWorkspaceId(null, listed), null);
+});
+
+test("an empty workspace list has one empty state: the onboarding step, not a second recovery box", () => {
+	const listed = { pending: false, failed: false, listed: 1, missing: false };
+	assert.equal(workspaceNotice({ ...listed, listed: 0 }), null, "the onboarding step already offers Open workspace");
+	assert.equal(workspaceNotice(listed), null);
+	assert.equal(workspaceNotice({ ...listed, pending: true })?.alert, false);
+	assert.equal(workspaceNotice({ ...listed, failed: true })?.alert, true);
+	assert.match(workspaceNotice({ ...listed, missing: true })?.text ?? "", /no longer listed/);
 });

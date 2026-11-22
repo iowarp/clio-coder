@@ -110,7 +110,7 @@ export function MissionControl({ client }: { client: Client }) {
 				<div className="mission__inner">
 					<header className="mission__heading">
 						<div>
-							<p className="eyebrow">Your research, in motion</p>
+							<p className="eyebrow">Your work, in motion</p>
 							<h2>
 								One place for <em>every session.</em>
 							</h2>

@@ -37,6 +37,7 @@ import {
 	usageSummary,
 	usageTitle,
 } from "../client/chat/composer-model.js";
+import { OUTPUT_DETAILS, outputDetailLabel } from "../client/chat/output-detail-model.js";
 import { quantityValue } from "../client/chat/session-usage-model.js";
 import type { KeyEventLike } from "../client/interaction/keybindings.js";
 import type { AgentCapabilities } from "../contracts/capabilities.js";
@@ -788,4 +789,12 @@ test("a finished turn that left a change unapplied is not a green Done, and one 
 		),
 	);
 	assert.equal(draftEstimate("hi", { files: [], images: 0 })?.text, "~1 token");
+});
+
+test("transcript detail tiers use the terminal's value names, so the header never says a bare Default beside autonomy", () => {
+	assert.deepEqual(
+		OUTPUT_DETAILS.map((tier) => tier.label),
+		["Compact", "Standard", "Detailed"],
+	);
+	assert.equal(outputDetailLabel("standard"), "Standard");
 });

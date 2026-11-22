@@ -111,3 +111,26 @@ export function acknowledgeFirstRequest(draft: HomeDraft, sent: FirstRequest): H
 export function setupWorkspaceId(chosen: string | null, listed: ReadonlyArray<{ id: string }>): string | null {
 	return chosen !== null && listed.some((item) => item.id === chosen) ? chosen : null;
 }
+
+/**
+ * The new-task screen's workspace recovery notice, if any. An empty list is not one: the onboarding step names it
+ * and offers Open workspace, and a second box with the same button made two empty states on one screen.
+ */
+export function workspaceNotice(workspaces: {
+	pending: boolean;
+	failed: boolean;
+	listed: number;
+	/** The chosen workspace is not in a loaded list. */
+	missing: boolean;
+}): { text: string; alert: boolean } | null {
+	if (workspaces.pending)
+		return { text: "Loading workspaces. You can keep writing while CLIO Coder checks.", alert: false };
+	if (workspaces.failed)
+		return { text: "Workspaces could not be loaded. Your draft is kept; retry to check them again.", alert: true };
+	if (workspaces.missing && workspaces.listed > 0)
+		return {
+			text: "Your chosen workspace is no longer listed. Retry, choose another workspace, or reopen its folder.",
+			alert: false,
+		};
+	return null;
+}

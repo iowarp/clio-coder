@@ -16,7 +16,12 @@ import { useShell } from "../shell/shell-context.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberWorkspace } from "../shell/tasks.js";
 import { firstRequestBusy, homeDraft, subscribeHomeDraft, updateHomeDraft } from "./home-draft.js";
-import { EMPTY_HOME_DRAFT, HOME_DRAFT_TEXT_MAX_CHARACTERS, setupWorkspaceId } from "./home-draft-model.js";
+import {
+	EMPTY_HOME_DRAFT,
+	HOME_DRAFT_TEXT_MAX_CHARACTERS,
+	setupWorkspaceId,
+	workspaceNotice,
+} from "./home-draft-model.js";
 import { settleStarted } from "./started-request.js";
 import { reconcileFirstTask, useFirstTask } from "./use-first-task.js";
 import "../chat/composer-box.css";
@@ -247,6 +252,12 @@ export function Home({ client }: { client: Client }) {
 	const needsSetup = setup.isSuccess && !ready;
 	const needsWorkspace = workspaces.isSuccess && list.length === 0;
 	const onboarding = needsSetup || needsWorkspace;
+	const notice = workspaceNotice({
+		pending: workspaces.isPending,
+		failed: workspaces.isError,
+		listed: list.length,
+		missing: missingWorkspace,
+	});
 	const summary = setup.data?.targetId
 		? ready
 			? `${setup.data.targetId} · ${setup.data.model ?? "Model not reported"}`
@@ -287,17 +298,9 @@ export function Home({ client }: { client: Client }) {
 							onOpenWorkspace={() => shell?.openWorkspace()}
 						/>
 					) : null}
-					{workspaces.isPending || workspaces.isError || needsWorkspace || missingWorkspace ? (
-						<div className="newtask__notice newtask__recovery" role={workspaces.isError ? "alert" : "status"}>
-							<p>
-								{workspaces.isPending
-									? "Loading workspaces. You can keep writing while CLIO Coder checks."
-									: workspaces.isError
-										? "Workspaces could not be loaded. Your draft is kept; retry to check them again."
-										: missingWorkspace
-											? "Your chosen workspace is no longer listed. Retry, choose another workspace, or reopen its folder."
-											: "Open a workspace for this task, or retry to check for recently opened folders."}
-							</p>
+					{notice ? (
+						<div className="newtask__notice newtask__recovery" role={notice.alert ? "alert" : "status"}>
+							<p>{notice.text}</p>
 							<div className="newtask__recovery-actions">
 								<button type="button" disabled={workspaces.isFetching} onClick={retryWorkspaces}>
 									{workspaces.isFetching ? "Checking…" : "Retry"}

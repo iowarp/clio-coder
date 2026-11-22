@@ -9,10 +9,10 @@ export type OutputDetail = "compact" | "standard" | "detailed";
 export const OUTPUT_DETAILS: readonly { value: OutputDetail; label: string; summary: string }[] = [
 	{
 		value: "compact",
-		label: "Minimal",
+		label: "Compact",
 		summary: "Requests, answers, approvals and failures. Reasoning and per-turn figures stay hidden.",
 	},
-	{ value: "standard", label: "Default", summary: "One line under each answer: time, tokens, cost and tool calls." },
+	{ value: "standard", label: "Standard", summary: "One line under each answer: time, tokens, cost and tool calls." },
 	{
 		value: "detailed",
 		label: "Detailed",
@@ -27,5 +27,5 @@ export function parseOutputDetail(value: unknown): OutputDetail {
 }
 
 export function outputDetailLabel(value: OutputDetail): string {
-	return OUTPUT_DETAILS.find((tier) => tier.value === value)?.label ?? "Default";
+	return OUTPUT_DETAILS.find((tier) => tier.value === value)?.label ?? "Standard";
 }
