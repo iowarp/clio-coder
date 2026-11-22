@@ -56,7 +56,19 @@
 						"properties": { "code": { "type": "string" }, "message": { "type": "string" } }
 					}
 				},
-				"limits": { "type": ["object", "null"] }
+				"limits": { "type": ["object", "null"] },
+				"worktree": {
+					"description": "Present when a playbook with scope `worktree` kept its task worktree: the run's work is committed on `branch`, and `fleet land` previews (`preview`) or lands (`land`) it.",
+					"type": "object",
+					"required": ["path", "branch", "commit", "preview", "land"],
+					"properties": {
+						"path": { "type": "string" },
+						"branch": { "type": "string" },
+						"commit": { "type": ["string", "null"] },
+						"preview": { "type": "string" },
+						"land": { "type": "string" }
+					}
+				}
 			}
 		},
 		"fleetAccepted": {

@@ -62,6 +62,7 @@ import {
 	createDispatchDomainModule,
 	type ExecuteFleetRunInput,
 	executeFleetRun,
+	type FleetKeptWorktree,
 	type FleetRunOutcome,
 	planFleetResume,
 	readFleetRun,
@@ -290,6 +291,8 @@ interface FleetRunTrack {
 	spent: FactSum;
 	totalCost: FleetCost | null;
 	cleanRun: boolean | null;
+	/** The task worktree a `worktree` run kept for `fleet land`, with its work committed on the task branch. */
+	worktree: FleetKeptWorktree | null;
 	limits: {
 		maxCostUsd: number | null;
 		maxCostSource: "flag" | "playbook" | null;
@@ -342,6 +345,7 @@ function fleetEndDocument(
 					},
 		causes,
 		limits: track.limits,
+		...(track.worktree !== null ? { worktree: track.worktree } : {}),
 	};
 }
 
@@ -361,6 +365,7 @@ async function runFleet(options: FleetRunOptions, reporter: ReturnType<typeof cr
 		spent: sumFactSums([]),
 		totalCost: null,
 		cleanRun: null,
+		worktree: null,
 		limits: {
 			maxCostUsd: options.maxCostUsd ?? null,
 			maxCostSource: options.maxCostUsd !== undefined ? "flag" : null,
@@ -774,6 +779,9 @@ async function runFleetTracked(
 						if (kind === "gate") {
 							if (!structured) reporter.stdout(`${text}\n`);
 						} else reporter.stderr(`${text}\n`);
+					},
+					onWorktreeKept(kept) {
+						track.worktree = kept;
 					},
 				});
 			},

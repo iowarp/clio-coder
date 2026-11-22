@@ -292,4 +292,57 @@ describe("playbook CLI variables", () => {
 			.map((line) => (JSON.parse(line) as { type: string }).type);
 		deepStrictEqual(events, ["fleet_end"], streamed.stdout);
 	});
+
+	it("names a worktree run's kept worktree, its committed branch and the land command in fleet_end", () => {
+		writeFileSync(
+			join(root, ".clio-coder", "playbooks", "wt.md"),
+			[
+				"---",
+				"version: 3",
+				"name: wt",
+				'description: "Build in a task worktree."',
+				"steps:",
+				"  - {kind: code, id: build, command: build, scope: worktree, dependencies: []}",
+				"maxWorkers: 1",
+				"onFailure: stop",
+				"---",
+				"",
+				"Build it.",
+				"",
+			].join("\n"),
+		);
+		writeFileSync(
+			join(root, ".clio-coder", "playbooks", "commands.yaml"),
+			"version: 1\ncommands:\n  build:\n    argv: [node, -e, \"require('node:fs').writeFileSync('built.txt','built')\"]\n",
+		);
+		writeFileSync(join(root, ".gitignore"), ".clio-coder/\n");
+		const repo = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+		repo("init", "-q");
+		repo("-c", "user.name=Contract", "-c", "user.email=contract@example.invalid", "add", ".gitignore");
+		repo("-c", "user.name=Contract", "-c", "user.email=contract@example.invalid", "commit", "-qm", "base");
+		const run = spawnSync(
+			process.execPath,
+			["--import", import.meta.resolve("tsx"), CLI_ENTRY, "fleet", "run", "wt", "--output-format", "json"],
+			{ cwd: root, env: { ...process.env, NO_COLOR: "1" }, encoding: "utf8" },
+		);
+		strictEqual(run.status, 0, run.stderr);
+		const end = JSON.parse(run.stdout) as {
+			rootId: string;
+			worktree?: { path: string; branch: string; commit: string | null; preview: string; land: string };
+		};
+		const branch = `clio-coder/task/${end.rootId}`;
+		deepStrictEqual(
+			{ ...end.worktree, path: undefined },
+			{
+				path: undefined,
+				branch,
+				commit: repo("rev-parse", branch),
+				preview: `clio-coder fleet land ${end.rootId}`,
+				land: `clio-coder fleet land ${end.rootId} --yes`,
+			},
+			run.stdout,
+		);
+		strictEqual(readFileSync(join(end.worktree?.path ?? "", "built.txt"), "utf8"), "built");
+		strictEqual(repo("show", `${branch}:built.txt`), "built");
+	});
 });
