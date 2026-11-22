@@ -181,7 +181,7 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 **Browser**
 
 - The `browser` tool, reached through the gateway, opens pages (`open`), runs Playwright scripts against them (`run`), reads the accessibility tree with element refs (`look`), starts dev servers (`serve`) and drives a browser started with `--remote-debugging-port` (`attach`). It runs inside the session's sandbox as `bash` does.
-- Pages reach loopback only. A host beyond it asks and is granted for the session, each blocked host is named with the grant that admits it, and `hermetic: true` keeps a session loopback-only.
+- Pages reach loopback only. A host beyond it asks and is granted for the session, each blocked host is named with the grant that admits it, and `hermetic: true` keeps a session loopback-only. Every redirect hop is checked against the grant before it leaves the machine, so a granted host cannot redirect a page to an ungranted one, and `open` loads only `http` and `https` URLs (`file:` and other schemes are refused). While attached to an outside browser, pages reach loopback only and grants do not apply.
 - `clio-coder tools install browser` provisions playwright-core and the Chromium headless shell under CLIO Coder's data directory, and the tool installs it on first use after one confirmation. Windows uses the installed Edge.
 - A `kind: browser` check in `.clio-coder/verifiers.yaml` starts the dev server, loads its page in a hermetic session and fails on console errors, uncaught exceptions, failed requests or an `axe` audit. `verifiers add|edit --kind browser` takes `--url`, `--ready`, `--steps` and `--assert`.
 - Screenshots draw inline in tool cards on terminals that speak the Kitty or iTerm2 graphics protocol, reach ACP clients as image blocks in `tool_call_update` and show in the desktop app's tool cards, and `/view` has a screenshots category. On a route without image input the model sees none of them.
@@ -440,7 +440,9 @@ A key written through a YAML anchor, alias or merge key is left as written, and 
 - A session taken over by `clio-coder session terminate` says who took it and why, and the launcher prints a hosted pane's last error lines when it exits.
 - The contained-yolo notice is remembered in `home.json` and no longer writes `safety.yoloConfinement` into your `settings.yaml`.
 - ACP replay keeps a drained steer in its turn, ends a turn at its own last entry and shows a tool card with the title and locations it streamed live. ACP answers always carry `agentInfo.version`, as ACP v1 requires.
-- The desktop app draws the yolo continuation notice in its turn, shows a reopened request as asked with its recorded time, shows the last System check at once on reload, and repairs a background unit an earlier version installed instead of refusing it.
+- The desktop app draws the yolo continuation notice in its turn, shows a reopened request as asked with its recorded time, shows the last System check at once on reload, naming the platform from the first frame instead of `Local`, and repairs a background unit an earlier version installed instead of refusing it.
+- The desktop app's guided setup creates a new home's credentials, state directories and migration record when it starts, so a home set up from a setup file shows no doctor issues and no pending migrations before its first task.
+- A finished turn in the desktop app no longer starts a session usage read that is aborted at once, and the transcript detail picker's options line up.
 
 ### Security
 
