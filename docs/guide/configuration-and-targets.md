@@ -126,7 +126,7 @@ Configure, GUI Settings and TUI `/settings` share one set of areas; the TUI adds
 | Context and memory | Compaction, working-set eviction, memory, semantic search |
 | Safety and limits | Autonomy, safety judge, approvals, sandbox, review, spending and tool limits |
 | Workspace | Panes, files, Git, task copies, library, external agents, plugins |
-| Advanced | Diagnostics, timing and size limits, experimental engines, and the validated full-file editor |
+| Advanced | Setup tools (version, directories, Run doctor), timing and size limits, experimental engines, raw collections, and the validated full-file editor |
 
 Settings YAML paths shown in the inventory below are canonical. Use [Configuration reference](configuration-reference.md) for the full settings-key/default map and the owning code for exact types.
 
@@ -678,7 +678,7 @@ While another model is resident on the same server, CLIO Coder caps a context le
 
 It applies to a `lmstudio` target and to a `litellm` target. On a LiteLLM gateway, CLIO Coder reads `/v1/model/info` and acts only on a route with exactly one deployment that declares `model_info.runtime: lm-studio`; it loads on that deployment's `api_base` under the upstream model key and still sends the request to the gateway alias. Routes on other runtimes, gateways that hide detail metadata from the key, and targets without a profile stay observe-only, and `lifecycle: user-managed` disables every load and unload. The gateway credential is never sent to the LM Studio server. Loads and reloads are serialized across the orchestrator and its workers by the residency lock.
 
-CLIO Coder remembers the LM Studio instances it loads in one state file per server (`lmstudio-ownership/` under the state directory), shared by the orchestrator, its workers and separate runs. Before loading a model under a profile, it unloads the instances any CLIO Coder process loaded earlier on that server for other models, and prints one `unloading '<model>', which Clio loaded earlier ...` line for each. LM Studio offloads an oversubscribed model to CPU instead of refusing it, so leaving two large models resident degrades both. A model another client loaded is never unloaded. While a CLIO Coder process streams on a model it holds a lease on it, so neither another process's load nor a profile reload unloads it mid-request; a lease whose process has exited protects nothing. Back-to-back turns and runs on one model reuse the resident instance. CLIO Coder does not unload anything when it exits.
+CLIO Coder remembers the LM Studio instances it loads in one state file per server (`lmstudio-ownership/` under the state directory), shared by the orchestrator, its workers and separate runs. Before loading a model under a profile, it unloads the instances any CLIO Coder process loaded earlier on that server for other models, and prints one `unloading '<model>', which CLIO Coder loaded earlier ...` line for each. LM Studio offloads an oversubscribed model to CPU instead of refusing it, so leaving two large models resident degrades both. A model another client loaded is never unloaded. While a CLIO Coder process streams on a model it holds a lease on it, so neither another process's load nor a profile reload unloads it mid-request; a lease whose process has exited protects nothing. Back-to-back turns and runs on one model reuse the resident instance. CLIO Coder does not unload anything when it exits.
 
 ### Per-request options for LM Studio and LiteLLM
 

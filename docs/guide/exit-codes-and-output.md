@@ -77,7 +77,7 @@ Startup flag rules ([index.ts](../../src/cli/index.ts), [argv.ts](../../src/cli/
 
 ## Streams and headless `run` behavior
 
-`clio-coder run` writes only the final answer (or, under `--output-format json|stream-json`, the result envelope or NDJSON frames) to `stdout`; all diagnostics, permission denials, `observed` summaries, `--verify` results, `Recording manifest (relative to Clio state): <path>` (`--agent --record`), and pre-send attachment interrupts (`clio-coder run: interrupted while reading file attachments; nothing was sent`, exit `130`) go to `stderr` ([print.ts](../../src/cli/modes/print.ts), [run.ts](../../src/cli/run.ts)). Argument validation precedes state reads (`#123`).
+`clio-coder run` writes only the final answer (or, under `--output-format json|stream-json`, the result envelope or NDJSON frames) to `stdout`; all diagnostics, permission denials, `observed` summaries, `--verify` results, `Recording manifest (relative to CLIO Coder state): <path>` (`--agent --record`), and pre-send attachment interrupts (`clio-coder run: interrupted while reading file attachments; nothing was sent`, exit `130`) go to `stderr` ([print.ts](../../src/cli/modes/print.ts), [run.ts](../../src/cli/run.ts)). Argument validation precedes state reads (`#123`).
 - `--output-format text` (the default) ends with one `stderr` line: `clio-coder run: session <id> · <outcome> · <N> requests · <in>/<out> tokens · <cost or unpriced>`.
 - `-o <path>` (`--output-last-message`) writes the final answer to a file when the run exits `0`; with `--output-schema` the file holds the validated JSON.
 - Stdin is read only when `-` is passed. `run --json` and `run --json-events` were removed; use `--output-format json` or `--output-format stream-json`.

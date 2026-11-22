@@ -284,7 +284,7 @@ The live phase is named on the composer's top rail, after the model nickname. It
 | No output | `has no output · <seconds>s` |
 | Ended | `finished`, `failed`, `was cancelled`, `reached the output limit`, or `stopped generating tool arguments` |
 
-While the composer is empty its placeholder follows the mode: `A parked call is waiting for your decision`, `Clio has your prompt and is preparing the turn`, or `Clio is compacting the session context`. The expanded footer's first row leads with the footer phase; when idle it leads with the last turn, or `no turn yet`.
+While the composer is empty its placeholder follows the mode: `A parked call is waiting for your decision`, `CLIO Coder has your prompt and is preparing the turn`, or `CLIO Coder is compacting the session context`. The expanded footer's first row leads with the footer phase; when idle it leads with the last turn, or `no turn yet`.
 
 ### 4.5 Exit Summary
 

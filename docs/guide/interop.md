@@ -107,7 +107,7 @@ integrations:
         toolGovernance: clio-coder-policy
 ```
 
-Keep the rest of your settings when adding these entries. Every headless peer runtime (`claude-code`, `codex-cli`, `opencode-cli`, `antigravity-code`, `pi-cli`) runs its own tool loop, so CLIO Coder cannot mediate its individual calls. Admission therefore refuses write-capable work on such a target unless the target sets `trustedUnmediated: true`, which is read only from the operator's own settings file; a project settings layer that sets it is ignored with a warning. Without it, `/run --target opencode-local` fails admission with `runtime 'opencode-cli' runs its own tool loop and Clio cannot mediate its individual calls, so it is refused write-capable work`, and a read-only run is refused on every headless peer but Codex whatever `trustedUnmediated` says (see below), so the OpenCode target needs the opt-in for any headless work. If OpenCode's provider
+Keep the rest of your settings when adding these entries. Every headless peer runtime (`claude-code`, `codex-cli`, `opencode-cli`, `antigravity-code`, `pi-cli`) runs its own tool loop, so CLIO Coder cannot mediate its individual calls. Admission therefore refuses write-capable work on such a target unless the target sets `trustedUnmediated: true`, which is read only from the operator's own settings file; a project settings layer that sets it is ignored with a warning. Without it, `/run --target opencode-local` fails admission with `runtime 'opencode-cli' runs its own tool loop and CLIO Coder cannot mediate its individual calls, so it is refused write-capable work`, and a read-only run is refused on every headless peer but Codex whatever `trustedUnmediated` says (see below), so the OpenCode target needs the opt-in for any headless work. If OpenCode's provider
 uses an environment credential such as `apiKey: "{env:LAB_GATEWAY_KEY}"` in its
 user `opencode.json` or `opencode.jsonc`, the headless connector passes that
 named variable to OpenCode when it is set. For ACP, add
@@ -516,7 +516,7 @@ required, or import supported individual resources.
 A package built for a release from before playbooks, one that still declares
 `resources.fleets`, kind `fleet` or a `fleet:` requirement in its CLIO Coder
 namespace, is not adopted. The plan marks the entry `skip` with a reason that
-starts `built for an older Clio:`, names what the package declares, and gives
+starts `built for an older CLIO Coder:`, names what the package declares, and gives
 the fix: install the package's current release where its publisher names an
 install command, or, for its author, rename `resources.fleets` to
 `resources.playbooks`, the `fleets` directory to `playbooks`, and fleet kinds

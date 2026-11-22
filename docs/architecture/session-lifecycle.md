@@ -78,7 +78,7 @@ client before resuming a shared session.
 
 A missing format or a version below 3 is refused with guidance to remove the
 incompatible session directory. A version above 7 is refused before anything is
-written, with the reader's message `session was written by a newer Clio (format version <n>, this build reads version 7): <path>. Upgrade clio-coder to resume this session.`
+written, with the reader's message `session was written by a newer CLIO Coder (format version <n>, this build reads version 7): <path>. Upgrade clio-coder to resume this session.`
 ACP load and resume report it as `session_format` without the path ([ACP](acp.md#error-envelope)).
 
 Session admission checks metadata format before any recovering ledger read. It

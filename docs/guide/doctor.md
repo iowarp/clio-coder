@@ -72,7 +72,7 @@ Conditional rows:
 ## External tools, PDFs, and panes
 
 `external tool <id>` covers `asciinema`, `herdr`, `yazi`, `croc`, `cliamp` (never `error`) ([doctor-toolchain.ts](../../src/cli/doctor-toolchain.ts), [resolve.ts](../../src/domains/toolchain/resolve.ts)):
-- `herdr` uses CLIO Coder's pinned copy only: ``pane host <pin> (Clio's pinned copy) at <path>`` (`OK`), `` pane host <pin> is not installed; run `clio-coder panes install` `` (`WARN`), or `no pinned pane host for this platform; Clio runs without panes` (`INFO`).
+- `herdr` uses CLIO Coder's pinned copy only: ``pane host <pin> (CLIO Coder's pinned copy) at <path>`` (`OK`), `` pane host <pin> is not installed; run `clio-coder panes install` `` (`WARN`), or `no pinned pane host for this platform; CLIO Coder runs without panes` (`INFO`).
 - Other tools prefer `PATH` when version `>= minimumVersion`, else vendored copy (`WARN` on missing `yazi` while files pane enabled; `INFO` on missing `croc`/`cliamp`/`asciinema`):
 
 | Detail | Meaning |

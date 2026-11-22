@@ -540,6 +540,8 @@ placement does not read it; use `fleet.defaultNode` or a profile pin.
 
 Each native worker response has a host deadline of `safety.limits.workerResponseSeconds` (default 600 seconds), starting after local residency waits and model loading complete. After tools lock or during synthesis, a round keeps that deadline and the same output budget as any other round: the model's own output limit, bounded by the remaining context window and any tighter budget the request sets. Those rounds also request thinking off wherever the model and runtime support it, except on Codex, where the reasoning level leads the cached prompt and a locked round keeps the run's level. Reaching a response deadline, or a locked round stopping on its output limit, fails the run with `worker_turn_timeout` or `worker_output_cap_exhausted` and keeps unfinished output partial. The `worker_output_cap_exhausted` detail names the limit and where it came from. Both codes are sealed in the run record and suppress automatic dispatch retry and failover without penalizing the target breaker; the fleet step settles as failed and follows its `onFailure` policy. Unlocked output truncation retains the normal provider and tool-call recovery behavior. Usage is retained only when the provider reported it; otherwise the interrupted call records usage as unknown (`observed: false`), since compatible providers may send usage only in their final chunk.
 
+Each dispatched run also has a wall clock, `fleet.limits.runTimeoutMs` (default 1,800,000 ms, 30 minutes). At 85% of it the worker's next round is its handback round (`WALL_HANDBACK_SHARE` in [handback.ts](../../src/domains/dispatch/handback.ts)). A run that reaches the limit is stopped by the host and seals `timed_out` with outcome code `worker_run_timeout`, which never retries; a stopped builder's result names the paths it changed. A recipe's `budget.timeoutMs` or the call's `timeout_ms` can only lower the wall clock, and the time a writer spends queued for the writer set counts against it ([Writer set](#writer-set)).
+
 `fleet.concurrency` sets the global worker pool and the implicit local node's
 limit. SSH nodes always use their own `maxWorkers`. A number means exactly that
 many workers for both. The default is `auto`. An explicit value in
@@ -615,7 +617,7 @@ A file-scoped edit worker whose reply ends with no tool call gets one more repai
 before the run settles. It is told that nothing was done and which edit tools it was
 admitted. The round applies to a mutation-report contract on a run that is not
 read-only, has an advisory budget, admits `edit` or `write`, and is not already in its
-synthesis lock. A second reply with no tool call ends the run as `worker_no_work`.
+synthesis lock. A second reply with no tool call leaves the builder obligation unmet and the grader settles the run as `obligation_unmet` ([grading.ts](../../src/domains/dispatch/grading.ts)). The old outcome code `worker_no_work` is retired and survives only so old journals still read ([run-vocabulary.ts](../../src/core/telemetry/run-vocabulary.ts)).
 
 ### Worker permission refusals
 
@@ -654,7 +656,7 @@ The native worker reports the last provider HTTP status on stderr, and a provide
 or 403 retries on another target. A 429 retries on another target after at least
 one second. A 408 is not deterministic and retries. Cancellation, policy denials,
 permission failures and the deterministic outcome codes (`worker_tool_call_cap_exhausted`,
-`worker_no_work`, `merge_withheld`, `result_contract_exhausted` and the others in
+`obligation_unmet`, `worker_not_done`, `worker_partial_work`, `assurance_compromised`, `worker_run_timeout`, `merge_withheld`, `result_contract_exhausted` and the others in
 `isDeterministicOutcomeCode`) never retry, unless the attempt left its [evidence obligation](#evidence-obligations-and-the-one-retry) unmet. `result_contract_invalid` is the exception: the host's validator found an otherwise successful worker's final result nonconforming, so the failure is classed `model-quality` and the retry avoids that agent and model without penalizing the target. No automatic retry follows a failed attempt
 that ran a state-changing call or whose tool telemetry cannot prove the checkout
 unchanged. Backoff starts at 500 ms, doubles per attempt and stops at 60 seconds.
@@ -663,20 +665,20 @@ The full class table is in
 
 #### Evidence obligations and the one retry
 
-Every run owes its result some evidence, resolved once from its role in the work graph and not from its recipe id ([obligation.ts](../../src/domains/dispatch/obligation.ts)). A gate position decides first (reviewer, judge, council seat), then a verification recipe is a checker, then a run that may write is a builder, and any other run is an explorer.
+Every run owes its result some evidence, resolved once from its role in the work graph and not from its recipe id ([obligation.ts](../../src/domains/dispatch/obligation.ts)). A gate position decides first (reviewer, judge, council seat), then a recipe of the checker capability class (the verifier and the debugger) is a checker, then a run that may write is a builder, and any other run is an explorer (`resolveRunRole`).
 
 | Role | Obligation |
 | --- | --- |
-| Explorer | `answer`; `observed-evidence` when its contract is `scout-report` or the task declares `read_roots` |
+| Explorer | `answer`; `observed-evidence` when its report kind is `scout-report`, `provenance-report`, `research-report` or `context-handbook`, or the task declares `read_roots` |
 | Builder | `change-or-declared` |
 | Checker | `executed-checks` |
 | Reviewer, judge | `cited-evidence` |
 | Council seat | `answer` |
 
-A gate's read roots are what it may read, not what it was asked to read, so they never make a reviewer or judge owe `observed-evidence`; a compete judge that ranks from the evidence in its task without a tool call settles normally. In this release two obligations are checked at settlement:
+A gate's read roots are what it may read, not what it was asked to read, so they never make a reviewer or judge owe `observed-evidence`; a compete judge that ranks from the evidence in its task without a tool call settles normally. In this release these obligations are checked at settlement:
 
 - A run that owes `observed-evidence` and executed no tool settles `failed`, with the detail `obligation observed-evidence unmet: no tools executed, so the worker reported without reading anything and its findings are unaudited`.
-- A native builder that ends `worker_no_work` with no tool call and an unchanged tree leaves `change-or-declared` unmet. A builder that asked for wider write roots has declared, so it meets it.
+- A builder leaves `change-or-declared` unmet, settling `obligation_unmet`, when it executed no tools, when policy refused or denied its state-changing calls and nothing changed, or when a permission ask went unanswered or denied and nothing changed. A builder that declares its assignment `partly_done` or `not_done` and changed nothing, or recorded a limitation and changed nothing, or asked for wider write roots, settles `worker_not_done`; one that declared it partly done after changing files settles `worker_partial_work`. A builder whose assurance is compromised settles `assurance_compromised`. One rule table in `src/domains/dispatch/grading.ts` decides these, and the verdict is sealed on the receipt. Unanswered asks, and unmet observed-evidence, executed-checks or cited-evidence obligations, are `obligation_unmet` too. `worker_not_done`, `worker_partial_work` and `assurance_compromised` are deterministic and never retry; an unmet obligation retries once as described below.
 
 An unmet obligation is the model's failure, classed `model-quality` even under a deterministic code, and it is retried once, only on another model, within `fleet.retry.maxRetries`. A route the caller pinned is not retried, and the run settles with `obligation <name> unmet, not retried because the route is explicitly pinned to <target>/<model>`. Under `approved` failover the retry moves only to an envelope candidate with another model; otherwise it takes the first eligible route with another wire model on any target. When no such route exists the run settles failed and the detail names why. A builder in a task worktree keeps that worktree for its retry, and it is discarded only when no retry follows.
 
@@ -1591,7 +1593,7 @@ Each task on the plan card carries a `limits:` line with the bounds that stop th
 
 - A priced route names its estimate: `cost <estimate> per model call at a <N>-token output bound`. The estimate prices output at the route's output bound, which is `chat.maxOutputTokens` when set, else the model's output cap, never above the model's cap or window.
 - An unpriced route has no cost bound, so the line names what does stop it. A native worker's line starts `unpriced route: each response stops at <S> s` from `safety.limits.workerResponseSeconds`, then says `the run has no wall-clock bound unless timeout_ms is set`, or, when the call sets `timeout_ms`, `the call's timeout_ms stops the run within <ms> ms`.
-- Both end with the tool bound, such as `Clio stops it at 300 tool calls` or `planned for about 40 tool calls; Clio stops it at 300`, with `lowered to Clio's overall limit` added when admission held the estimate at `fleet.limits.toolCallsPerRun`. An external one-shot worker, whose calls CLIO Coder cannot count, is promised no tool ceiling: `one launch whose tool calls Clio cannot count, so no tool ceiling applies`.
+- Both end with the tool bound, such as `CLIO Coder stops it at 300 tool calls` or `planned for about 40 tool calls; CLIO Coder stops it at 300`, with `lowered to CLIO Coder's overall limit` added when admission held the estimate at `fleet.limits.toolCallsPerRun`. An external one-shot worker, whose calls CLIO Coder cannot count, is promised no tool ceiling: `one launch whose tool calls CLIO Coder cannot count, so no tool ceiling applies`.
 
 ### Shipped playbooks and playbook versions
 
