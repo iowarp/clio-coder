@@ -30,6 +30,7 @@ import {
 	readAgentLedger,
 	renderAgentLedgerBoard,
 } from "../domains/dispatch/agent-ledger-store.js";
+import { assignmentNotRetried } from "../domains/dispatch/assignment.js";
 import type { DetachedBatchRun } from "../domains/dispatch/batch-store.js";
 import type { AbortReason, DispatchContract, DispatchRequest, WorkerGrantView } from "../domains/dispatch/contract.js";
 import type { WithheldCapability } from "../domains/dispatch/envelope.js";
@@ -708,15 +709,8 @@ async function withNotRetried(deps: DispatchToolDeps, runs: readonly CompletedRu
 		// The attempt id resolves to its assignment. A hosted run's published lineage root names the main run, which
 		// keys no assignment, so headless `run` printed no not_retried line (bt-45 D3-c).
 		const assignment = deps.dispatch.assignments?.get(run.receipt.runId);
-		if (assignment?.status !== "failed") return run;
-		const detail = assignment.outcomeDetail;
-		if (detail) return { ...run, notRetried: detail.length > 240 ? `${detail.slice(0, 239)}…` : detail };
-		const used = Math.max(0, assignment.attempts.length - 1);
-		const code = run.receipt.outcomeCode ? ` (${run.receipt.outcomeCode})` : "";
-		return {
-			...run,
-			notRetried: `the host did not retry this ${run.receipt.outcome} run${code}; ${used} of maxRetries ${assignment.policy.maxRetries} retries used`,
-		};
+		const notRetried = assignmentNotRetried(assignment, run.receipt);
+		return notRetried === null ? run : { ...run, notRetried };
 	});
 }
 

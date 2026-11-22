@@ -230,7 +230,11 @@ export function dispatchAnswerText(streamedAnswer: string, receipt: RunResult): 
 	return redactUrlCredentials(cutOff ? holdCutOffText(whole) : whole);
 }
 
-export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunResult): string {
+export function formatDispatchHumanOutput(
+	streamedAnswer: string,
+	receipt: RunResult,
+	notRetried?: string | null,
+): string {
 	const answer = dispatchAnswerText(streamedAnswer, receipt);
 	const limitations = sealedResultLimitations(receipt);
 	const verifier = verifierVerdict(receipt);
@@ -242,6 +246,8 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	// A person reading the run learns what went wrong in words before the machine line repeats the record's own detail.
 	const headline = receipt.exitCode !== 0 ? workerFailureHeadline(receipt.failureMessage) : null;
 	const failed = headline === null ? "" : `\nFailed: ${headline}\n`;
+	// Why the host ran no further attempt, which the sealed receipt cannot say: the decision follows its seal (row 371).
+	const notRetriedLine = notRetried ? `Not retried: ${limitationLine(notRetried)}\n` : "";
 	// A run that finished with a refused call or a wrong-format answer says so in the words its worker card and board
 	// row use, so a script reading exit 0 and a person reading the card are told the same thing.
 	// A run that called no tools is only a hint on the card, and an answer-only worker legitimately calls none, so the
@@ -250,7 +256,7 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	const caveat = found?.kind === "no-tools" ? null : found;
 	const finishedWith = caveat === null ? "" : `\nFinished with a caveat: ${caveat.words}\n`;
 	return redactUrlCredentials(
-		`${answer.length > 0 ? `${answer}\n` : ""}${failedBlock}${block}${failed}${finishedWith}${formatResultLine(receipt, limitations.length, verifier, executed.length)}\n`,
+		`${answer.length > 0 ? `${answer}\n` : ""}${failedBlock}${block}${failed}${notRetriedLine}${finishedWith}${formatResultLine(receipt, limitations.length, verifier, executed.length)}\n`,
 	);
 }
 

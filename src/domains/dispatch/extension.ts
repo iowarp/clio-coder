@@ -5406,7 +5406,7 @@ export function createDispatchBundle(
 				// A failed write is reported, never swapped for the worker's real
 				// outcome, and never left holding the capacity slot (#428).
 				try {
-					await settleStoredAssignment(assignmentId, receipt.runId, status);
+					await settleStoredAssignment(assignmentId, receipt.runId, status, undefined, outcomeDetail);
 				} catch (error) {
 					reportDispatchDiagnostic(`persist assignment ${assignmentId}:settle:${status}`, error);
 				}

@@ -443,6 +443,8 @@ interface SeenFrames {
 	receipt?: RunResult;
 	failedChecks?: string[];
 	verdict?: string;
+	/** A failed `run --agent` run's reason its assignment ran no further attempt, from the result frame (row 371). */
+	notRetried?: string;
 	/** Milliseconds from the run's start to the loop's first `agent_start` and first streamed delta, as written. */
 	firstRequestMs?: number;
 	firstTokenMs?: number;
@@ -541,6 +543,7 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			seen.receipt = result.result;
 			if (result.verdict !== undefined) seen.verdict = result.verdict;
 			if (result.failedChecks !== undefined) seen.failedChecks = result.failedChecks;
+			if (result.notRetried !== undefined) seen.notRetried = result.notRetried;
 			return null;
 		}
 	}
@@ -691,6 +694,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			outcome: previewed ? "previewed" : resolution.outcome,
 			...(resolution.causes[0] !== undefined ? { outcomeDetail: resolution.causes[0].code } : {}),
 			causes: resolution.causes,
+			...(seen.notRetried !== undefined ? { notRetried: seen.notRetried } : {}),
 			...(runCompletion !== undefined
 				? { completion: runCompletion }
 				: agentCompletion !== undefined

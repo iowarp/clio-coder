@@ -950,7 +950,7 @@ test("run --agent coder whose own check failed, or who claimed a check it never 
 		let code: number;
 		try {
 			code = await withRunResultV2({ format: "json", mode: "agent", agentId: "coder", verify: [] }, async () => {
-				writeFrame({ type: "result", result: receipt } as never);
+				writeFrame({ type: "result", result: receipt, notRetried: "the host did not retry this failed run" } as never);
 				noteAgentRunCompletion(agentRunCompletion(receipt));
 				return exit;
 			});
@@ -961,11 +961,14 @@ test("run --agent coder whose own check failed, or who claimed a check it never 
 		const end = JSON.parse(stdout.join("").trim().split("\n").at(-1) ?? "{}") as {
 			exitCode?: number;
 			outcome?: string;
+			notRetried?: string;
 			causes?: Array<{ code?: string; exitCode?: number; message?: string }>;
 			dispatch?: { runs?: Array<{ outcome?: string; outcomeCode?: string; exitCode?: number; outcomeDetail?: string }> };
 		};
 		strictEqual(end.exitCode, 1);
 		strictEqual(end.outcome, "failed");
+		// Row 371: why the assignment ran no further attempt rides run_end.
+		strictEqual(end.notRetried, "the host did not retry this failed run");
 		strictEqual(end.causes?.[0]?.code, "worker_failed");
 		match(end.causes?.[0]?.message ?? "", cause);
 		strictEqual(end.dispatch?.runs?.[0]?.outcome, "failed");

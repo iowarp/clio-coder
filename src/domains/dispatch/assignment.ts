@@ -160,6 +160,23 @@ interface MutableAssignment {
 	reject: (reason: unknown) => void;
 }
 
+/**
+ * Why a failed assignment ran no further attempt, for every surface that reports its terminal receipt: the cause its
+ * settlement named, bounded, or the policy line (outcome and retries used against maxRetries) when it named none.
+ * Null for a receipt that succeeded or an assignment that did not settle failed.
+ */
+export function assignmentNotRetried(
+	assignment: Pick<DispatchAssignment, "status" | "outcomeDetail" | "attempts" | "policy"> | null | undefined,
+	receipt: Pick<RunResult, "exitCode" | "outcome" | "outcomeCode">,
+): string | null {
+	if (receipt.exitCode === 0 || assignment?.status !== "failed") return null;
+	const detail = assignment.outcomeDetail;
+	if (detail) return detail.length > 240 ? `${detail.slice(0, 239)}…` : detail;
+	const used = Math.max(0, assignment.attempts.length - 1);
+	const code = receipt.outcomeCode ? ` (${receipt.outcomeCode})` : "";
+	return `the host did not retry this ${receipt.outcome} run${code}; ${used} of maxRetries ${assignment.policy.maxRetries} retries used`;
+}
+
 /** In-memory assignment manager. Attempt receipts remain owned by the run ledger. */
 export class AssignmentRegistry {
 	readonly #assignments = new Map<AssignmentId, MutableAssignment>();
