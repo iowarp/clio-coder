@@ -27,6 +27,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildStampText } from "../core/build-info.js";
+import { ensureProjectIgnore } from "../core/project-root.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { removeSessionAtRest, renameSessionAtRest, sessionRemovalRefusal } from "../domains/session/at-rest.js";
 import type { SessionMeta } from "../domains/session/contract.js";
@@ -255,8 +256,11 @@ function exportSession(meta: SessionMeta, flags: Record<string, string | boolean
 			process.cwd(),
 			requestedOut ?? join(".clio-coder", "exports", `${meta.id}-${localDate(new Date())}.jsonl`),
 		);
+		// As the html and md exports: a default path stays out of Git, and the file is as private as the session (row 362).
+		if (requestedOut === undefined) ensureProjectIgnore(process.cwd());
 		safeResourceWrite(target, bundle.entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""), {
 			encoding: "utf8",
+			mode: 0o600,
 		});
 		return out(
 			{ sessionId: meta.id, format, path: target, entries: bundle.entries.length },

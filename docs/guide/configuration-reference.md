@@ -210,7 +210,7 @@ The music keys are documented in the [music guide](music.md). The exit summary i
 
 ### Commit authorship
 
-With `integrations.git.commitAuthor: auto`, CLIO Coder names itself as the Git author (`Clio Coder <…clio-coder[bot]@users.noreply.github.com>`) of a commit it makes with nobody attending. Your configured identity stays the committer and gets a `Co-authored-by:` trailer, so GitHub credits both and nobody is dropped. CLIO Coder's own `Assisted-by:` and `Co-authored-by:` lines are left off such a commit because the author field already says it. `Tested-by:`, `Reviewed-by:`, receipt and `Clio-Decision:` trailers are kept.
+With `integrations.git.commitAuthor: auto`, CLIO Coder names itself as the Git author (`CLIO Coder <…clio-coder-agent[bot]@users.noreply.github.com>`) of a commit it makes with nobody attending. Your configured identity stays the committer and gets a `Co-authored-by:` trailer, so GitHub credits both and nobody is dropped. CLIO Coder's own `Assisted-by:` and `Co-authored-by:` lines are left off such a commit because the author field already says it. `Tested-by:`, `Reviewed-by:`, receipt and `Clio-Decision:` trailers are kept.
 
 Autonomous means a dispatched worker or fleet run, the host commits and merges that land a worker's worktree (`fleet land` included), a fleet commit step, a headless `clio-coder run`, and a scheduled job's turn. An interactive TUI or ACP session keeps you as author with CLIO Coder's trailers at every autonomy level, as does every commit under `commitAuthor: human`.
 

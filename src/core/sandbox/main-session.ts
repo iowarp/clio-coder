@@ -140,14 +140,19 @@ export function yoloContainmentNotes(
 	};
 }
 
-/** Shown once to an operator whose yolo became contained on upgrade (ob-yolo D1), with this host's real containment. */
+/**
+ * Shown once when yolo first runs on a home that has not recorded its confinement (ob-yolo D1), with this host's real
+ * containment. Only a home upgraded from before contained yolo hears of a change and of an old yolo it had used.
+ */
 export function yoloContainedMigrationNotice(
-	mode: SandboxMode,
+	safety: { sandbox: SandboxMode; judge: { enabled: boolean } },
 	availability: SandboxAvailability,
-	judgeEnabled: boolean,
+	upgradedFromUnconfined: boolean,
 ): string {
-	const notes = yoloContainmentNotes(mode, availability, judgeEnabled);
-	return `Yolo now runs contained: ${notes.sandbox}; ${notes.judge}; nothing waits for you, and a call that would need you is refused back to CLIO Coder instead of asking. To keep the old unconfined yolo, set safety.yoloConfinement: unconfined and safety.yoloUnconfinedAccepted: true in your user settings, or choose it in /settings.`;
+	const notes = yoloContainmentNotes(safety.sandbox, availability, safety.judge.enabled);
+	const head = `${upgradedFromUnconfined ? "Yolo now runs contained" : "Yolo runs contained"}: ${notes.sandbox}; ${notes.judge}; nothing waits for you, and a call that would need you is refused back to CLIO Coder instead of asking.`;
+	const unconfined = upgradedFromUnconfined ? "To keep the old unconfined yolo" : "To run yolo unconfined";
+	return `${head} ${unconfined}, set safety.yoloConfinement: unconfined and safety.yoloUnconfinedAccepted: true in your user settings, or choose it in /settings.`;
 }
 
 export interface MainSandboxPolicyInput {

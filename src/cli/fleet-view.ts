@@ -38,6 +38,7 @@ import { readSettings } from "../core/config.js";
 import type { RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { clioStateDir, resetXdgCache } from "../core/xdg.js";
 import type { ExecutionStepResult } from "../domains/dispatch/execution-scheduler.js";
+import { fleetNodeTaskBrief } from "../domains/dispatch/fleet-node-prompt.js";
 import { type RunFeedLine, readRunFeed, runFeedPath } from "../domains/dispatch/run-feed.js";
 import type { LedgerSnapshot } from "../domains/dispatch/state.js";
 import { openLedger, readFleetRun, readLedgerSnapshot } from "../domains/dispatch/state.js";
@@ -474,6 +475,8 @@ export interface FleetRunStepRow {
 	agentId: string | null;
 	outcome: string;
 	detail: string | undefined;
+	/** The step's task brief from its run's ledger entry; absent when the step never ran or its entry is gone. */
+	task?: string;
 }
 
 export interface FleetRunViewModel {
@@ -530,12 +533,14 @@ function loadFleetRunViewModel(
 		const envelope = ledger.get(runId);
 		const outcome = envelope?.outcome ?? (result.succeeded === true ? "succeeded" : "failed");
 		const detail = result.boundaryViolated === true ? WRITE_BOUNDARY_VIOLATION_REASON : result.failureReason;
+		const task = typeof envelope?.task === "string" ? fleetNodeTaskBrief(envelope.task).trim() : "";
 		return {
 			stepId,
 			runId,
 			agentId: envelope?.agentId ?? null,
 			outcome,
 			detail: typeof detail === "string" && detail.length > 0 ? detail : undefined,
+			...(task.length > 0 ? { task } : {}),
 		};
 	});
 	const telemetry = runTelemetry(rootId, loadRunTelemetrySource(clioStateDir(), rootId), { now: new Date(now()) });
@@ -577,6 +582,7 @@ function renderFleetRunView(model: FleetRunViewModel, width: number = DEFAULT_WI
 			runId: step.runId ?? "-",
 			outcome: sanitizeBounded(step.outcome, 32),
 			tail: [step.agentId, step.detail].filter((part) => part !== null && part !== undefined).join(": "),
+			task: step.task,
 		}));
 		const stepWidth = Math.max(...rows.map((row) => row.step.length));
 		const runWidth = Math.max(...rows.map((row) => row.runId.length));
@@ -585,6 +591,9 @@ function renderFleetRunView(model: FleetRunViewModel, width: number = DEFAULT_WI
 			const head = `${row.step.padEnd(stepWidth)}  ${row.runId.padEnd(runWidth)}  ${row.outcome.padEnd(outcomeWidth)}`;
 			const text = row.tail.length === 0 ? head : `${head}  ${sanitizeBounded(row.tail, DETAIL_MAX_WIDTH)}`;
 			lines.push(truncatePlain(text.trimEnd(), columns));
+			// Row 362: the index says what each step was asked to do, not only which run to open next.
+			if (row.task !== undefined)
+				lines.push(truncatePlain(`  task ${sanitizeBounded(row.task, TASK_MAX_WIDTH)}`, columns));
 		}
 	}
 	lines.push(rule);

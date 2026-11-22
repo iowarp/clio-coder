@@ -8,11 +8,12 @@ import { createToolCallIdMinter } from "../../src/cli/modes/run-json-schema-v2.j
 import { mapExitCode } from "../../src/cli/run.js";
 import {
 	completionExitCode,
+	noteAgentAnswer,
 	noteAgentRunCompletion,
 	withRunFailureReporting,
 	withRunResultV2,
 } from "../../src/cli/run-failure.js";
-import { agentRunCompletion } from "../../src/cli/run-output.js";
+import { agentRunCompletion, dispatchAnswerText } from "../../src/cli/run-output.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-grounding.js";
 import type { ChatLoopRunSnapshot } from "../../src/session-control/chat-loop.js";
@@ -625,6 +626,49 @@ test("run --agent's run_end carries its sealed receipt's completion; a refused e
 		verification: { state: "verified", basis: "validation-tool" },
 	});
 	strictEqual((verified.completion as { state?: string }).state, "done");
+});
+
+test("run --agent's result.text is the worker's answer in words; its sealed contract stays on the receipt (row 362)", async (t) => {
+	const env = await isolateClioEnv("headless-agent-answer-");
+	t.after(() => env.restore());
+	const report = { mutatedPaths: ["src/math.js"], validations: [], summary: "Added clamp." };
+	const json = JSON.stringify(report);
+	const receipt = {
+		...fixtureReceiptDraft(fixtureEnvelope()),
+		digest: "d",
+		output: {
+			state: "final",
+			text: json,
+			bytes: json.length,
+			truncated: false,
+			structured: { version: 1, kind: "mutation-report", data: report },
+		},
+	};
+	strictEqual(dispatchAnswerText(json, receipt as never), "Added clamp.\nchanged: src/math.js");
+	strictEqual(dispatchAnswerText("Plain words.", receipt as never), "Plain words.");
+	const stdout: string[] = [];
+	const write = process.stdout.write;
+	process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+		stdout.push(String(chunk));
+		for (const argument of rest) if (typeof argument === "function") argument();
+		return true;
+	}) as typeof process.stdout.write;
+	try {
+		const code = await withRunResultV2({ format: "json", mode: "agent", agentId: "coder", verify: [] }, async () => {
+			writeFrame({ type: "result", result: receipt } as never);
+			noteAgentAnswer(dispatchAnswerText(json, receipt as never));
+			return 0;
+		});
+		strictEqual(code, 0);
+	} finally {
+		process.stdout.write = write;
+	}
+	const end = JSON.parse(stdout.join("").trim().split("\n").at(-1) ?? "{}") as {
+		result?: { text?: string };
+		dispatch?: { runs?: Array<{ output?: { structured?: { kind?: string } } }> };
+	};
+	strictEqual(end.result?.text, "Added clamp.\nchanged: src/math.js");
+	strictEqual(end.dispatch?.runs?.[0]?.output?.structured?.kind, "mutation-report");
 });
 
 test("a v2 run_end lists every child run the main agent dispatched, a steer cancel as canceled (row 164)", async (t) => {

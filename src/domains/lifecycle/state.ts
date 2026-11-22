@@ -4,6 +4,7 @@ import { initializeClioHome } from "../../core/init.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStatePath } from "../../core/xdg.js";
+import { compareReleaseVersions } from "./release-version.js";
 
 export interface StateInfo {
 	version: string;
@@ -57,6 +58,18 @@ export function readStateInfoResult(): StateInfoRead {
 
 export function readStateInfo(): StateInfo | null {
 	return readStateInfoResult().info;
+}
+
+/** The release that made yolo contained by default (0.7.0-rc.1); a home first run on it or later never had unconfined yolo. */
+const CONTAINED_YOLO_RELEASE = "0.7.0-rc.1";
+
+/**
+ * Whether this home was upgraded from a release whose yolo ran unconfined. `upgradedFrom` is stamped on every version
+ * change, so a home created by a release with contained yolo, or one with no readable record, has no earlier yolo.
+ */
+export function hadOldYolo(): boolean {
+	const from = readStateInfo()?.upgradedFrom;
+	return typeof from === "string" && compareReleaseVersions(from, CONTAINED_YOLO_RELEASE) === -1;
 }
 
 export function ensureClioState(): StateInfo {

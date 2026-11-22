@@ -185,7 +185,7 @@ describe("Clio commit identity", () => {
 
 describe("autonomous commit authorship", () => {
 	const HUMAN = "Human <human@example.com>";
-	const CLIO = `Clio Coder <${CLIO_COMMIT_EMAIL}>`;
+	const CLIO = `CLIO Coder <${CLIO_COMMIT_EMAIL}>`;
 
 	afterEach(() => {
 		setAutonomousCommitProcess(false);
@@ -407,7 +407,7 @@ describe("autonomous commit authorship", () => {
 			]) {
 				const posix = execFileSync(join(shimDirectory, "git"), args, { env: fakeEnv, encoding: "utf8" });
 				const node = execFileSync(process.execPath, [nodeShim, ...args], { env: fakeEnv, encoding: "utf8" });
-				const expected = shim.keepsClioAuthor(args) ? "Clio Coder" : "";
+				const expected = shim.keepsClioAuthor(args) ? "CLIO Coder" : "";
 				deepStrictEqual([posix, node], [expected, expected], args.join(" "));
 			}
 
