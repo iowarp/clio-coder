@@ -1,5 +1,6 @@
 import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
+import { CallEconomicsSchema, RunEconomicsSchema } from "./economy.js";
 import {
 	AgentRole,
 	ConfigChangeSource,
@@ -548,6 +549,12 @@ export const CallRowSchema = Type.Object(
 			),
 			Type.Null(),
 		]),
+		/**
+		 * The attempt's economics as its settlement recorded them (`callEconomicsOf`), beside `usd`, the route price, and
+		 * `billing`, the seat units it reported: additive and comparison quantities in separate groups. Not captured,
+		 * never zero, on a settlement that predates them.
+		 */
+		economics: CallEconomicsSchema,
 	},
 	closed,
 );
@@ -1290,6 +1297,8 @@ export const RunTelemetrySchema = Type.Object(
 					digest: Type.String({ pattern: "^[0-9a-f]{64}$" }),
 					boundKind: Type.Union([RunBoundKind, Type.Null()]),
 					repairRounds: QuantitySchema,
+					/** The run's economics as recorded (`runEconomicsOf`): not captured, never zero, on an older record. */
+					economics: RunEconomicsSchema,
 				},
 				closed,
 			),

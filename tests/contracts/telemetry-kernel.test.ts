@@ -16,6 +16,13 @@ import {
 	withTelemetryContext,
 	withToolTelemetryContext,
 } from "../../src/core/telemetry/context.js";
+import {
+	type CallEconomics,
+	callEconomicsOf,
+	moneyQuantities,
+	runEconomicsOf,
+	sumInUnit,
+} from "../../src/core/telemetry/economy.js";
 import type { SegmentHeader, TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord, readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { EVENTS, validPayload } from "../../src/core/telemetry/events.js";
@@ -465,6 +472,171 @@ test("run.settled writes the fleet role names at version 2 and a sealed version 
 	});
 	strictEqual(written.kv, 2);
 	strictEqual(validPayload("run.settled", { ...sealed.data, executionRole: "verifier" }), false);
+});
+
+test("economics: a sealed record without them reads as not captured, and validators refuse unsafe, negative and mixed-unit amounts", () => {
+	const golden = new URL("../fixtures/telemetry/golden/vccap2ywu7n8/runs/2s47tzn7p4bz/journal.jsonl", import.meta.url);
+	const records = readFileSync(golden, "utf8")
+		.split("\n")
+		.filter((line) => line.includes('"k":"call.settled"') || line.includes('"k":"run.settled"'))
+		.map((line) => readTelemetryRecord(JSON.parse(line.slice(0, line.lastIndexOf("\t")))));
+	const notCaptured = { kind: "unknown", reason: "not-captured" } as const;
+	const missing = (fact: unknown) => ({
+		additive: {
+			providerCharge: { amount: fact },
+			marginalCharge: { amount: fact },
+			seatCredits: { nanoAiu: fact },
+			energy: { kwh: fact, cost: { amount: fact } },
+		},
+		comparison: { apiEquivalent: { amount: fact } },
+		funding: fact,
+	});
+	strictEqual(records.length, 4);
+	for (const read of records) {
+		ok(read.kind === "record", JSON.stringify(read));
+		const { record } = read;
+		if (record.k === "run.settled") deepStrictEqual(runEconomicsOf(record.data), missing(notCaptured));
+		else if (record.k === "call.settled") deepStrictEqual(callEconomicsOf(record.data), missing(notCaptured));
+		else ok(false, record.k);
+	}
+	deepStrictEqual(callEconomicsOf(undefined), missing({ kind: "unknown", reason: "not-observed" }));
+	deepStrictEqual(callEconomicsOf({ disposition: "never_sent" }), missing({ kind: "absent", reason: "not-applicable" }));
+
+	const call = records.find((read) => read.kind === "record" && read.record.k === "call.settled");
+	ok(call?.kind === "record" && call.record.k === "call.settled");
+	const settled = call.record.data;
+	const usd = (value: number) => ({ currency: "USD", amount: { kind: "measured", value, source: "provider" } }) as const;
+	const economics: CallEconomics = {
+		additive: {
+			providerCharge: usd(0.25),
+			marginalCharge: { amount: { kind: "unknown", reason: "provider-omitted" } },
+			seatCredits: {
+				nanoAiu: { kind: "estimated", value: 3_000_000_000, method: "seat-listing-tariff" },
+				listingAsOf: "2026-05-01",
+			},
+			energy: {
+				kwh: { kind: "absent", reason: "not-applicable" },
+				cost: { amount: { kind: "absent", reason: "not-applicable" } },
+			},
+		},
+		comparison: {
+			apiEquivalent: {
+				currency: "USD",
+				amount: { kind: "estimated", value: 0.4, method: "public-retail-tariff" },
+				referenceRowId: "openai/gpt-5@2026-04-01",
+				asOf: "2026-04-01",
+				basis: "served-model",
+			},
+		},
+		funding: {
+			kind: "snapshot",
+			poolId: "pool_7f3a",
+			scheme: { source: "declared", kind: "seat" },
+			payer: "organization",
+			unit: "nano-aiu",
+			period: { kind: "month" },
+		},
+	};
+	const valid = (patch: (e: CallEconomics) => unknown) =>
+		validPayload("call.settled", { ...settled, economics: patch(structuredClone(economics)) });
+	strictEqual(
+		valid((e) => e),
+		true,
+	);
+	const unsafe = Number.MAX_SAFE_INTEGER + 1;
+	for (const patch of [
+		(e: CallEconomics) => ({
+			...e,
+			additive: {
+				...e.additive,
+				seatCredits: {
+					...e.additive.seatCredits,
+					nanoAiu: { kind: "estimated", value: unsafe, method: "seat-listing-tariff" },
+				},
+			},
+		}),
+		(e: CallEconomics) => ({ ...e, additive: { ...e.additive, providerCharge: usd(-0.01) } }),
+		// A known amount names its currency; a route price is not a provider charge, and an API equivalent is never cash.
+		(e: CallEconomics) => ({ ...e, additive: { ...e.additive, providerCharge: { amount: usd(1).amount } } }),
+		(e: CallEconomics) => ({
+			...e,
+			additive: {
+				...e.additive,
+				providerCharge: { currency: "USD", amount: { kind: "estimated", value: 1, method: "target-rates" } },
+			},
+		}),
+		(e: CallEconomics) => ({
+			...e,
+			comparison: { apiEquivalent: { ...e.comparison.apiEquivalent, amount: usd(1).amount } },
+		}),
+		(e: CallEconomics) => ({ ...e, funding: { ...e.funding, poolId: "someone@example.com" } }),
+		(e: CallEconomics) => ({ ...e, savings: 1 }),
+	])
+		strictEqual(valid(patch), false);
+	strictEqual(
+		validPayload("call.settled", {
+			...settled,
+			usage: { ...settled.usage, input: { kind: "measured", value: unsafe, source: "provider" } },
+		}),
+		false,
+	);
+	strictEqual(
+		validPayload("call.settled", {
+			...settled,
+			usage: { ...settled.usage, input: { kind: "measured", value: -1, source: "provider" } },
+		}),
+		false,
+	);
+
+	const quota = {
+		provider: "openai-codex",
+		targetId: "codex",
+		source: "poll",
+		observedAt: "2026-05-01T00:00:00.000Z",
+		windows: [
+			{
+				key: "primary",
+				usedPct: { kind: "measured", value: 40, source: "provider" },
+				unit: "requests",
+				durationSeconds: 18_000,
+			},
+		],
+		displayName: "Codex",
+		status: "ok",
+		credits: {
+			display: "12 credits",
+			usedPct: { kind: "unknown", reason: "provider-omitted" },
+			unit: "provider-credits",
+		},
+		accountPseudonym: "acct_9c1e",
+	};
+	strictEqual(validPayload("quota.read", quota), true);
+	strictEqual(validPayload("quota.read", { ...quota, windows: [], limitOnly: true, limitReached: true }), true);
+	strictEqual(validPayload("quota.read", { ...quota, accountPseudonym: "someone@example.com" }), false);
+	strictEqual(validPayload("quota.read", { ...quota, windows: [{ ...quota.windows[0], durationSeconds: 0 }] }), false);
+	strictEqual(validPayload("quota.read", { ...quota, limitOnly: false }), false);
+
+	const eur = { currency: "EUR", amount: { kind: "measured", value: 1, source: "provider" } } as const;
+	deepStrictEqual(sumInUnit(moneyQuantities([usd(1), eur])), { refused: "mixed-unit", units: ["EUR", "USD"] });
+	const nano = (value: number) => ({ unit: "nano-aiu", fact: { kind: "measured", value, source: "provider" } }) as const;
+	deepStrictEqual(sumInUnit([nano(Number.MAX_SAFE_INTEGER), nano(1)]), { refused: "out-of-range", unit: "nano-aiu" });
+	deepStrictEqual(sumInUnit([nano(-1)]), { refused: "out-of-range", unit: "nano-aiu" });
+	deepStrictEqual(sumInUnit([{ unit: "percent", fact: { kind: "measured", value: 5, source: "provider" } }]), {
+		refused: "non-additive-unit",
+		unit: "percent",
+	});
+	const total = sumInUnit(moneyQuantities([usd(1), usd(0.5), { amount: notCaptured }]));
+	ok("sum" in total && "unit" in total && total.unit === "USD");
+	deepStrictEqual([total.sum.measured, total.sum.unknownCount], [1.5, 1]);
+	deepStrictEqual(sumInUnit(moneyQuantities([{ amount: notCaptured }])), {
+		sum: {
+			measured: 0,
+			estimated: 0,
+			unknownCount: 1,
+			absentCount: 0,
+			coverage: { measured: 0, estimated: 0, unknown: 1 },
+		},
+	});
 });
 
 test("a settled breakdown keeps its measured zeros beside a larger total; only a total-only row loses them (#434)", () => {

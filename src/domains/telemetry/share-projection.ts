@@ -96,7 +96,7 @@ const CALL = {
 	target: TARGET,
 } as const satisfies FieldProjection;
 const QUOTA_WINDOW = {
-	...keep("usedPct", "resetsAt"),
+	...keep("usedPct", "resetsAt", "unit", "durationSeconds"),
 	key: "token",
 	scope: "token",
 	label: "withhold",
@@ -153,6 +153,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		},
 		quota: { ...keep("source"), provider: "runtime", windows: QUOTA_WINDOW },
 		stop: { reason: "keep", failure: "keep", detail: "withhold" },
+		// Funding pools, payers and personal charges are private funding metadata; a share leaves them out.
+		economics: "drop",
 	},
 	"call.linked": { runId: "id", callId: "id" },
 	"compaction.settled": {
@@ -209,6 +211,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		agentId: "name",
 		callIds: "id",
 		frameType: "token",
+		// Funding pools, payers and personal charges are private funding metadata; a share leaves them out.
+		economics: "drop",
 		// The detail names the dispatch runs whose record grounded the verdict: run ids and agent names.
 		verification: { ...keep("state", "basis"), detail: "withhold" },
 		identity: { host: "host", user: "user" },
@@ -400,11 +404,14 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		windows: QUOTA_WINDOW,
 		displayName: "withhold",
 		plan: "token",
-		credits: { display: "withhold", usedPct: "keep" },
+		credits: { display: "withhold", usedPct: "keep", unit: "keep" },
 		targetId: "model-id",
 		message: "withhold",
 		// Already an opaque digest whose pattern an anonymous id cannot satisfy; the field is optional, so it goes.
 		account: "drop",
+		// The pool key of a billing identity: a share never carries it.
+		accountPseudonym: "drop",
+		limitOnly: "keep",
 	},
 	"budget.crossed": keep("level", "spendUsd", "projectedUsd", "ceilingUsd", "contextTokens"),
 	"budget.held": keep(
