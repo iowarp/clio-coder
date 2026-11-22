@@ -273,8 +273,10 @@ export interface MainGrantDecisionInput {
 	decision: "approve" | "deny";
 	/** The deciding main agent's session; a request from another session fails. */
 	sessionId: string | null;
-	/** The main agent's effective autonomy. */
+	/** The main agent's effective autonomy, as admission runs it: contained yolo reads as default. */
 	autonomy: AutonomyLevel;
+	/** The operator's own level, so a refusal names contained yolo; it never decides. */
+	operatorAutonomy?: AutonomyLevel;
 	/** The main turn's host constraints; the delegation ceiling is `delegatedTools ?? allowedTools`. */
 	turnConstraints?: TurnConstraints;
 	signal?: AbortSignal;

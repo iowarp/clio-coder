@@ -33,7 +33,10 @@ export type MainGrantVerdict =
 
 export interface MainGrantInput {
 	record: GrantRecord;
+	/** The level admission runs at, where contained yolo reads as default; it decides. */
 	autonomy: AutonomyLevel;
+	/** The operator's own level, which only words a refusal: yolo here over a default `autonomy` is contained yolo. */
+	operatorAutonomy?: AutonomyLevel;
 	/** True when an operator surface in this process answers forwarded worker asks. */
 	attended: boolean;
 	safety: Pick<SafetyContract, "evaluate">;
@@ -66,6 +69,28 @@ function inPermit(record: GrantRecord, tool: string): boolean {
 	return record.permitTools.includes(tool);
 }
 
+/**
+ * The main agent cannot grant a worker's ask itself below yolo: an attended operator decides, and with nobody to ask it
+ * is refused. Contained yolo grants as default does, so it is worded as itself rather than as the default it decides at.
+ */
+export function mainGrantBelowYolo(input: {
+	autonomy: AutonomyLevel;
+	operatorAutonomy?: AutonomyLevel;
+	attended: boolean;
+}): { kind: "ask-operator"; reason: string } | { kind: "deny"; reason: string } {
+	const contained = input.operatorAutonomy === "yolo" && input.autonomy === "default";
+	const level = contained
+		? "contained yolo, which grants a worker's ask as default does"
+		: `at autonomy ${input.autonomy}`;
+	if (input.attended) return { kind: "ask-operator", reason: `the main agent runs ${level}, so the operator decides` };
+	return {
+		kind: "deny",
+		reason: contained
+			? `the main agent runs ${level}; with no operator to ask it is refused (an attended operator, or unconfined yolo, can grant it)`
+			: `the main agent runs ${level} with no operator to ask; an attended operator, or --autonomy yolo with safety.yoloConfinement: unconfined, can grant it`,
+	};
+}
+
 export function evaluateMainGrant(input: MainGrantInput): MainGrantVerdict {
 	const { record, autonomy, attended } = input;
 	const refuse = (reason: string): MainGrantVerdict =>
@@ -88,14 +113,7 @@ export function evaluateMainGrant(input: MainGrantInput): MainGrantVerdict {
 	if (effect.tool === ToolNames.Verify && !mainResolvesVerify(record.cwd, effect.args)) {
 		return { kind: "deny", reason: "the main agent cannot see the command this verify call runs, so it grants nothing" };
 	}
-	if (autonomy !== "yolo") {
-		return attended
-			? { kind: "ask-operator", reason: `the main agent runs at autonomy ${autonomy}, so the operator decides` }
-			: {
-					kind: "deny",
-					reason: `the main agent runs at autonomy ${autonomy} with no operator to ask; only --autonomy yolo lets it grant worker asks`,
-				};
-	}
+	if (autonomy !== "yolo") return mainGrantBelowYolo(input);
 	const admission = evaluateAdmission({
 		principal: "main",
 		effects: [{ tool: effect.tool, args: effect.args }],

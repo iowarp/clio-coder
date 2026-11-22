@@ -247,6 +247,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 					(await import("./steer.js")).createSteerTool({
 						dispatch,
 						...(admissionAutonomy ? { getAutonomy: admissionAutonomy } : {}),
+						...(deps.getAutonomy ? { getOperatorAutonomy: deps.getAutonomy } : {}),
 					}),
 				),
 				{

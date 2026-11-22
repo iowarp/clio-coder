@@ -32,6 +32,8 @@ export interface SteerToolDeps {
 	dispatch: DispatchContract;
 	/** The main agent's effective autonomy; approval below yolo goes to the operator or is denied. */
 	getAutonomy?: () => AutonomyLevel;
+	/** The operator's own level, which only words a refusal (contained yolo reads as default in `getAutonomy`). */
+	getOperatorAutonomy?: () => AutonomyLevel;
 }
 
 /** The refusal for a run or assignment this session did not dispatch, or null when it did. */
@@ -126,6 +128,7 @@ async function decideGrant(
 		decision: action,
 		sessionId: options?.sessionId ?? null,
 		autonomy: deps.getAutonomy?.() ?? "default",
+		...(deps.getOperatorAutonomy ? { operatorAutonomy: deps.getOperatorAutonomy() } : {}),
 		...(options?.turnConstraints !== undefined ? { turnConstraints: options.turnConstraints } : {}),
 		...(options?.signal !== undefined ? { signal: options.signal } : {}),
 	});

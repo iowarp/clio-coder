@@ -17,6 +17,7 @@ import {
 	type GrantRequestInput,
 } from "../../src/domains/dispatch/grant-broker.js";
 import { writeGrantAnswerRecord } from "../../src/domains/dispatch/run-directory-records.js";
+import { evaluateWriteRootGrant } from "../../src/domains/dispatch/write-root-requests.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { SafetyJudgementInput } from "../../src/domains/safety/decision-events.js";
 import { grantEffectDescriptor, grantEffectDigest } from "../../src/domains/safety/grant-effect.js";
@@ -199,6 +200,20 @@ describe("grant broker", () => {
 		ok(headless.kind === "deny" && /--autonomy yolo/u.test(headless.reason), JSON.stringify(headless));
 		strictEqual(evaluateMainGrant({ record, autonomy: "default", attended: true, safety }).kind, "ask-operator");
 		strictEqual(evaluateMainGrant({ record, autonomy: "yolo", attended: false, safety }).kind, "grant");
+		// Contained yolo decides as default does, and its refusal says so instead of pointing at --autonomy yolo.
+		for (const verdict of [
+			evaluateMainGrant({ record, autonomy: "default", operatorAutonomy: "yolo", attended: false, safety }),
+			evaluateWriteRootGrant({ autonomy: "default", operatorAutonomy: "yolo", attended: false }),
+		]) {
+			strictEqual(verdict.kind, "deny");
+			ok(
+				verdict.kind === "deny" &&
+					/runs contained yolo, which grants a worker's ask as default does; with no operator to ask it is refused \(an attended operator, or unconfined yolo, can grant it\)$/u.test(
+						verdict.reason,
+					),
+				JSON.stringify(verdict),
+			);
+		}
 		broker.dispose();
 	});
 });
