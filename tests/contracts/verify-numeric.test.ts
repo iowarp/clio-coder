@@ -758,6 +758,27 @@ describe("package-script checks through the verify tool", () => {
 			strictEqual("exitCode" in (refused.details ?? {}), false, check);
 		}
 	});
+
+	it("maps a package manager's own invocation of a declared script to that check", () => {
+		const root = workspace({
+			"package.json": JSON.stringify({ scripts: { test: "node --test", lint: "exit 0", start: "node -e 0" } }),
+		});
+		process.chdir(root);
+		for (const [check, id] of [
+			["npm test", "test"],
+			["npm run test", "test"],
+			["pnpm test", "test"],
+			["yarn run lint", "lint"],
+			["bun run test", "test"],
+		]) {
+			const resolution = resolveVerifyCall(root, { check });
+			ok(resolution.kind === "package" && resolution.check.id === id, `${check}: ${JSON.stringify(resolution)}`);
+		}
+		// Not a declared check's own invocation: bun's test runner, a script outside the family, extra arguments.
+		for (const check of ["bun test", "npm start", "npm test -- --watch"]) {
+			strictEqual(resolveVerifyCall(root, { check }).kind, "unresolved", check);
+		}
+	});
 });
 
 describe("numeric-compare under host verification", () => {
