@@ -17,7 +17,7 @@ import type {
 	ApplicationIntervalHandle,
 	ApplicationSignalCoordinator,
 } from "./application-controller.js";
-import { createApplicationController } from "./application-controller.js";
+import { createApplicationController, SURFACE_ACTION_ORDER } from "./application-controller.js";
 import { backOutOneLayer } from "./escape-layers.js";
 import { formatKeyLabel } from "./keybinding-manager.js";
 import { focusedComponent, keyboardOwner } from "./keyboard-owner.js";
@@ -274,6 +274,9 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			}) as Partial<Record<OverlayState, ClioKeybinding>>
 		)[deps.overlay.getState()];
 	const canToggleOwner = () => deps.overlay.getState() === "dispatch-board" || owner().keyboardScope === "browse";
+	/** Runs from every scope, as its direct key does (FX-13). */
+	const surfaceAction = (id: Keybinding | undefined): boolean =>
+		(SURFACE_ACTION_ORDER as ReadonlyArray<string>).includes(id ?? "");
 	const omitAction = (id: Keybinding | undefined): boolean =>
 		id === "clio-coder.music.toggle" && deps.actions.musicAvailable?.() === false;
 	const targets = (): ReadonlyArray<LeaderTarget> => {
@@ -283,11 +286,12 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			.filter(({ id }) => deps.tui instanceof TuiAltScreen || !id?.startsWith("tui.altScreen."))
 			.filter(({ id }) => !omitAction(id));
 		const filtered = search()
-			? all.filter(({ id }) => id === "tui.editor.undo" || id === "tui.altScreen.search")
+			? all.filter(({ id }) => id === "tui.editor.undo" || id === "tui.altScreen.search" || surfaceAction(id))
 			: deps.overlay.getState() === "closed"
 				? all
 				: all.filter(
 						({ id }) =>
+							surfaceAction(id) ||
 							(id === ownerAction() && canToggleOwner()) ||
 							(id === "tui.editor.undo" &&
 								(owner().keyboardScope === "edit" || deps.overlay.getState() === "permission-confirm")),
@@ -381,6 +385,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			}
 			return true;
 		}
+		if (surfaceAction(id)) return deps.dispatchAction(id as ClioKeybinding, keyActionDeps());
 		if (deps.overlay.getState() !== "closed") {
 			if (id === ownerAction() && canToggleOwner()) deps.overlay.closeOverlay();
 			return true;

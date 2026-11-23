@@ -320,7 +320,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			const fallback =
 				operation === "install"
 					? installed
-						? `${name} is already installed in ${view.scope} scope; u reviews an update and r a removal.`
+						? `${name} is already installed in ${view.scope} scope; u reviews an update and x a removal.`
 						: `${name} cannot be installed from this row.`
 					: installed
 						? `${name} has nothing to ${operation} in ${view.scope} scope.`

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, it } from "node:test";
-import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { DEFAULT_SETTINGS, nextOutputStyle } from "../../src/core/defaults.js";
+import { presentationTier, setPresentationTier } from "../../src/core/presentation-tier.js";
+import type { FleetRunPreview } from "../../src/domains/dispatch/fleet-run-preview.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/index.js";
 import type { ProcessTerminal } from "../../src/engine/tui.js";
 import {
@@ -27,6 +29,7 @@ import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../../src/
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
 import { openExtensionPanel } from "../../src/interactive/overlays/extension-panel.js";
+import { openFleetRunApprovalOverlay } from "../../src/interactive/overlays/fleet-run-approval.js";
 import { openHelpOverlay } from "../../src/interactive/overlays/help-reference.js";
 import { openInteropOverlay } from "../../src/interactive/overlays/interop.js";
 import { openLibraryReviewOverlay } from "../../src/interactive/overlays/library-review.js";
@@ -107,7 +110,10 @@ function fixture(overrides: Record<string, string | string[]> = {}) {
 		shutdown: 0,
 		runCancel: 0,
 		steer: 0,
+		output: 0,
 	};
+	const previousTier = presentationTier();
+	cleanups.push(() => setPresentationTier(previousTier));
 	editor.onSubmit = () => {
 		counts.submit++;
 	};
@@ -144,7 +150,10 @@ function fixture(overrides: Record<string, string | string[]> = {}) {
 		dispatchAction: dispatchInteractiveAction,
 		actions: {
 			canExit: () => !active.streaming && !active.queued && editor.getText().length === 0,
-			cycleOutputStyle: noop,
+			cycleOutputStyle: () => {
+				counts.output++;
+				setPresentationTier(nextOutputStyle(presentationTier()));
+			},
 			availableThinkingLevels: () => ["off"],
 			onCycleThinking: noop,
 			cycleScopedModelForward: noop,
@@ -408,6 +417,111 @@ it("leader toggles its owner, survives delay/unknown suffix, and Ctrl+C closes o
 	assert.equal(f.counts.cancel, 0);
 	f.terminal.input("\x03");
 	assert.equal(f.counts.cancel, 1);
+});
+it("Alt+O cycles the tier from the plan review card and the card redraws at the new tier (FX-13)", () => {
+	const f = fixture();
+	setPresentationTier("standard");
+	const preview = {
+		name: "review",
+		planHash: "abc",
+		plan: { hash: "def" },
+		waves: [
+			{
+				index: 0,
+				steps: [
+					{
+						kind: "agent",
+						stepId: "review",
+						agentId: "scout",
+						scope: "readonly",
+						writes: [],
+						route: { targetId: "blade", wireModelId: "dynamo/qwopus", nodeId: "local" },
+					},
+				],
+			},
+		],
+		budget: { playbookUsd: null, ceilingUsd: 2, currentUsd: 0 },
+	} as unknown as FleetRunPreview;
+	let cancelled = 0;
+	const card = f.mount("fleet-run-approval", () =>
+		openFleetRunApprovalOverlay(f.tui, {
+			subject: { ok: true, preview },
+			columns: 100,
+			onAccept: noop,
+			onCancel: () => {
+				cancelled++;
+			},
+		}),
+	);
+	cleanups.push(() => card.hide());
+	const frame = () => {
+		const from = f.terminal.output.length;
+		f.tui.renderNow();
+		return stripTerminalSequences(f.terminal.output.slice(from));
+	};
+	assert.doesNotMatch(frame(), /blade · dynamo\/qwopus/u, "standard keeps the step route off the card");
+	const order = ["standard"];
+	for (let press = 0; press < 3; press++) {
+		f.terminal.input("\x1bo");
+		order.push(presentationTier());
+		if (presentationTier() === "detailed") assert.match(frame(), /blade · dynamo\/qwopus/u, "the held card redraws");
+	}
+	assert.equal(f.counts.output, 3);
+	assert.deepEqual(new Set(order), new Set(["compact", "standard", "detailed"]));
+	assert.equal(f.state(), "fleet-run-approval");
+	assert.equal(cancelled, 0);
+	f.terminal.input("\x07");
+	f.terminal.input("o");
+	assert.equal(f.counts.output, 4, "Ctrl+G O reaches the tier from the card");
+});
+it("Alt+O and Ctrl+G O reach the tier from every surface family and leave the surface open (FX-13)", async () => {
+	const f = fixture();
+	const rows: ReadonlyArray<{ family: string; state: OverlayState; open: () => () => void | Promise<void> }> = [
+		{ family: "approval card", state: "permission-confirm", open: () => (f.open("permission-confirm"), noop) },
+		{
+			family: "interview",
+			state: "ask-user",
+			open: () => {
+				const interview = openAskUserOverlay(f.tui, { onCancel: f.close });
+				f.mount("ask-user", () => interview);
+				const answered = interview.ask([{ question: "First", options: [{ label: "Choose" }] }]);
+				return async () => {
+					interview.cancel();
+					await answered;
+				};
+			},
+		},
+		{ family: "side question", state: "side-question", open: () => (f.open("side-question"), noop) },
+		{ family: "picker", state: "skills-hub", open: () => (f.terminal.input("\x1bl"), noop) },
+		{ family: "Fleet Runs board", state: "dispatch-board", open: () => (f.open("dispatch-board"), noop) },
+		{ family: "/usage", state: "usage", open: () => (f.open("usage"), noop) },
+		// The in-TUI workers dock never takes the keyboard: the composer keeps it, so the key routes as from the composer.
+		{ family: "dock under the composer", state: "closed", open: () => noop },
+	];
+	f.editor.setText("draft");
+	for (const row of rows) {
+		const teardown = row.open();
+		assert.equal(f.state(), row.state, row.family);
+		const before = f.counts.output;
+		const tier = presentationTier();
+		f.terminal.input("\x1bo");
+		assert.equal(f.counts.output, before + 1, `${row.family}: Alt+O cycles the tier`);
+		assert.equal(presentationTier(), nextOutputStyle(tier), row.family);
+		f.terminal.input("\x07");
+		f.terminal.input("o");
+		assert.equal(f.counts.output, before + 2, `${row.family}: Ctrl+G O cycles the tier`);
+		assert.equal(f.state(), row.state, `${row.family} stays open`);
+		assert.equal(f.editor.getText(), "draft", `${row.family}: the draft is untouched`);
+		assert.equal(f.counts.allow + f.counts.stop + f.counts.submit + f.counts.runCancel, 0, row.family);
+		await teardown();
+		if (f.state() !== "closed") f.close();
+	}
+	// Transcript search is a focused owner too.
+	f.terminal.input("\x12");
+	assert.equal(f.tui.isSearchFocused, true);
+	f.terminal.input("\x1bo");
+	assert.equal(f.counts.output, rows.length * 2 + 1, "search: Alt+O cycles the tier");
+	assert.equal(f.tui.isSearchFocused, true);
 });
 it("permits printable editing repeats and live reload cancels a pending menu", () => {
 	const f = fixture();

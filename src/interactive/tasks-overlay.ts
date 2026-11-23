@@ -391,7 +391,8 @@ function selectionStatusRow(selection: TasksOverlaySelection, width: number, wor
 				: selection.kind === "history"
 					? [...taskUnits(selection.task), dim(selection.board.title)]
 					: taskUnits(selection.task);
-	return fitUnits(theme, `${theme.fg("selectedOption", GLYPH.cursor)} `, units, width);
+	// The selected row carries the cursor; this row sits under its text without a second one.
+	return fitUnits(theme, "  ", units, width);
 }
 
 function isSameSelection(left: TasksOverlaySelection | undefined, right: TasksOverlaySelection): boolean {

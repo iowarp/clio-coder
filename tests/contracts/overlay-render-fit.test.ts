@@ -1,5 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import { sumFacts } from "../../src/core/telemetry/pricing.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { emptyTaskMemorySpendSummary } from "../../src/domains/memory/task-memory-spend.js";
@@ -145,6 +146,35 @@ test("a two-column list draws its meta as one column, so the text column ends at
 		["/compact", "/compact"].map((lead) => row(lead).indexOf(GLYPH.ellipsis)),
 		"every text is cut at the same column",
 	);
+});
+
+test("a list that cuts its descriptions still states the selection by tier (FX-17)", (t) => {
+	t.after(() => setPresentationTier("standard"));
+	const text = "Describes what this extension does in more words than an eighty column row can hold";
+	const view = new ListOverlayView(
+		{
+			title: "Extensions",
+			items: ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"].map((id) => ({
+				id,
+				label: id,
+				cells: { lead: id, text },
+				meta: "running",
+				summary: () => `status of ${id}`,
+				facts: () => [`fact one of ${id}`, `fact two of ${id}`],
+			})),
+			onClose() {},
+		},
+		() => {},
+	);
+	view.setViewportRows(18);
+	setPresentationTier("compact");
+	const compact = view.render(80).map(stripTerminalSequences).join("\n");
+	match(compact, /alpha {2}Describes what this extension does in more words than/u, "the focus line states the cut row");
+	match(compact, /^ {2}status of alpha/mu, "compact keeps the status row under the focus line");
+	setPresentationTier("standard");
+	const standard = view.render(80).map(stripTerminalSequences).join("\n");
+	match(standard, /alpha {2}Describes what this extension does in more words than/u);
+	match(standard, /^ {2}fact one of alpha *\n {2}fact two of alpha/mu, "standard keeps the fact rows");
 });
 
 test("a list mixing rows offers the detail key only on a row that has detail", () => {

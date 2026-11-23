@@ -141,7 +141,7 @@ function forkParentLine(snapshot: TreeSnapshot, theme: ClioTheme): string | null
 	if (typeof parentSessionId !== "string" || parentSessionId.length === 0) return null;
 	const parentTurnId = snapshot.meta.parentTurnId;
 	const at = typeof parentTurnId === "string" && parentTurnId.length > 0 ? ` at ${shortTurnId(parentTurnId)}` : "";
-	return `${theme.fg("annotation", "↰ forked from ")}${theme.fg("menuDescription", `${parentSessionId}${at}`)}${theme.fg("annotation", ` ${GLYPH.sep} /resume it to reach the turns left behind`)}`;
+	return `${theme.fg("annotation", `${GLYPH.forked} forked from `)}${theme.fg("menuDescription", `${parentSessionId}${at}`)}${theme.fg("annotation", ` ${GLYPH.sep} /resume it to reach the turns left behind`)}`;
 }
 
 function isLeaf(node: TreeSnapshotNode): boolean {
@@ -189,7 +189,7 @@ function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
 				walk(
 					childId,
 					depth + 1,
-					`${rest}${last ? `${GLYPH.bottomLeft} ` : "├ "}`,
+					`${rest}${last ? `${GLYPH.bottomLeft} ` : `${GLYPH.branch} `}`,
 					`${rest}${last ? "  " : `${GLYPH.rail} `}`,
 				);
 			});
@@ -276,7 +276,7 @@ function formatTreeRow(
 	// a branched session shows exactly one live tip instead of every childless
 	// node reading the same as every other (issue #94). Other leaves still get
 	// a leaf glyph, just not the one that claims to be current.
-	const glyph = row.isActiveTip ? GLYPH.active : isLeaf(row.node) ? GLYPH.running : "○";
+	const glyph = row.isActiveTip ? GLYPH.active : isLeaf(row.node) ? GLYPH.running : GLYPH.hollow;
 	const who = TREE_ROLE_WORDS[row.node.kind] ?? row.node.kind.replace(/_/gu, " ");
 	const rawPreview = row.node.preview && row.node.preview.length > 0 ? row.node.preview : fallbackPreview(row.node);
 	const labelText = row.node.label ? ` ${GLYPH.sep} label:"${row.node.label}"` : "";
@@ -559,7 +559,7 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		return fitHintEntries(
 			[
 				{ key: "Enter", verb: "continue from here", short: "continue", critical: true },
-				{ key: "↑↓", verb: "select" },
+				{ key: GLYPH.upDown, verb: "select" },
 				{ key: "e", verb: "label" },
 				{ key: "p", verb: `folder: ${this.currentCwdOnly ? "this" : "all"}` },
 				{ key: "o", verb: `order: ${this.sortOrder === "tree" ? "tree" : "newest"}` },

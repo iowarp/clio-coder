@@ -70,7 +70,7 @@ const SELECTION_FACT_ROWS = 4;
 /** The one key the body never repeats: a pane that overflows names it on its own position row. */
 const PANE_REMINDERS = new Set(["PgUp/PgDn"]);
 /** Keys the chrome may already show by their glyph alone: the compact tab bar ends in ←→. */
-const NAVIGATION_KEYS = new Set(["←→", "↑↓"]);
+const NAVIGATION_KEYS = new Set<string>([GLYPH.leftRight, GLYPH.upDown]);
 
 interface RenderedRow {
 	type: "group" | "item";
@@ -513,7 +513,7 @@ export class ListOverlayView implements Component {
 					this.padLine(
 						theme.fg(
 							"selectedOption",
-							`${GLYPH.cursor} ${active.label} ${this.tabCounts.get(active.id) ?? 0} · ${position}/${tabs.length} ←→`,
+							`${GLYPH.cursor} ${active.label} ${this.tabCounts.get(active.id) ?? 0} · ${position}/${tabs.length} ${GLYPH.leftRight}`,
 						),
 						width,
 					),
@@ -688,7 +688,7 @@ export class ListOverlayView implements Component {
 		const countLabel = tab.countLabel?.(count) ?? `${count} ${tab.label.toLowerCase()}`;
 		// The tab bar itself is on screen at every width, naming ←→ when it is
 		// narrow, so the footer entry is a reminder that gives way before a row's keys.
-		return { key: "←→", verb: `tab · ${countLabel}`, short: "tab" };
+		return { key: GLYPH.leftRight, verb: `tab · ${countLabel}`, short: "tab" };
 	}
 
 	/**
@@ -730,7 +730,7 @@ export class ListOverlayView implements Component {
 		if (armedRow !== null && armedAsk !== undefined && armedItem !== undefined)
 			return { entries: confirmOnceRail(armedRow.key, armedAsk.verb, armedAsk.label(armedItem)), esc: this.escapeVerb() };
 		if (tabEntry) hintEntries.push(tabEntry);
-		hintEntries.push({ key: "↑↓", verb: "select" });
+		hintEntries.push({ key: GLYPH.upDown, verb: "select" });
 		// Navigation before actions, which is the order a narrowing footer drops in:
 		// droppable entries go left to right, so the last one written is the last one
 		// standing. Scrolling a pane is reachable only once the pane is on screen, and
@@ -1013,19 +1013,21 @@ export class ListOverlayView implements Component {
 			const metaWidth = this.metaWidth(filteredItems);
 			// With no detail pane, a two-column row the width cuts is stated whole under the list for the focused
 			// row. The rows are reserved whenever any row is cut, so moving the cursor never resizes the window.
-			const focus =
+			let focus =
 				focusLine && listMaxLines >= FOCUS_LINE_MIN_LIST_ROWS && this.anyRowCut(width - 2, filteredItems, leadWidth)
 					? this.focusLineRows(width, filteredItems[this.selectedIndex])
 					: [];
-			// With no pane the tier states the selection under the list; the focus line already states it whole.
-			const block = focus.length === 0 && focusLine ? this.reservedSelectionBlock(width, filteredItems) : [];
+			// With no pane the tier states the selection under the list, whether or not the width cut its text: the focus
+			// line restates the row, the block says what the row leaves out.
+			const block = focusLine ? this.reservedSelectionBlock(width, filteredItems) : [];
 			const windowFor = (blockRows: number): { scrollRows: number; itemRows: number } => {
 				const room = listMaxLines - focus.length - blockRows;
 				const scroll = renderedRows.length > room && listMaxLines > 1 ? 1 : 0;
 				return { scrollRows: scroll, itemRows: room - scroll };
 			};
-			// The block gives way, last row first, before the list falls under the rows a cursor needs.
+			// Before the list falls under the rows a cursor needs, the focus line gives way, then the block, last row first.
 			const listFloor = Math.min(STACKED_LIST_MIN_ROWS, renderedRows.length);
+			if (focus.length > 0 && windowFor(block.length).itemRows < listFloor) focus = [];
 			let blockRows = block.length;
 			while (blockRows > 0 && windowFor(blockRows).itemRows < listFloor) blockRows -= 1;
 			const scrollRows = windowFor(blockRows).scrollRows;

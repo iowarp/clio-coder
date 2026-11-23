@@ -42,8 +42,9 @@ const ARGUMENT_HINT_BUDGET = 44;
 const COMPLETION_DESCRIPTION_BUDGET = 96;
 /** The list's name column is 32 cells with a 2-cell gap; the label must fit before the list cuts it silently. */
 const ROW_LABEL_BUDGET = 30;
-const PARENT_MARK = "▸";
-const PATH_SEPARATOR = "›";
+const PARENT_MARK = GLYPH.submenu;
+/** clio-editor.ts splits the breadcrumb on this same glyph, so the join and the split cannot drift apart. */
+const PATH_SEPARATOR = GLYPH.crumb;
 
 export interface CompletionValue {
 	/** Stable identity; distinct from the inserted spelling when aliases are displayed. */

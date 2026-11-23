@@ -136,7 +136,7 @@ class SessionSelectList extends SelectList {
  * own: a session row can carry no activity instant at all.
  */
 export function formatRelativeTime(iso: string | null | undefined, now: number = Date.now()): string {
-	return iso ? relative(iso, now) : "—";
+	return iso ? relative(iso, now) : GLYPH.none;
 }
 
 /** The session's connection and model the way the composer names them: `mock · mock/judge-model`. */

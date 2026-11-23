@@ -4,8 +4,21 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { renderCard, verdictText } from "../../src/cli/fleet-board.js";
-import { createBoardSource, loadBoard, loadTakeover, type WorkerCard } from "../../src/cli/fleet-board-model.js";
+import {
+	type BoardView,
+	renderBoard,
+	renderCard,
+	renderTakeover,
+	type TakeoverView,
+	verdictText,
+} from "../../src/cli/fleet-board.js";
+import {
+	createBoardSource,
+	loadBoard,
+	loadTakeover,
+	type TakeoverModel,
+	type WorkerCard,
+} from "../../src/cli/fleet-board-model.js";
 import { fleetInspectionScope } from "../../src/cli/fleet-project-scope.js";
 import { runFleetStatus } from "../../src/cli/fleet-status.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -450,6 +463,112 @@ test("the workers takeover reads a sealed report in words, never as its JSON (bt
 			takeover.card.record?.answer,
 			"Implemented slugify (bash-hidden-content rail).\nchanged: textutil/slug.py",
 		);
+	} finally {
+		home.restore();
+	}
+});
+
+test("the dock key row drops words before keys and keeps [q] hide at the real 37-cell dock (FX-14)", () => {
+	const paint = { fg: (_role: unknown, text: string) => text, dim: (text: string) => text };
+	const keys = (width: number) => renderBoard(paint, [], { selectedRunId: null, top: 0 } as BoardView, width, 12).at(-1);
+	strictEqual(keys(40), " [↑↓] select · [Enter] open · [q] hide");
+	// Herdr's border leaves a 40-column dock 37 cells; the row once ended at `[Enter] open`.
+	strictEqual(keys(37), " [↑↓] · [Enter] open · [q] hide");
+	strictEqual(keys(32), " [↑↓] · [Enter] open · [q] hide");
+	strictEqual(keys(26), " [↑↓] · [Enter] · [q] hide");
+	strictEqual(keys(19), " [Enter] · [q] hide");
+	strictEqual(keys(12), " [q] hide");
+});
+
+test("in run detail, t after a scroll keeps the answer on the same screen rows (FX-14)", () => {
+	const paint = { fg: (_role: unknown, text: string) => text, dim: (text: string) => text };
+	const task = Array.from({ length: 12 }, (_, index) => `step ${index + 1}: inspect module ${index + 1}`).join("; ");
+	const answer = Array.from({ length: 40 }, (_, index) => `${index + 1}. finding number ${index + 1}`).join("\n");
+	const model = {
+		card: {
+			runId: "r1",
+			agentId: "scout",
+			task,
+			state: "succeeded",
+			elapsedMs: 5_000,
+			phase: null,
+			current: null,
+			last: null,
+			asking: null,
+			trail: [],
+			record: { outcome: "succeeded", integrity: "unverified", validationState: "none", answer },
+			attempt: 0,
+			toolCalls: 0,
+			target: "local",
+			model: "model",
+			origin: "operator",
+			helper: false,
+			startedAtMs: 0,
+			endedAtMs: 5_000,
+		},
+		fold: { present: true, truncated: false, rows: [], droppedRows: 0, eventsUnread: false, current: null, last: null },
+		fleet: null,
+	} as unknown as TakeoverModel;
+	const view: TakeoverView = {
+		runId: "r1",
+		scrollTop: 0,
+		followSuccessor: false,
+		taskExpanded: false,
+		answerStart: -1,
+		streamLength: 0,
+		bodyHeight: 1,
+		live: false,
+	};
+	const frame = () => renderTakeover(paint, model, view, 37, 38);
+	const answerRows = (rows: string[]) => rows.filter((row) => /^ \d+\. finding/u.test(row));
+	const rowOf = (rows: string[]) => rows.findIndex((row) => row.startsWith(" 1. finding"));
+	frame();
+	(view.scrollTop as number) += 3;
+	const scrolled = frame();
+	ok(rowOf(scrolled) > 2, "the answer starts on screen");
+	view.taskExpanded = true;
+	const expanded = frame();
+	strictEqual(rowOf(expanded), rowOf(scrolled), "t keeps the answer's row");
+	deepStrictEqual(answerRows(expanded), answerRows(scrolled));
+	view.taskExpanded = false;
+	const folded = frame();
+	deepStrictEqual(folded, scrolled, "t again returns the same frame");
+});
+
+test("the workers board lists every failover attempt, as the Fleet Runs board does (FX-14)", async () => {
+	const home = await isolateClioEnv("clio-fleet-board-attempts-");
+	try {
+		const ledger = openLedger();
+		let parentRunId: string | null = null;
+		let rootRunId: string | null = null;
+		const ids: string[] = [];
+		for (let attempt = 0; attempt < 3; attempt += 1) {
+			const run = ledger.create({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "fix the parser",
+				targetId: "local",
+				wireModelId: `model-${attempt}`,
+				runtimeId: "openai",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: process.cwd(),
+				...(attempt > 0 ? { requestOrigin: "internal" as const } : {}),
+			});
+			rootRunId ??= run.id;
+			ledger.update(run.id, {
+				status: "failed",
+				outcome: "failed",
+				exitCode: 1,
+				endedAt: new Date().toISOString(),
+				lineage: { parentRunId, rootRunId, attempt, depth: 0 },
+			} as never);
+			parentRunId = run.id;
+			ids.push(run.id);
+		}
+		await ledger.persist();
+		const board = loadBoard(createBoardSource(clioStateDir()), null, fleetInspectionScope(true), Date.now());
+		deepStrictEqual(board.finished.map((card) => card.runId).sort(), [...ids].sort());
 	} finally {
 		home.restore();
 	}
