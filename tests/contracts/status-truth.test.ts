@@ -7,6 +7,16 @@ import {
 	type ModelAdmissionEvent,
 	type ModelAdmissionWait,
 } from "../../src/core/model-admission.js";
+import {
+	compareRuns,
+	type RunCell,
+	type RunFacts,
+	runCountBuckets,
+	runCountRow,
+	runIdentityWidth,
+	runRow,
+	runSortRank,
+} from "../../src/core/run-row.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { readTrailingWrittenCalls } from "../../src/core/tool-call-markup.js";
 import { foregroundEndpointBlock } from "../../src/domains/dispatch/admission.js";
@@ -34,7 +44,7 @@ import {
 } from "../../src/domains/session/retry.js";
 import { createWorkerProgressFold, type WorkerProgressSnapshot } from "../../src/domains/telemetry/worker-progress.js";
 import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/residency.js";
-import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import {
@@ -3038,4 +3048,125 @@ test("a chained verify step naming no declared check seals no failed validation 
 		[true],
 		"only the check that ran is sealed, and it passed",
 	);
+});
+
+test("the run row model gives the 6.2 and 6.6 rows, the run sort order and the count row (W0-5)", () => {
+	const glyphs: Record<string, string> = {
+		error: "✗",
+		warn: "!",
+		phaseBlocked: "‖",
+		cancelled: "⊘",
+		queued: "◌",
+		running: "●",
+		ok: "✓",
+		workerAgent: "◆",
+		subProcess: "↳",
+		sep: "·",
+		ellipsis: "…",
+	};
+	const plain = (cells: RunCell[]): string =>
+		cells.map((cell) => cell.lead + (cell.glyph === undefined ? "" : glyphs[cell.glyph]) + cell.text).join("");
+	const now = 1_000_000;
+	const heldElsewhere = {
+		expiresAt: now + 212_000,
+		held: false,
+		fallback: "deny" as const,
+		decider: "operator" as const,
+		owner: "s-7f3a",
+	};
+	const failed: RunFacts = {
+		agent: "verifier",
+		origin: "model",
+		outcome: "succeeded",
+		validation: "failed",
+		integrity: "verified",
+		reason: "validation failed: verify 'gate-1' exited with code 127",
+		task: "Run the test suite with `python -m pytest -v`.",
+		elapsed: "8.4s",
+	};
+	const unverified: RunFacts = {
+		agent: "scout",
+		helper: true,
+		origin: "model",
+		outcome: "succeeded",
+		validation: "none",
+		integrity: "unverified",
+		task: "Map the modules under src/ and their functions.",
+		elapsed: "9.1s",
+	};
+	const queued: RunFacts = {
+		agent: "scout",
+		helper: true,
+		origin: "model",
+		outcome: "queued",
+		phase: "waiting for a slot · 3/4 copilot",
+		elapsed: "1.0s",
+	};
+	const held: RunFacts = {
+		agent: "verifier",
+		origin: "model",
+		outcome: "running",
+		task: "Run the test suite with `python -m pytest -v`.",
+		elapsed: "1m02s",
+		approval: {
+			decider: "operator",
+			owner: "s-7f3a",
+			cardDocked: true,
+			words: (room) => approvalWaitWords({ approvalWindow: heldElsewhere }, { now, room }),
+		},
+	};
+	const runs = [failed, unverified, queued, held];
+	const identityWidth = runIdentityWidth(runs, visibleWidth);
+	const rows = (width: number): string[] =>
+		runs.map((run) => plain(runRow(run, { width, identityWidth, measure: visibleWidth }).cells));
+	deepStrictEqual(rows(80), [
+		"✗ ◆ verifier   8.4s  validation failed: verify 'gate-1' exited with code 127",
+		"! ◆ ↳ scout    9.1s  unverified · Map the modules under src/ and their function…",
+		"◌ ◆ ↳ scout          waiting for a slot · 3/4 copilot",
+		"● ◆ verifier  1m02s  running · approval held by session s-7f3a · denied in 3:32",
+	]);
+	deepStrictEqual(rows(40), [
+		"✗ ◆ verifier   8.4s  validation failed:…",
+		"! ◆ ↳ scout    9.1s  unverified · Map t…",
+		"◌ ◆ ↳ scout          waiting for a slot…",
+		"● ◆ verifier  1m02s  running",
+	]);
+	for (const width of [80, 40]) {
+		for (const row of rows(width)) ok(visibleWidth(row) <= width, `${row} fits ${width} cells`);
+		doesNotMatch(rows(width)[0] as string, /pytest/u, "a failed run's text is its reason, not its task");
+		doesNotMatch(rows(width)[3] as string, /\[Enter\]/u, "an ask another session owns names no key");
+	}
+
+	const mixed: RunFacts[] = [
+		{ agent: "done", origin: "model", outcome: "succeeded", validation: "passed", integrity: "verified", startedAt: 1 },
+		{ agent: "cancelled", origin: "model", outcome: "cancelled", startedAt: 1 },
+		{ agent: "queued", origin: "model", outcome: "queued", startedAt: 1 },
+		{ agent: "running", origin: "model", outcome: "running", startedAt: 1 },
+		{ agent: "warning", origin: "model", outcome: "succeeded", integrity: "unverified", startedAt: 1 },
+		{ agent: "failed", origin: "model", outcome: "failed", startedAt: 1 },
+		{
+			agent: "waiting",
+			origin: "model",
+			outcome: "running",
+			approval: { decider: "operator", words: () => "needs approval" },
+			startedAt: 1,
+		},
+	];
+	const sorted = [...mixed].sort(compareRuns);
+	deepStrictEqual(
+		sorted.map((run) => run.agent),
+		["waiting", "failed", "warning", "running", "queued", "cancelled", "done"],
+	);
+	deepStrictEqual(sorted.map(runSortRank), [0, 1, 2, 3, 4, 5, 6]);
+
+	const runningRun = mixed[3] as RunFacts;
+	const counts = runCountBuckets([
+		mixed[5] as RunFacts,
+		mixed[6] as RunFacts,
+		runningRun,
+		runningRun,
+		mixed[2] as RunFacts,
+	]);
+	strictEqual(plain(runCountRow(counts, 80)), "✗ 1 failed · ‖ 1 waiting · ● 2 running · ◌ 1 queued");
+	strictEqual(plain(runCountRow(counts, 24)), "✗ 1 failed · ‖ 1 waiting");
 });
