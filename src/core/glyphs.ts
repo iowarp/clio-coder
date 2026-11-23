@@ -61,6 +61,8 @@ const UNICODE_GLYPHS = {
 	degraded: "◐",
 	// A cell with no value.
 	none: "—",
+	// Between the two ends of a span: `3–18 of 42 rows`.
+	range: "–",
 	quoteOpen: "“",
 	quoteClose: "”",
 	// A tree row that opens a branch with more siblings below it; the last one takes bottomLeft.
@@ -179,6 +181,7 @@ const ASCII_GLYPHS: { readonly [K in keyof typeof UNICODE_GLYPHS]: string } = {
 	hollow: "o",
 	degraded: "~",
 	none: "-",
+	range: "-",
 	quoteOpen: '"',
 	quoteClose: '"',
 	branch: "+",

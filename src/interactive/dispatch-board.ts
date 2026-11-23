@@ -492,12 +492,12 @@ function cardKvKey(theme: ClioTheme, key: string): string {
 }
 
 // A card key-value row built from whole units. A row that fits keeps its dim
-// middot join; an overflowing one is refit unit-by-unit so it closes on a
+// separator join, the one `fitUnits` draws; an overflowing one is refit unit-by-unit so it closes on a
 // whole unit or a dim ellipsis instead of a mid-token clip that reads as a
 // complete fact ("total 5" for 5.2k) or a dangling ` · `.
 function cardUnitsLine(theme: ClioTheme, key: string, units: ReadonlyArray<string>, contentWidth: number): string {
 	const prefix = cardKvKey(theme, key);
-	const full = `${prefix}${units.join(dotSep(theme))}`;
+	const full = `${prefix}${units.join(theme.fg("divider", SEP))}`;
 	return visibleWidth(full) <= contentWidth ? full : fitUnits(theme, prefix, units, contentWidth);
 }
 
@@ -926,7 +926,7 @@ function dispatchCardBody(
 	// `(N calls unknown)` after every figure. A figure nothing measured reads `not measured`, never `?`.
 	const figure = (display: string): string => compactQuantity(display) ?? USAGE_NOT_MEASURED;
 	const lineFigure = (key: "prompt" | "output" | "total", display: string): string =>
-		row.usage.kind === "ready" ? usageLineFigure(row.usage[key]) : figure(display);
+		boundMark(row.usage.kind === "ready" ? usageLineFigure(row.usage[key]) : figure(display));
 	const tokenDisplays = [usage.prompt, usage.output, usage.total];
 	const nothingMeasured = tokenDisplays.every((display) => compactQuantity(display) === null);
 	const coverage =
@@ -987,7 +987,7 @@ function dispatchCardBody(
 	// Context occupancy is a figure like the others: a lower bound keeps its mark, and one nothing measured is left out,
 	// since the line's own coverage unit already says calls went unreported.
 	const contextFigure = usageFigure(row.telemetry?.activity.contextTokens);
-	const contextUnit = usageSaysNothing(contextFigure) ? null : theme.fg("body", `context ${contextFigure}`);
+	const contextUnit = usageSaysNothing(contextFigure) ? null : theme.fg("body", `context ${boundMark(contextFigure)}`);
 	// The phase column: a fleet step says which wave it belongs to and which
 	// step it is; every other run leaves the cell empty rather than inventing a
 	// position, so the column reads as "not a fleet step" and not as wave zero.
@@ -1456,8 +1456,16 @@ function tableFigure(display: string): string {
 	const figure = compactQuantity(display);
 	if (figure === null) return NO_VALUE;
 	const match = /^(≥|≈|~|>=)?([\d,]+)$/u.exec(figure);
-	if (match?.[2] === undefined) return figure;
-	return `${match[1] ?? ""}${formatCount(Number(match[2].replaceAll(",", "")))}`;
+	if (match?.[2] === undefined) return boundMark(figure);
+	return boundMark(`${match[1] ?? ""}${formatCount(Number(match[2].replaceAll(",", "")))}`);
+}
+
+/**
+ * The read model's lower-bound and estimate marks in the glyph vocabulary, so ASCII mode draws `>=` and `~`. The read
+ * model keeps `≥` and `≈` in its strings, which other surfaces parse, so the board swaps them only where it draws.
+ */
+function boundMark(figure: string): string {
+	return figure.replace(/^≥/u, GLYPH.atLeast).replace(/^≈/u, GLYPH.estimate);
 }
 
 export { USAGE_NOT_MEASURED } from "./usage-words.js";
@@ -2054,8 +2062,8 @@ function boardFactLines(
 	const tokenUnits = [
 		...(measured && row.usage.kind === "ready"
 			? [
-					theme.fg("body", `prompt ${usageLineFigure(row.usage.prompt)}`),
-					theme.fg("body", `out ${usageLineFigure(row.usage.output)}`),
+					theme.fg("body", `prompt ${boundMark(usageLineFigure(row.usage.prompt))}`),
+					theme.fg("body", `out ${boundMark(usageLineFigure(row.usage.output))}`),
 				]
 			: [theme.fg("body", isTerminalStatus(row.status) ? USAGE_NOT_MEASURED : "none reported yet")]),
 		theme.fg("body", cost === null || cost === USAGE_NOT_MEASURED ? "cost not measured on this route" : `cost ${cost}`),

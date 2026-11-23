@@ -1009,9 +1009,9 @@ export interface PositionRowOptions {
 /** `3–18 of 42 rows · ↑↓ scroll`, dim, for every windowed body. */
 export function positionRow(theme: ClioTheme, options: PositionRowOptions, width: number): string {
 	const unit = options.unit ?? "rows";
-	const range = options.start === options.end ? `${options.start}` : `${options.start}–${options.end}`;
+	const range = options.start === options.end ? `${options.start}` : `${options.start}${GLYPH.range}${options.end}`;
 	const parts = [`${range} of ${options.total} ${unit}`, ...(options.keys ?? [])];
-	return clip(theme.fg("annotation", parts.join(" · ")), width);
+	return clip(theme.fg("annotation", parts.join(` ${GLYPH.sep} `)), width);
 }
 
 export interface EmptyStateOptions {
