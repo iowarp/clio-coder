@@ -62,7 +62,8 @@ export const TERMINAL_PALETTE = {
 		["#231f1a", 234],
 	],
 	ivorySubdued: [
-		["#807360", 243],
+		// #807360 measured 3.45:1 on the selection band #052629; #807560 holds 3.52 there and 4.53 on white.
+		["#807560", 243],
 		["#9c8d77", 144],
 		["#7a6850", 242],
 	],
