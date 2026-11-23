@@ -37,7 +37,14 @@ test("fleet dock follows live tiers, prioritizes approval waits, and does not re
 			taskSummary: "Inspect the parser",
 		},
 	];
-	const dock = createFleetDock({ getRows: () => rows, getTerminalRows: () => 40 });
+	let settled: DispatchBoardRow[] = [];
+	let boardOpen = false;
+	const dock = createFleetDock({
+		getRows: () => rows,
+		getSettledRows: () => settled,
+		isFleetBoardOpen: () => boardOpen,
+		getTerminalRows: () => 40,
+	});
 	const at = (tier: OutputStyle, width: number) => {
 		setPresentationTier(tier);
 		return dock.render(width);
@@ -103,6 +110,36 @@ test("fleet dock follows live tiers, prioritizes approval waits, and does not re
 			},
 		});
 		at("compact", 120);
+		// A failed run is no longer live, yet the dock keeps it at every tier, counted first (6.1 buckets: failed,
+		// waiting, running) while the wait still leads the rows (2.7), until the operator opens Fleet Runs.
+		const failed: DispatchBoardRow = {
+			...first,
+			runId: "refused",
+			agentId: "pusher",
+			status: "failed",
+			outcomeDetail: "git push --force refused",
+		};
+		const done: DispatchBoardRow = { ...first, runId: "clean", agentId: "finisher", status: "completed" };
+		const stopped: DispatchBoardRow = { ...first, runId: "stopped", agentId: "stopper", status: "aborted" };
+		rows = [first, { ...first, runId: "approval", agentId: "waiting-worker", progress: waiting.progress }];
+		settled = [first, failed, done, stopped];
+		match(plain(at("compact", 120)), /^✗ 1 failed · ‖ 1 waiting · ● 1 running/);
+		match(plain(at("compact", 33)), /^✗ 1 failed · ‖ 1 waiting/);
+		for (const tier of ["standard", "detailed"] as const) {
+			const lines = plain(at(tier, 120)).split("\n");
+			match(lines[0] ?? "", /^Fleet ─+✗ 1 failed · ‖ 1 waiting · ● 1 running · \[Alt\+W\] ─$/);
+			match(lines[1] ?? "", /^‖ .*waiting-worker/);
+			match(lines[2] ?? "", /^✗ .*pusher/);
+			doesNotMatch(lines.join("\n"), /finisher|stopper/);
+		}
+		boardOpen = true;
+		strictEqual(plain(at("standard", 120)), "");
+		boardOpen = false;
+		doesNotMatch(plain(at("compact", 120)), /failed/);
+		rows = [];
+		settled = [first, failed, { ...failed, runId: "later", agentId: "later-pusher" }];
+		match(plain(at("compact", 120)), /^✗ 1 failed\s+\[Alt\+W\] fleet$/);
+		match(plain(at("standard", 120)).split("\n")[1] ?? "", /^✗ .*later-pusher/);
 	} finally {
 		setPresentationTier("standard");
 	}
