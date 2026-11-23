@@ -39,7 +39,8 @@ test("board and fleet approval share target labels without the observe glyph", (
 			board.resetSelection();
 			if (expanded) board.toggleDetail();
 			const rows = board.render(width);
-			match(rows.map(stripTerminalSequences).join("\n"), /target +blade · dynamo\/qwopus/);
+			// The route is a fact of the open detail at standard; the folded facts are doing, task, slots and started.
+			if (expanded) match(rows.map(stripTerminalSequences).join("\n"), /target +blade · dynamo\/qwopus/);
 			for (const line of rows) ok(visibleWidth(line) <= width);
 		}
 		const rows = formatFleetRunApprovalBody({ ok: true, preview }, width, 0);

@@ -1,4 +1,11 @@
 import type { OutputStyle } from "../core/defaults.js";
+import {
+	type BoardColumn,
+	type BoardFact,
+	presentationTier,
+	tierPolicy,
+	tierRevision,
+} from "../core/presentation-tier.js";
 import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import { parseCouncilReport } from "../domains/agents/index.js";
@@ -66,6 +73,7 @@ import {
 	dotSep,
 	emptyState,
 	fitUnits,
+	formatCount,
 	formatElapsed,
 	formatTargetLabel,
 	frame,
@@ -79,7 +87,9 @@ import {
 	type TableCell,
 	type TableColumn,
 	tableRows,
+	toneRole,
 	toolFunction,
+	widthClass,
 } from "./theme/index.js";
 import { fitIdentityLabel, keyName } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
@@ -1670,6 +1680,7 @@ function selectableBoardRows(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoa
 }
 
 export interface RunTableOptions {
+	/** Ignored: the table reads `tierPolicy()`. The sweep row removes it. */
 	style?: OutputStyle;
 	/** The run under the cursor; when given, every row reserves the cursor column. */
 	selectedRunId?: string | null;
@@ -1683,16 +1694,20 @@ export interface RunTableOptions {
 	inspectFinished?: boolean;
 }
 
+/** A table cell with no value yet, or one nothing measured (2.9); the selected run's facts say which, once. */
+const NO_VALUE = "—";
+
 /**
- * A token figure for a table cell. The read model's coverage clause, `unknown (2 calls unknown)`, is
- * longer than the row can spare, and it cost a 120-column table its cost column; the run's record has it.
+ * A token figure for a right-aligned column in the count form (`39.4k`), its lower-bound or estimate mark kept. The
+ * read model's coverage clause is longer than the column; the run's facts and record carry it.
  */
 function tableFigure(display: string): string {
-	const figure = display.replace(/ \(.*\)$/u, "");
-	return figure === "unknown" ? "—" : figure;
+	const figure = compactQuantity(display);
+	if (figure === null) return NO_VALUE;
+	const match = /^(≥|≈|~|>=)?([\d,]+)$/u.exec(figure);
+	if (match?.[2] === undefined) return figure;
+	return `${match[1] ?? ""}${formatCount(Number(match[2].replaceAll(",", "")))}`;
 }
-
-const USAGE_SHORT: Readonly<Record<string, string>> = { "not available": "n/a" };
 
 export { USAGE_NOT_MEASURED } from "./usage-words.js";
 export const USAGE_NO_CALLS = "no calls yet";
@@ -1747,8 +1762,25 @@ const COMPACT_CAVEAT_WORD: Readonly<Record<CompletedRunCaveat["kind"], string>> 
 	"no-tools": "no tools",
 };
 
-/** The status cell: the outcome glyph in its tone, then the word, the same pair every surface uses. */
-function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined, width: number): string {
+/** A live run parked on an ask that this session's operator answers: its state is the wait (2.7), not `running`. */
+function waitsOnOperator(row: Pick<DispatchBoardRow, "status" | "progress">): boolean {
+	if (row.status !== "running" || row.progress?.awaitingApproval !== true) return false;
+	const window = row.progress.approvalWindow;
+	return window === undefined || (window.decider === "operator" && window.owner === undefined);
+}
+
+/**
+ * The status cell: the outcome glyph in its tone, then the word, the same pair every surface uses. `glyphOnly` is the
+ * one-column form under 44 cells, where running, queued and a clean done keep only their glyph; a failure, a warning
+ * and a wait on the operator keep their word at every width (2.7).
+ */
+function runStatusCell(
+	theme: ClioTheme,
+	row: DispatchBoardRow,
+	tick: number | undefined,
+	width: number,
+	glyphOnly = false,
+): string {
 	// A plan whose worker steps finished with warnings reads as its card does, never as a clean done.
 	if (row.plan !== undefined && row.plan.state === "passed" && planWarnedStepCount(row.plan) > 0) {
 		return theme.fg("warning", `${GLYPH.warn} ${width >= NARROW_STATUS_WIDTH ? "done with warnings" : "warnings"}`);
@@ -1768,6 +1800,7 @@ function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | u
 					: COMPACT_CAVEAT_WORD[failure.kind];
 		return theme.fg(mark.token, `${mark.glyph} ${words}`);
 	}
+	if (waitsOnOperator(row)) return theme.fg("attention", `${GLYPH.phaseBlocked} needs approval`);
 	const full = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" && tick !== undefined ? { tick } : {}),
 	});
@@ -1777,7 +1810,9 @@ function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | u
 		row.status === "running" && (row.agentAudience === "shadow" || row.agentAudience === "internal")
 			? "shadowDispatchAction"
 			: presentation.token;
-	return `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(token, presentation.label)}`;
+	const glyph = theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
+	if (glyphOnly && (row.status === "running" || row.status === "enqueued" || row.status === "completed")) return glyph;
+	return `${glyph} ${theme.fg(token, presentation.label)}`;
 }
 
 /** Share of the worker's window its last reply occupied; warning tone from this share up (CLI-H3). */
@@ -1858,191 +1893,310 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number, r
 	}
 }
 
+/** Board columns in the order they print. */
+const BOARD_COLUMN_ORDER: readonly BoardColumn[] = [
+	"state",
+	"agent",
+	"time",
+	"in",
+	"out",
+	"cost",
+	"node",
+	"account",
+	"text",
+];
+
+const BOARD_HEADER: Readonly<Record<BoardColumn, string>> = {
+	state: "state",
+	agent: "agent",
+	time: "time",
+	in: "in",
+	out: "out",
+	cost: "cost",
+	node: "node",
+	account: "account",
+	text: `now ${GLYPH.sep} task`,
+};
+
+/** The order columns leave when the width cannot hold them, first to go first (6.5); a column absent never drops. */
+const BOARD_DROP_RANK: Readonly<Partial<Record<BoardColumn, number>>> = {
+	account: 1,
+	node: 2,
+	cost: 3,
+	in: 4,
+	out: 5,
+	time: 6,
+};
+
+/** What a column dropped for width holds, in the words the selected run's facts use. */
+const BOARD_COLUMN_FACT: Readonly<Partial<Record<BoardColumn, string>>> = {
+	time: "time",
+	in: "tokens",
+	out: "tokens",
+	cost: "cost",
+	node: "node",
+	account: "account",
+};
+
+const RIGHT_ALIGNED: ReadonlySet<BoardColumn> = new Set(["time", "in", "out", "cost"]);
+
 /**
- * One row per run (a council is one row), the shape every list of runs
- * shares: status, who, how long, what it has consumed and cost, and what it is
- * doing, with the numbers right-aligned. The activity column clips first and
- * the cost, token and phase columns drop before the status and the name do,
- * so a narrow row still says which run is in which state.
+ * The text column keeps twelve cells in a W2 table and three tenths of the row from W3, so a quieter column drops
+ * before the text is cut to a stub: at 76 cells a node or an account leaves before the task does.
+ */
+function boardTextMin(width: number): number {
+	return widthClass(width) === "W2" ? 12 : Math.max(12, Math.ceil(width * 0.3));
+}
+const BOARD_GAP = 2;
+/** Under sixty cells one long state (`✗ stopped responding`) would set the column for every row. */
+const NARROW_STATE_MAX = 14;
+
+/**
+ * The columns the tier offers at the measured width's class (6.5, 2.3): time from W2, the telemetry columns from W3,
+ * node and account only when some run has them. W1 is one column and has no header.
+ */
+function boardColumns(width: number, anyNode: boolean, anyAccount: boolean): BoardColumn[] {
+	const offered = new Set(tierPolicy().boardColumns);
+	const measured = widthClass(width);
+	return BOARD_COLUMN_ORDER.filter((column) => {
+		if (!offered.has(column)) return false;
+		if (column === "state" || column === "agent" || column === "text") return true;
+		if (column === "time") return measured !== "W1";
+		if (column === "node" && !anyNode) return false;
+		if (column === "account" && !anyAccount) return false;
+		return measured !== "W1" && measured !== "W2";
+	});
+}
+
+function listWords(words: readonly string[]): string {
+	return words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
+}
+
+/** The one supporting row that names the columns this width dropped and where their facts are read. */
+function droppedColumnsNote(theme: ClioTheme, dropped: readonly BoardColumn[], width: number): string | null {
+	if (dropped.length === 0) return null;
+	const columns = BOARD_COLUMN_ORDER.filter((column) => dropped.includes(column));
+	const names = `${listWords(columns.map((column) => BOARD_HEADER[column]))} column${columns.length === 1 ? "" : "s"} hidden`;
+	const facts = listWords([...new Set(columns.map((column) => BOARD_COLUMN_FACT[column] ?? column))]);
+	const sep = ` ${GLYPH.sep} `;
+	const forms = [`${names}${sep}widen the window, or [Enter] for the run's ${facts}`, `${names}${sep}widen the window`];
+	const fitted =
+		forms.find((form) => visibleWidth(form) <= width) ?? truncateToWidth(names, width, GLYPH.ellipsis, false);
+	return theme.fg("annotation", fitted);
+}
+
+type BoardCells = Partial<Record<BoardColumn, string | TableCell>>;
+
+interface BoardCellContext {
+	cursor: boolean;
+	selectedRunId: string | null | undefined;
+	width: number;
+	now: number;
+	tick: number | undefined;
+	quota: QuotaProviders;
+	anyAccount: boolean;
+	inspectFinished: boolean;
+	glyphOnly: boolean;
+}
+
+function cursorLead(theme: ClioTheme, context: BoardCellContext, selected: boolean): string {
+	if (!context.cursor) return "";
+	return `${selected ? theme.fg("selectedOption", GLYPH.cursor) : " "} `;
+}
+
+/** A run's text: live rows say what they are doing, then the task (6.1); every other state reads as its cell says. */
+function runTextCell(theme: ClioTheme, row: DispatchBoardRow, context: BoardCellContext): TableCell {
+	if (context.inspectFinished && isTerminalStatus(row.status) && row.plan === undefined)
+		return { text: `/view dispatch:${row.runId}`, tone: "muted" };
+	const cell = runActivityCell(theme, row, context.now);
+	const live = row.status === "running" || row.status === "stale";
+	const task = row.taskSummary ? sanitizeCallTargetText(row.taskSummary) : null;
+	if (!live || row.plan !== undefined || task === null || row.progress?.awaitingApproval === true) return cell;
+	// The phase words, then the task; a run with no phase yet reads as its task alone.
+	const words = liveActivityCell(theme, row, undefined, null).text;
+	const text = words.length === 0 ? task : `${words}${theme.fg("separator", ` ${GLYPH.sep} `)}${theme.fg("body", task)}`;
+	return withContextFill(theme, row, { text });
+}
+
+function itemCells(theme: ClioTheme, item: DispatchBoardItem, context: BoardCellContext): BoardCells {
+	if (item.kind === "council") {
+		const group = item.group;
+		const selected = group.selectedRunId !== undefined;
+		// The group id is the record's; a person knows the council by its size and its question.
+		const name = councilName(group);
+		return {
+			state: `${cursorLead(theme, context, selected)}${theme.fg(group.status.glyphToken ?? group.status.token, group.status.glyph)} ${theme.fg(group.status.token, group.status.label)}`,
+			agent: selected ? theme.style("selectedOption", name, { bold: true }) : theme.fg("dispatchAction", name),
+			time: group.elapsed,
+			text: {
+				// A one-round council has no round worth naming; a synthesis is the council's own answer, so it says so.
+				text: [
+					...(group.task === undefined ? [] : [group.task]),
+					...(group.round > 1 ? [`round ${group.round}`] : []),
+					...(group.synthesis === null ? [] : ["with a synthesis"]),
+				].join(` ${GLYPH.sep} `),
+				tone: "muted",
+			},
+		};
+	}
+	const row = item.row;
+	const selected = context.cursor && row.runId === context.selectedRunId;
+	const prefix = dispatchRowPrefix(theme, row);
+	const label = agentDisplayLabel(row);
+	// A plan step's worker carries its step on its name, `coder · map-stats`, so two workers of one plan never read
+	// the same when the table is narrow.
+	const step =
+		row.phase === undefined || row.plan !== undefined
+			? ""
+			: theme.fg("info", ` ${GLYPH.sep} ${sanitizeCallTargetText(row.phase.stepId)}`);
+	const cells: BoardCells = {
+		state: `${cursorLead(theme, context, selected)}${runStatusCell(theme, row, context.tick, context.width, context.glyphOnly)}`,
+		agent: `${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}${step}`,
+		time: row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : formatElapsed(row.elapsedMs)),
+		node: row.node ?? "local",
+		text: runTextCell(theme, row, context),
+	};
+	if (row.plan !== undefined) {
+		// A plan's workers have their own rows, so its row sums nothing a reader could mistake for measured.
+		cells.cost = { text: row.plan.costText ?? NO_VALUE, tone: "muted" };
+		cells.node = "";
+		return cells;
+	}
+	const usage = dispatchUsageText(row.usage);
+	const figure = (display: string): TableCell =>
+		row.usage.kind === "ready" ? { text: tableFigure(display) } : { text: NO_VALUE, tone: "muted" };
+	cells.in = figure(usage.prompt);
+	cells.out = figure(usage.output);
+	// A cost nothing measured is the dash; the selected run's facts say why, once.
+	const cost = row.usage.kind === "ready" ? compactQuantity(usage.cost) : null;
+	cells.cost = cost === null || cost === USAGE_NOT_MEASURED ? { text: NO_VALUE, tone: "muted" } : { text: cost };
+	const weekly = context.anyAccount ? routeWeeklyQuota(row, context.quota) : null;
+	if (weekly !== null)
+		cells.account = {
+			text: weekly.label,
+			tone: weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "muted" : "warning",
+		};
+	return cells;
+}
+
+function paintedCell(theme: ClioTheme, cell: string | TableCell | undefined): string {
+	if (cell === undefined) return "";
+	if (typeof cell === "string") return cell;
+	return cell.text.includes("\u001b") ? cell.text : theme.fg(toneRole(cell.tone ?? "neutral"), cell.text);
+}
+
+interface RunTable {
+	/** The column labels, absent under 44 cells where the table is one column. */
+	header: string | null;
+	/** One row per item, in item order. */
+	rows: string[];
+	/** The supporting row naming columns dropped for width. */
+	note: string | null;
+}
+
+/**
+ * The run table (6.5): columns from the tier's `boardColumns` and the measured width's class, a header at every tier,
+ * the text column taking the rest and clipping, and quieter columns dropping in their fixed order before the text
+ * would fall under its floor, named once by a supporting row. Under 44 cells it is one column.
+ */
+function runTable(items: ReadonlyArray<DispatchBoardItem>, width: number, options: RunTableOptions): RunTable {
+	const theme = clioTheme();
+	const safe = Math.max(1, Math.floor(width));
+	const runs = items.flatMap((item) => (item.kind === "run" ? [item.row] : []));
+	const quota = options.quota ?? [];
+	const anyNode = options.compact !== true && runs.some((row) => row.node !== undefined && row.node !== "local");
+	const anyAccount = runs.some((row) => routeWeeklyQuota(row, quota) !== null);
+	const oneColumn = widthClass(safe) === "W1";
+	const context: BoardCellContext = {
+		cursor: options.selectedRunId !== undefined,
+		selectedRunId: options.selectedRunId,
+		width: safe,
+		now: options.now ?? Date.now(),
+		tick: options.tick,
+		quota,
+		anyAccount,
+		inspectFinished: options.inspectFinished === true,
+		glyphOnly: oneColumn,
+	};
+	const cells = items.map((item) => itemCells(theme, item, context));
+	if (oneColumn) {
+		// State, identity and text flow in one column; identities pad to one width so the text starts together.
+		const identities = cells.map((cell) => paintedCell(theme, cell.agent));
+		const identityWidth = Math.max(0, ...identities.map((identity) => visibleWidth(identity)));
+		const rows = cells.map((cell, index) => {
+			const line = `${paintedCell(theme, cell.state)} ${padAnsi(identities[index] ?? "", identityWidth)}  ${paintedCell(theme, cell.text)}`;
+			return visibleWidth(line) <= safe ? line : truncateToWidth(line, safe, GLYPH.ellipsis, false);
+		});
+		return { header: null, rows, note: null };
+	}
+	const label = (column: BoardColumn): string =>
+		column === "state" && context.cursor ? `  ${BOARD_HEADER.state}` : BOARD_HEADER[column];
+	const cap = (column: BoardColumn): number =>
+		column === "state" && safe < 60
+			? NARROW_STATE_MAX + (context.cursor ? 2 : 0)
+			: column === "agent"
+				? 30
+				: column === "node"
+					? 12
+					: Number.POSITIVE_INFINITY;
+	const natural = (column: BoardColumn): number =>
+		Math.min(
+			cap(column),
+			Math.max(visibleWidth(label(column)), ...cells.map((cell) => visibleWidth(paintedCell(theme, cell[column])))),
+		);
+	let kept = boardColumns(safe, anyNode, anyAccount).filter((column) => column !== "text");
+	const dropped: BoardColumn[] = [];
+	const used = (): number => kept.reduce((sum, column) => sum + natural(column) + BOARD_GAP, 0);
+	while (used() + boardTextMin(safe) > safe) {
+		const next = kept
+			.filter((column) => BOARD_DROP_RANK[column] !== undefined)
+			.sort((a, b) => (BOARD_DROP_RANK[a] ?? 0) - (BOARD_DROP_RANK[b] ?? 0))[0];
+		if (next === undefined) break;
+		kept = kept.filter((column) => column !== next);
+		dropped.push(next);
+	}
+	const textRoom = Math.max(1, safe - used());
+	// An approval wait is what its run is blocked on, so it is worded for the room the text column has.
+	items.forEach((item, index) => {
+		const cell = cells[index];
+		if (item.kind !== "run" || item.row.plan !== undefined || cell === undefined) return;
+		if (item.row.progress?.awaitingApproval !== true || isTerminalStatus(item.row.status)) return;
+		cell.text = runActivityCell(theme, item.row, context.now, textRoom);
+	});
+	const order: BoardColumn[] = [...kept, "text"];
+	const columns: TableColumn[] = order.map((column) => ({
+		label: label(column),
+		min: 1,
+		max: column === "text" ? textRoom : natural(column),
+		priority: 10,
+		...(RIGHT_ALIGNED.has(column) ? { align: "right" as const } : {}),
+		...(column === "time" ? { tone: "muted" as const } : {}),
+	}));
+	const lines = tableRows(
+		theme,
+		{ columns, rows: cells.map((cell) => order.map((column) => cell[column] ?? "")), header: true },
+		safe,
+	);
+	// The header row stands alone over the runs; the table primitive's underline is not part of the board (6.5).
+	return {
+		header: lines[0] ?? null,
+		rows: lines.slice(2, 2 + items.length),
+		note: droppedColumnsNote(theme, dropped, safe),
+	};
+}
+
+/**
+ * One row per run (a council is one row), the shape every list of runs shares (6.5): a header naming the columns,
+ * the rows, then one supporting row when the width dropped a column the tier offers. The tier comes from
+ * `tierPolicy()`; `options.style` is ignored.
  */
 export function runTableRows(
 	items: ReadonlyArray<DispatchBoardItem>,
 	width: number,
 	options: RunTableOptions = {},
 ): string[] {
-	const theme = clioTheme();
-	const now = options.now ?? Date.now();
-	const quota = options.quota ?? [];
-	const cursor = options.selectedRunId !== undefined;
-	const runs = items.flatMap((item) => (item.kind === "run" ? [item.row] : []));
-	const anyNode = options.compact !== true && runs.some((row) => row.node !== undefined && row.node !== "local");
-	const anyAccount = runs.some((row) => routeWeeklyQuota(row, quota) !== null);
-	const fixed: TableColumn[] = [
-		...(cursor ? [{ label: "", min: 1, max: 1, priority: 10 }] : []),
-		// Under sixty columns one long state (`✗ stopped responding`) would set the column for every row and leave the
-		// names a stub, so the column keeps the common words whole and cuts a long one on the ellipsis; the selected
-		// run's detail under the table states it in full.
-		{ label: "status", priority: 10, ...(width < 60 ? { max: 11 } : {}) },
-		{ label: "agent", priority: 9, max: 30 },
-		...(anyNode ? [{ label: "node", priority: 2, max: 12 }] : []),
-		{ label: "elapsed", align: "right" as const, priority: 6, tone: "muted" as const },
-		{ label: "prompt", align: "right" as const, priority: 4 },
-		{ label: "out", align: "right" as const, priority: 5 },
-		{ label: "cost", align: "right" as const, priority: 3 },
-		...(anyAccount ? [{ label: "account", priority: 1 }] : []),
-	];
-	const rows = items.map((item): Array<string | TableCell> => {
-		if (item.kind === "council") {
-			const group = item.group;
-			const selected = group.selectedRunId !== undefined;
-			// The group id is the record's; a person knows the council by its size and its question.
-			const name = councilName(group);
-			const cells: Array<string | TableCell> = [];
-			if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
-			cells.push(
-				`${theme.fg(group.status.glyphToken ?? group.status.token, group.status.glyph)} ${theme.fg(group.status.token, group.status.label)}`,
-				selected ? theme.style("selectedOption", name, { bold: true }) : theme.fg("dispatchAction", name),
-			);
-			if (anyNode) cells.push("");
-			cells.push(group.elapsed, "", "", "");
-			if (anyAccount) cells.push("");
-			cells.push({
-				// A one-round council has no round worth naming; a synthesis is the council's own answer, so it says so.
-				text: [
-					...(group.task === undefined ? [] : [group.task]),
-					...(group.round > 1 ? [`round ${group.round}`] : []),
-					...(group.synthesis === null ? [] : ["with a synthesis"]),
-				].join(" · "),
-				tone: "muted",
-			});
-			return cells;
-		}
-		const row = item.row;
-		const selected = cursor && row.runId === options.selectedRunId;
-		const prefix = dispatchRowPrefix(theme, row);
-		const label = agentDisplayLabel(row);
-		const usage = dispatchUsageText(row.usage);
-		const weekly = anyAccount ? routeWeeklyQuota(row, quota) : null;
-		const elapsed =
-			row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : formatElapsed(row.elapsedMs));
-		const pending = row.usage.kind !== "ready";
-		if (row.plan !== undefined) {
-			const cells: Array<string | TableCell> = [];
-			if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
-			cells.push(
-				runStatusCell(theme, row, options.tick, width),
-				`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
-			);
-			if (anyNode) cells.push("");
-			// A plan's workers have their own rows, so its row sums nothing a reader could mistake for measured.
-			cells.push(elapsed, "", "", { text: row.plan.costText ?? "no model calls", tone: "muted" });
-			if (anyAccount) cells.push("");
-			cells.push(runActivityCell(theme, row, now));
-			return cells;
-		}
-		const figure = (label: string, text: string): TableCell =>
-			pending
-				? { text: USAGE_SHORT[text] ?? text, tone: "muted" }
-				: { text: label ? `${label} ${tableFigure(text)}` : text };
-		const cells: Array<string | TableCell> = [];
-		if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
-		// A plan step's worker carries its step on its name, `coder · map-stats`: as a column of its own the step was
-		// the first thing a row under 130 columns dropped, which left two workers of one plan reading the same.
-		const step = row.phase === undefined ? "" : theme.fg("info", ` · ${sanitizeCallTargetText(row.phase.stepId)}`);
-		cells.push(
-			runStatusCell(theme, row, options.tick, width),
-			`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}${step}`,
-		);
-		if (anyNode) cells.push(row.node ?? "local");
-		// Unmeasured and not started are different facts, and the cost cell is wide enough to say which.
-		const costCell: TableCell = pending
-			? {
-					// A finished run's calls are in the session that ran it, so `no calls yet` would be false here.
-					text:
-						row.usage.kind === "unavailable"
-							? USAGE_NOT_MEASURED
-							: isTerminalStatus(row.status)
-								? row.earlier === true && row.status === "completed"
-									? "earlier session"
-									: row.status === "completed"
-										? USAGE_NOT_MEASURED
-										: "no calls here"
-								: USAGE_NO_CALLS,
-					tone: "muted",
-				}
-			: figure("", usage.cost);
-		cells.push(elapsed, figure("prompt", usage.prompt), figure("out", usage.output), costCell);
-		if (anyAccount)
-			cells.push(
-				weekly === null
-					? ""
-					: {
-							text: weekly.label,
-							tone: weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "muted" : "warning",
-						},
-			);
-		cells.push(
-			options.inspectFinished && isTerminalStatus(row.status)
-				? { text: `/view dispatch:${row.runId}`, tone: "muted" }
-				: runActivityCell(theme, row, now),
-		);
-		return cells;
-	});
-	if (options.style === "compact") {
-		for (let index = fixed.length - 1; index >= 0; index--) {
-			if (!["prompt", "out", "cost", "node", "account"].includes(fixed[index]?.label ?? "")) continue;
-			fixed.splice(index, 1);
-			for (const cells of rows) cells.splice(index, 1);
-		}
-	}
-	// The activity column takes whatever the fixed columns leave, so a long
-	// clause clips before it costs the row its cost or phase; below sixteen
-	// cells the table drops its quietest columns instead.
-	const gap = 2;
-	// The run's name is what a narrow row is read by, so it shrinks into the room the status leaves before it would
-	// be dropped: a board of bare `● running` rows says nothing about which run is which.
-	const agentIndex = fixed.findIndex((column) => column.label === "agent");
-	const lead = fixed
-		.slice(0, agentIndex)
-		.reduce(
-			(sum, column, index) =>
-				sum +
-				Math.min(
-					column.max ?? Number.POSITIVE_INFINITY,
-					Math.max(0, ...rows.map((cells) => visibleWidth(cellText(cells[index])))),
-				) +
-				gap,
-			0,
-		);
-	const agentColumn = fixed[agentIndex];
-	if (agentColumn !== undefined) agentColumn.max = Math.max(6, Math.min(agentColumn.max ?? 24, width - lead));
-	const used = fixed.reduce((sum, column, index) => {
-		const natural = Math.max(0, ...rows.map((cells) => visibleWidth(cellText(cells[index]))));
-		return sum + Math.min(natural, column.max ?? Number.POSITIVE_INFINITY);
-	}, 0);
-	const activityRoom = width - used - gap * fixed.length;
-	// An approval wait is what its run is blocked on, so it takes the room beside the status and the name and the
-	// table drops its quietest columns, with its note, rather than cutting the owner and time left to `appro…` (bt-11 l).
-	const agentWidth = Math.min(
-		agentColumn?.max ?? Number.POSITIVE_INFINITY,
-		Math.max(0, ...rows.map((cells) => visibleWidth(cellText(cells[agentIndex])))),
-	);
-	const waitRoom = width - lead - agentWidth - gap;
-	let activityMax = Math.max(16, activityRoom);
-	items.forEach((item, index) => {
-		const cells = rows[index];
-		if (item.kind !== "run" || item.row.plan !== undefined || cells === undefined) return;
-		if (item.row.progress?.awaitingApproval !== true || isTerminalStatus(item.row.status)) return;
-		const cell = runActivityCell(theme, item.row, now, Math.max(activityRoom, waitRoom));
-		cells[cells.length - 1] = cell;
-		activityMax = Math.max(activityMax, visibleWidth(cell.text));
-	});
-	const columns: TableColumn[] = [...fixed, { label: "activity", priority: 8, min: 12, max: activityMax }];
-	return tableRows(theme, { columns, rows }, width);
-}
-
-function cellText(cell: string | TableCell | undefined): string {
-	return cell === undefined ? "" : typeof cell === "string" ? cell : cell.text;
+	const table = runTable(items, width, options);
+	return [...(table.header === null ? [] : [table.header]), ...table.rows, ...(table.note === null ? [] : [table.note])];
 }
 
 /** The run identity the board's detail rule names: the agent and its run id. */
@@ -2074,53 +2228,241 @@ function rowSignature(row: DispatchBoardRow): string {
 	].join("|");
 }
 
-/**
- * The board body for `budget` rows: the run table windowed around the cursor,
- * then the selected run's facts under a rule that names it. The key router
- * gives the board only ↑↓, Enter, s and x, so nothing here scrolls by key: the
- * table follows the cursor and the detail is cut at the budget with a marker
- * that names where the rest is read.
- *
- * Enter asks for the selected run's whole story, so an open detail takes the
- * rows it needs before the table does. The table shrinks to the selected row
- * and the rows around it that still fit, and its position row says how many
- * runs the detail is hiding. `budgetKnown` is false before the frame has
- * granted rows; an open detail then renders whole and the frame's cut marks
- * what is missing.
- */
 /** A painted row's text, for reading its shape. */
 function stripPaint(text: string): string {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: only the row's escape sequences are removed.
 	return text.replace(/\u001b\[[0-9;]*m/gu, "");
 }
 
-/** What a column the width dropped holds, in the words the run's detail uses for it. */
-const DROPPED_COLUMN_WORDS: Readonly<Record<string, string>> = {
-	in: "tokens",
-	out: "tokens",
-	cost: "cost",
-	phase: "plan step",
-	node: "node",
-	elapsed: "time",
-	account: "account",
-	activity: "activity",
-};
-
-/**
- * The table's dropped-column note, said as where the facts are rather than as column labels: `in, out not shown`
- * named two columns a person never saw, while the selected run's detail under the table states every one of them.
- */
-function boardColumnNote(note: string): string {
-	const plain = stripPaint(note).replace(/\s+/gu, " ").trim();
-	const match = /^\S+\s+(.+?) not shown at this width$/u.exec(plain);
-	if (match?.[1] === undefined) return plain;
-	const words = [...new Set(match[1].split(", ").map((label) => DROPPED_COLUMN_WORDS[label.trim()] ?? label.trim()))];
-	const list = words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
-	// The detail under the table may itself be cut to a few rows, so the note says where the facts live, not that
-	// they are on screen.
-	return `${GLYPH.ellipsis} each run's detail shows its ${list}`;
+/** A route's slots in use and waiting, counted across the board. */
+interface EndpointLoad {
+	active: number;
+	queued: number;
 }
 
+/** What the selected run is doing now, or how it ended: its `doing` fact, which no tier leaves out. */
+function doingLines(theme: ClioTheme, row: DispatchBoardRow, width: number, now: number): string[] {
+	const live = row.status === "running" || row.status === "stale";
+	if (row.progress !== undefined && !isTerminalStatus(row.status)) {
+		const line = progressActionLine(theme, row.progress, width, row.routeFirstOutput ?? null);
+		if (line !== null) return [line];
+	}
+	if (row.status === "completed" && row.plan === undefined) {
+		const failure = completedRunFailure(row);
+		const words =
+			failure === null ? theme.fg("body", "finished") : theme.fg(completedRunMark(failure).token, failure.words);
+		return [cardUnitsLine(theme, "doing", [words], width)];
+	}
+	const cell = live ? liveActivityCell(theme, row, undefined, null) : runActivityCell(theme, row, now);
+	const text = cell.text.length > 0 ? cell.text : "starting";
+	return [cardUnitsLine(theme, "doing", [paintedCell(theme, { ...cell, text })], width)];
+}
+
+/** The selected run's facts at the tier's `boardFacts`, and how many facts that set left for Enter. */
+function boardFactLines(
+	theme: ClioTheme,
+	row: DispatchBoardRow,
+	width: number,
+	facts: readonly BoardFact[] | "all",
+	load: EndpointLoad | null,
+	evidence: RunEvidencePresentation | undefined,
+	now: number,
+): { lines: string[]; hidden: number } {
+	const usage = dispatchUsageText(row.usage);
+	const firstOutput =
+		row.ttft !== undefined && row.ttft !== null
+			? `first output after ${row.ttft}`
+			: row.status === "running"
+				? "no output yet"
+				: null;
+	const task = row.taskSummary
+		? cardWrappedValueLines(theme, "task", theme.fg("body", sanitizeCallTargetText(row.taskSummary)), width)
+		: [];
+	const firstTask = task[0];
+	const slots = [
+		...(row.endpoint !== undefined && load !== null
+			? [
+					theme.fg(
+						"info",
+						`${load.active}/${row.endpoint.limit} ${sanitizeCallTargetText(row.endpoint.label)}${load.queued > 0 ? ` +${load.queued} queued` : ""}`,
+					),
+				]
+			: []),
+		...(firstOutput === null ? [] : [theme.fg("body", firstOutput)]),
+	];
+	const started = runOriginWords(row);
+	const measured = row.usage.kind === "ready" && compactQuantity(usage.prompt) !== null;
+	const cost = row.usage.kind === "ready" ? compactQuantity(usage.cost) : null;
+	const tokenUnits = [
+		...(measured && row.usage.kind === "ready"
+			? [
+					theme.fg("body", `prompt ${usageLineFigure(row.usage.prompt)}`),
+					theme.fg("body", `out ${usageLineFigure(row.usage.output)}`),
+				]
+			: [theme.fg("body", isTerminalStatus(row.status) ? USAGE_NOT_MEASURED : "none reported yet")]),
+		theme.fg("body", cost === null || cost === USAGE_NOT_MEASURED ? "cost not measured on this route" : `cost ${cost}`),
+	];
+	const proof = evidence === undefined ? null : evidenceCardLine(theme, evidence, width);
+	const all: ReadonlyArray<readonly [string, string[]]> = [
+		["doing", doingLines(theme, row, width, now)],
+		["task", firstTask === undefined ? [] : [task.length > 1 ? cutRowWithEllipsis(firstTask, width) : firstTask]],
+		["slots", slots.length === 0 ? [] : [cardUnitsLine(theme, "slots", slots, width)]],
+		[
+			"started",
+			started === null && row.earlier !== true
+				? []
+				: [
+						cardUnitsLine(
+							theme,
+							"started",
+							[
+								...(started === null ? [] : [theme.fg("body", started)]),
+								...(row.earlier === true ? [theme.fg("annotation", "recorded before this CLIO Coder started")] : []),
+							],
+							width,
+						),
+					],
+		],
+		[
+			"target",
+			[
+				cardUnitsLine(
+					theme,
+					"target",
+					[
+						theme.fg("footerIdentity", formatRowRoute(row)),
+						...(row.node === undefined || row.node === "local" ? [] : [theme.fg("body", `on node ${row.node}`)]),
+					],
+					width,
+				),
+			],
+		],
+		["tokens", [cardUnitsLine(theme, "tokens", tokenUnits, width)]],
+		["trust", trustCardLines(theme, row, width, false)],
+		["evidence", proof === null ? [] : [proof]],
+	];
+	const present = all.filter(([, lines]) => lines.length > 0);
+	// A settled run's trust verdict is part of its state, which no tier hides (3, invariant 2).
+	const settledTrust = isTerminalStatus(row.status);
+	const shown =
+		facts === "all"
+			? present
+			: present.filter(([name]) => (facts as readonly string[]).includes(name) || (name === "trust" && settledTrust));
+	return { lines: shown.flatMap(([, lines]) => lines), hidden: present.length - shown.length };
+}
+
+interface BoardDetail {
+	title: string;
+	meta: string;
+	runId: string;
+	body: string[];
+	/** Facts the tier left for Enter, named by the fold marker. */
+	hidden: number;
+	plan: boolean;
+}
+
+/**
+ * The selected run's titled rule and its body in `room` rows. An open detail pages through the whole record; a folded
+ * one shows the tier's facts, then, when `marker`, the row that says how many more Enter opens. A body cut at the
+ * budget closes on the row that says where the rest is read.
+ */
+function detailSection(
+	theme: ClioTheme,
+	detail: BoardDetail,
+	width: number,
+	room: number,
+	expanded: boolean,
+	budgetKnown: boolean,
+	detailWindow: { offset: number },
+	marker: boolean,
+): string[] {
+	const lines = [sectionRule(theme, width, detail.title, { meta: detail.meta })];
+	const rest = room - 1;
+	const sep = ` ${GLYPH.sep} `;
+	const fold =
+		marker && !expanded && detail.hidden > 0
+			? theme.fg(
+					"annotation",
+					truncateToWidth(`${GLYPH.ellipsis} ${detail.hidden} more rows${sep}[Enter] detail`, width, GLYPH.ellipsis, false),
+				)
+			: null;
+	if ((expanded && !budgetKnown) || detail.body.length + (fold === null ? 0 : 1) <= rest) {
+		lines.push(...detail.body, ...(fold === null ? [] : [fold]));
+		return lines;
+	}
+	if (rest <= 0) return lines;
+	if (expanded) {
+		const page = Math.max(1, rest - 1);
+		const start = Math.min(detailWindow.offset, Math.max(0, detail.body.length - page));
+		detailWindow.offset = start;
+		lines.push(...detail.body.slice(start, start + page));
+		if (rest > 1)
+			lines.push(
+				positionRow(theme, { start: start + 1, end: start + page, total: detail.body.length, unit: "detail rows" }, width),
+			);
+		return lines;
+	}
+	const kept = detail.body.slice(0, Math.max(0, rest - 1));
+	const hidden = detail.body.length - kept.length + (marker ? detail.hidden : 0);
+	// A fact the cut lands inside of wraps onto the next row, which starts blank under its key; the last row kept
+	// then closes with the ellipsis, so `its answer was not in the` never reads as the whole of it.
+	const nextRow = detail.body[kept.length];
+	const lastKept = kept.at(-1);
+	if (lastKept !== undefined && nextRow !== undefined && /^\s/u.test(stripPaint(nextRow)) && nextRow.trim().length > 0) {
+		kept[kept.length - 1] = cutRowWithEllipsis(lastKept, width);
+	}
+	// Pointers drop whole from the end rather than cut, so a `/view` never shows a run id it cannot be typed from.
+	// A plan is not a dispatch record; Enter opens its steps, not /view dispatch:<id>.
+	const where = [`${hidden} more rows`, "[Enter] detail", ...(detail.plan ? [] : [`/view dispatch:${detail.runId}`])];
+	const fits = (): boolean => visibleWidth(`${GLYPH.ellipsis} ${where.join(sep)}`) <= width;
+	// The /view handle is the only way to the rows a narrow board cut, so the count shortens and Enter goes first.
+	if (!fits() && where.length > 2) where.splice(1, 1);
+	if (!fits()) where[0] = `${hidden} more`;
+	if (!fits() && where.length > 1) where.shift();
+	while (where.length > 1 && !fits()) where.pop();
+	lines.push(
+		...kept,
+		theme.fg("annotation", truncateToWidth(`${GLYPH.ellipsis} ${where.join(sep)}`, width, GLYPH.ellipsis, false)),
+	);
+	return lines;
+}
+
+/** The header, the rows in `tableBudget` around the cursor, the earlier-sessions rule and the position row. */
+function tableWindowLines(
+	theme: ClioTheme,
+	table: RunTable,
+	items: ReadonlyArray<DispatchBoardItem>,
+	selectedIndex: number,
+	tableBudget: number,
+	width: number,
+	detailExpanded: boolean,
+): string[] {
+	const [start] = centeredWindow(table.rows.length, selectedIndex, tableBudget);
+	const { window, position } = windowRows(table.rows, start, tableBudget);
+	const lines = [...window];
+	// What an earlier Clio recorded sits under its own rule, so a row from before this process never passes for one
+	// of its own at a glance, at any width or without colour. The rule sits above the first earlier row in view, or
+	// tops the window when every row in view is earlier.
+	const firstEarlier = items.findIndex(itemFromEarlierSession);
+	if (firstEarlier >= 0 && firstEarlier < start + window.length) {
+		lines.splice(Math.max(0, firstEarlier - start), 0, earlierSessionsRule(theme, items.length - firstEarlier, width));
+	}
+	if (table.header !== null) lines.unshift(table.header);
+	if (position) {
+		// An open detail adds only how many runs it is hiding.
+		const hidden = position.total - (position.end - position.start + 1);
+		const keys = detailExpanded ? [`${hidden} hidden while the detail is open`] : [];
+		lines.push(positionRow(theme, { ...position, unit: "runs", keys }, width));
+	}
+	return lines;
+}
+
+/**
+ * The board body for `budget` rows (6.5): the run table with its header, windowed around the cursor, then the
+ * selected run's facts under a rule that names it and its state. The facts are the tier's `boardFacts`; Enter opens
+ * the whole record, paged. From W5 the list and the facts sit side by side, 60 and 40 percent. `budgetKnown` is false
+ * before the frame has granted rows; an open detail then renders whole and the frame's cut marks what is missing.
+ */
 function formatDispatchBoardBody(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	width: number,
@@ -2129,14 +2471,15 @@ function formatDispatchBoardBody(
 	selectedRunId: string | null,
 	detailExpanded: boolean,
 	budgetKnown: boolean,
-	detailKey = "Enter",
-	style: OutputStyle = "standard",
 	detailWindow = { offset: 0 },
 ): string[] {
 	const theme = clioTheme();
 	if (rows.length === 0) {
-		return emptyState(theme, "No fleet runs yet", width, { remedy: "Use /run to start a run." });
+		return emptyState(theme, "No runs in this session.", width, {
+			remedy: `/run <agent> <task> starts one ${GLYPH.sep} CLIO Coder lists the workers it starts here.`,
+		});
 	}
+	const now = Date.now();
 	const endpointActive: Record<string, number> = { ...foregroundStreamUsage() };
 	const endpointQueued: Record<string, number> = {};
 	for (const row of rows) {
@@ -2154,132 +2497,95 @@ function formatDispatchBoardBody(
 			item.kind === "run" ? item.row.runId === selectedRunId : item.group.selectedRunId !== undefined,
 		),
 	);
-	// One line per run, then any note on the columns this width dropped. The position row counts runs, so the note
-	// rides under the window instead of being counted as one, which made the total change with the width.
-	const tableLines = runTableRows(items, width, { selectedRunId, style });
-	const table = tableLines.slice(0, items.length);
-	const columnNote = boardColumnNote(
-		tableLines
-			.slice(items.length)
-			.map((line) => line.trim())
-			.join(" "),
-	);
-	// On a short board the note would cost the selected run's status row, which says more than which columns left.
-	const notes =
-		columnNote.length === 0 || budget < 10
-			? []
-			: [theme.fg("annotation", truncateToWidth(columnNote, width, GLYPH.ellipsis, false))];
-	// What an earlier Clio recorded sits under its own rule, so a row from before this process never passes for one
-	// of its own at a glance, at any width or without colour.
-	const firstEarlier = items.findIndex(itemFromEarlierSession);
-	const earlierCount = firstEarlier < 0 ? 0 : items.length - firstEarlier;
-	const dividerRows = firstEarlier < 0 ? 0 : 1;
+	const split = widthClass(width) === "W5";
+	const listWidth = split ? Math.floor((width - BOARD_GAP) * 0.6) : width;
+	const factsWidth = split ? width - listWidth - BOARD_GAP : width;
+	const table = runTable(items, listWidth, { selectedRunId });
+	const head = table.header === null ? 0 : 1;
+	// On a short stacked board the note would cost the selected run's status row, which says more than which columns left.
+	const notes = table.note === null || (!split && budget < 10) ? [] : [table.note];
+	const dividerRows = items.some(itemFromEarlierSession) ? 1 : 0;
 	const item = items[selectedIndex];
-	const detail =
-		item === undefined
-			? null
-			: item.kind === "council"
+	const detail = ((): BoardDetail | null => {
+		if (item === undefined) return null;
+		if (item.kind === "council") {
+			return {
+				title: `${councilName(item.group)}${item.group.task === undefined ? "" : ` ${GLYPH.sep} ${item.group.task}`}`,
+				meta: item.group.round > 1 ? `round ${item.group.round} ${GLYPH.sep} ${item.group.elapsed}` : item.group.elapsed,
+				runId: item.group.selectedRunId ?? item.group.members[0]?.runId ?? "",
+				// The table keeps its selected row and position row, and the detail its rule, whatever the council's size.
+				body: councilGroupBody(theme, item.group, factsWidth, Math.max(3, budget - notes.length - dividerRows - head - 3)),
+				hidden: 0,
+				plan: false,
+			};
+		}
+		const row = item.row;
+		const evidence = deriveRunEvidenceState(telemetry, row.runId);
+		const load =
+			row.endpoint === undefined
+				? null
+				: { active: endpointActive[row.endpoint.key] ?? 0, queued: endpointQueued[row.endpoint.key] ?? 0 };
+		const folded =
+			detailExpanded || row.plan !== undefined
 				? {
-						title: `${councilName(item.group)}${item.group.task === undefined ? "" : ` · ${item.group.task}`}`,
-						meta: item.group.round > 1 ? `round ${item.group.round} · ${item.group.elapsed}` : item.group.elapsed,
-						runId: item.group.selectedRunId ?? item.group.members[0]?.runId ?? "",
-						// The table keeps its selected row and position row, and the detail its rule, whatever the council's size.
-						body: councilGroupBody(theme, item.group, width, Math.max(3, budget - notes.length - dividerRows - 3)),
-					}
-				: {
-						title: runRuleTitle(item.row),
-						meta: item.row.telemetry?.activity.elapsed.display ?? formatElapsed(item.row.elapsedMs),
-						runId: item.row.runId,
-						body: dispatchCardBody(item.row, width, deriveRunEvidenceState(telemetry, item.row.runId), {
+						lines: dispatchCardBody(row, factsWidth, evidence, {
 							expanded: detailExpanded,
-							style,
-							detailKey,
-							...(item.row.endpoint !== undefined
-								? {
-										endpointActive: endpointActive[item.row.endpoint.key] ?? 0,
-										endpointQueued: endpointQueued[item.row.endpoint.key] ?? 0,
-									}
-								: {}),
+							detailKey: "Enter",
+							...(load !== null ? { endpointActive: load.active, endpointQueued: load.queued } : {}),
 						}),
-					};
-	// An open detail leaves the table what its body and rule do not need, and
-	// never less than the selected row. A table that cannot show every run
-	// spends one more row on the position row that counts the rest.
-	const detailRows = (detail === null ? 0 : detail.body.length + 1) + notes.length + dividerRows;
+						hidden: 0,
+					}
+				: boardFactLines(theme, row, factsWidth, tierPolicy().boardFacts, load, evidence, now);
+		return {
+			title: runRuleTitle(row),
+			meta: `${stripPaint(runStatusCell(theme, row, undefined, factsWidth))} ${GLYPH.sep} ${row.telemetry?.activity.elapsed.display ?? formatElapsed(row.elapsedMs)}`,
+			runId: row.runId,
+			body: folded.lines,
+			hidden: folded.hidden,
+			plan: row.plan !== undefined,
+		};
+	})();
+	if (split) {
+		// Side by side, the list keeps every row the budget holds and the facts need no fold marker.
+		const listRows = Math.max(1, budget - head - notes.length - dividerRows);
+		const tableBudget = table.rows.length <= listRows ? table.rows.length : Math.max(1, listRows - 1);
+		const list = [
+			...tableWindowLines(theme, table, items, selectedIndex, tableBudget, listWidth, detailExpanded),
+			...notes,
+		];
+		const facts =
+			detail === null
+				? []
+				: detailSection(theme, detail, factsWidth, budget, detailExpanded, budgetKnown, detailWindow, false);
+		const height = Math.max(list.length, facts.length);
+		return Array.from(
+			{ length: height },
+			(_, index) => `${padAnsi(list[index] ?? "", listWidth)}${" ".repeat(BOARD_GAP)}${facts[index] ?? ""}`,
+		);
+	}
+	// An open detail leaves the table what its body and rule do not need, and never less than the selected row. A
+	// table that cannot show every run spends one more row on the position row that counts the rest.
+	const detailRows =
+		(detail === null ? 0 : detail.body.length + 1 + (detail.hidden > 0 ? 1 : 0)) + notes.length + dividerRows + head;
 	const tableBudget = detailExpanded
-		? table.length + detailRows <= budget
-			? table.length
-			: Math.max(1, Math.min(table.length - 1, budget - detailRows - 1))
+		? table.rows.length + detailRows <= budget
+			? table.rows.length
+			: Math.max(1, Math.min(table.rows.length - 1, budget - detailRows - 1))
 		: Math.min(
-				table.length,
+				table.rows.length,
 				Math.max(
 					1,
 					Math.min(
-						Math.max(3, Math.floor(budget / 2) - dividerRows),
+						Math.max(3, Math.floor(budget / 2) - dividerRows - head),
 						// The selected run keeps its rule, its first rows and the pointer to the rest, however short the board.
-						budget - dividerRows - notes.length - 1 - (detail === null ? 0 : Math.min(2, detail.body.length) + 2),
+						budget - head - dividerRows - notes.length - 1 - (detail === null ? 0 : Math.min(2, detail.body.length) + 2),
 					),
 				),
 			);
-	const [start] = centeredWindow(table.length, selectedIndex, tableBudget);
-	const { window, position } = windowRows(table, start, tableBudget);
-	const lines = [...window];
-	// The rule sits above the first earlier row in view, or tops the window when every row in view is earlier.
-	if (firstEarlier >= 0 && firstEarlier < start + window.length) {
-		lines.splice(Math.max(0, firstEarlier - start), 0, earlierSessionsRule(theme, earlierCount, width));
-	}
-	if (position) {
-		// One wording at every width and in both views; an open detail adds only how many runs it is hiding.
-		const hidden = position.total - (position.end - position.start + 1);
-		const keys = [...(detailExpanded ? [`${hidden} hidden while the detail is open`] : []), "↑↓ select"];
-		lines.push(positionRow(theme, { ...position, unit: "runs", keys }, width));
-	}
-	lines.push(...notes);
+	const lines = [...tableWindowLines(theme, table, items, selectedIndex, tableBudget, width, detailExpanded), ...notes];
 	if (detail === null) return lines;
-	lines.push(sectionRule(theme, width, detail.title, { meta: detail.meta }));
-	const room = budget - lines.length;
-	if ((detailExpanded && !budgetKnown) || detail.body.length <= room) {
-		lines.push(...detail.body);
-		return lines;
-	}
-	if (room <= 0) return lines;
-	if (detailExpanded) {
-		const page = Math.max(1, room - 1);
-		const start = Math.min(detailWindow.offset, Math.max(0, detail.body.length - page));
-		detailWindow.offset = start;
-		lines.push(...detail.body.slice(start, start + page));
-		if (room > 1)
-			lines.push(
-				positionRow(theme, { start: start + 1, end: start + page, total: detail.body.length, unit: "detail rows" }, width),
-			);
-		return lines;
-	}
-	const kept = detail.body.slice(0, Math.max(0, room - 1));
-	const hidden = detail.body.length - kept.length;
-	// A fact the cut lands inside of wraps onto the next row, which starts blank under its key; the last row kept
-	// then closes with the ellipsis, so `its answer was not in the` never reads as the whole of it.
-	const nextRow = detail.body[kept.length];
-	const lastKept = kept.at(-1);
-	if (lastKept !== undefined && nextRow !== undefined && /^\s/u.test(stripPaint(nextRow)) && nextRow.trim().length > 0) {
-		kept[kept.length - 1] = cutRowWithEllipsis(lastKept, width);
-	}
-	// Pointers drop whole from the end rather than cut, so a `/view` never shows a run id it cannot be typed from.
-	// A plan is not a dispatch record; Enter opens its steps, not /view dispatch:<id>.
-	const plan = item?.kind === "run" && item.row.plan !== undefined;
-	const where = [
-		`${hidden} more rows`,
-		...(detailExpanded ? [] : [`${detailKey} for detail`]),
-		...(plan ? [] : [`/view dispatch:${detail.runId}`]),
-	];
-	const fits = (): boolean => visibleWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`) <= width;
-	// The /view handle is the only way to the rows a narrow board cut, so the count shortens and Enter goes first.
-	if (!fits() && where.length > 2) where.splice(1, 1);
-	if (!fits()) where[0] = `${hidden} more`;
-	if (!fits() && where.length > 1) where.shift();
-	while (where.length > 1 && !fits()) where.pop();
 	lines.push(
-		...kept,
-		theme.fg("annotation", truncateToWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`, width, GLYPH.ellipsis, false)),
+		...detailSection(theme, detail, width, budget - lines.length, detailExpanded, budgetKnown, detailWindow, true),
 	);
 	return lines;
 }
@@ -2387,18 +2693,19 @@ function droppedKeyRows(entries: ReadonlyArray<HintEntry>, width: number, esc: H
 export function createDispatchBoardView(
 	rows: () => ReadonlyArray<DispatchBoardRow>,
 	telemetry: () => TelemetrySnapshot | undefined,
-	getOutputStyle: () => OutputStyle = () => "standard",
+	/** Unread: the board takes its tier from `presentationTier()` (3.1). The sweep row removes the parameter. */
+	_getOutputStyle: () => OutputStyle = presentationTier,
 ): DispatchBoardView {
 	let armedCancelRunId: string | null = null;
 	let selectedRunId: string | null = null;
 	// Until the operator moves the cursor, the pick is the board's own, so a live run that registers after the board
 	// opened takes it over from a finished one.
 	let chosen = false;
-	// Detail is a property of the operator's attention, not of a run, so it
-	// follows the cursor rather than pinning to the row it was opened on.
-	let expanded: boolean | null = null;
+	// Detail is a property of the operator's attention, not of a run, so it follows the cursor rather than pinning to
+	// the row it was opened on. The board opens folded at every tier, so Esc from the list closes it in one press.
+	let expanded = false;
 	const detailWindow = { offset: 0 };
-	const detailExpanded = (): boolean => expanded ?? getOutputStyle() === "detailed";
+	const detailExpanded = (): boolean => expanded && rows().length > 0;
 	let watchable: (row: DispatchBoardRow) => boolean = () => false;
 	let bodyRows = 0;
 	let memo: { key: string; lines: string[] } | null = null;
@@ -2451,7 +2758,6 @@ export function createDispatchBoardView(
 			normalizeSelection(currentRows);
 			const snapshot = telemetry();
 			const safeWidth = Math.max(1, width);
-			const style = getOutputStyle();
 			const budget = bodyRows > 0 ? bodyRows : DOCK_BODY_ROWS_MAX;
 			// A waiting retry counts down by the second, so its row is keyed on the second.
 			const clock = currentRows.some((row) => row.retry !== undefined) ? Math.floor(Date.now() / 1000) : 0;
@@ -2461,7 +2767,7 @@ export function createDispatchBoardView(
 					.map((run) => run.runId)
 					.join(",") ?? "";
 			const keyRows = droppedKeyRows(dispatchBoardHintEntries(view), safeWidth, dispatchBoardEscapeEntry(view));
-			const key = `${safeWidth}|${budget}|${selectedRunId}|${detailExpanded()}|${detailWindow.offset}|${style}|${skinEpoch()}|${clock}|${evidence}|${keyRows.join("/")}|${currentRows.map(rowSignature).join(";")}`;
+			const key = `${safeWidth}|${budget}|${selectedRunId}|${detailExpanded()}|${detailWindow.offset}|${tierRevision()}|${skinEpoch()}|${clock}|${evidence}|${keyRows.join("/")}|${currentRows.map(rowSignature).join(";")}`;
 			if (memo?.key === key) return memo.lines;
 			const body = formatDispatchBoardBody(
 				currentRows,
@@ -2471,8 +2777,6 @@ export function createDispatchBoardView(
 				selectedRunId,
 				detailExpanded(),
 				bodyRows > 0,
-				"Enter",
-				style,
 				detailWindow,
 			);
 			const lines = currentRows.length === 0 ? body : [...body, ...keyRows];
@@ -2494,7 +2798,7 @@ export function createDispatchBoardView(
 		resetSelection(): void {
 			selectedRunId = null;
 			chosen = false;
-			expanded = null;
+			expanded = false;
 			detailWindow.offset = 0;
 			normalizeSelection(rows());
 		},

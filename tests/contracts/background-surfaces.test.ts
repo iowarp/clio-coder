@@ -1,6 +1,7 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import type { OutputStyle } from "../../src/core/defaults.js";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
 import { createWorkerProgressFold } from "../../src/domains/telemetry/worker-progress.js";
 import type { Component, TUI } from "../../src/engine/tui.js";
@@ -153,23 +154,27 @@ test("a run waiting for the verification slot says so on its worker card and Fle
 test("fleet board tier changes invalidate cached rows and explicit detail overrides compact mode", () => {
 	const fixture = footerState().dispatchRows[0];
 	ok(fixture);
-	let style: OutputStyle = "compact";
 	const row = { ...fixture, agentAudience: "base" as const, taskSummary: "Investigate the parser" };
 	const board = createDispatchBoardView(
 		() => [row],
 		() => undefined,
-		() => style,
 	);
 	board.setBodyRows(30);
-	const compact = plain(board.render(120));
-	doesNotMatch(compact, /target\s|tokens\s/);
-	style = "standard";
-	match(plain(board.render(120)), /target\s/);
-	style = "compact";
-	strictEqual(plain(board.render(120)), compact);
-	board.toggleDetail();
-	match(plain(board.render(120)), /target\s/);
-	strictEqual(board.detailExpanded(), true);
+	setPresentationTier("compact");
+	try {
+		const compact = plain(board.render(120));
+		doesNotMatch(compact, /target\s|tokens\s/);
+		// The route and token facts of the selected run are detailed's (boardFacts).
+		setPresentationTier("detailed");
+		match(plain(board.render(120)), /target\s/);
+		setPresentationTier("compact");
+		strictEqual(plain(board.render(120)), compact);
+		board.toggleDetail();
+		match(plain(board.render(120)), /target\s/);
+		strictEqual(board.detailExpanded(), true);
+	} finally {
+		setPresentationTier("standard");
+	}
 });
 
 test("settled plans fold routine steps but keep the failed step and a route to detail", () => {
