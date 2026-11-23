@@ -1,4 +1,5 @@
 import { formatCountdown } from "../../core/format-time.js";
+import { tierPolicy } from "../../core/presentation-tier.js";
 import { escapeTerminalControls } from "../../core/terminal-controls.js";
 import {
 	classifyDecisionPresentation,
@@ -49,6 +50,7 @@ import {
 	editorTheme,
 	emptyState,
 	GLYPH,
+	positionRow,
 	screenTitle,
 	sectionLabel,
 	sectionRule,
@@ -72,49 +74,47 @@ const MIN_INNER_ROWS = 6;
 /** The key that moves between a round's questions, spelled once for the rail, the legend and the position row. */
 const MOVE_KEY = "Tab/Shift+Tab";
 /** The key that moves between a question's options; the rail names it when it fits, and the option pointer stands in for it otherwise. */
-const OPTION_MOVE_KEY = "↑↓";
+const OPTION_MOVE_KEY = `${GLYPH.up}${GLYPH.down}`;
+/** The fact separator of the plain rows this card measures before painting. */
+const SEP = ` ${GLYPH.sep} `;
 /** The question region keeps at least this many rows before the options window shrinks. */
 const MIN_QUESTION_ROWS = 3;
-/** At or under this many body rows an option's explanation may give way so every choice stays listed. */
+/** At or under this many body rows a card that cannot list every option gives up its legend too, so the window is larger. */
 const COMPACT_BODY_ROWS = 12;
+/**
+ * Under this width the timer sentence takes its narrow form (`unattendedOutcomeShort`). Full function is promised
+ * from 44 columns (spec 2.3), so the source's full sentence holds at 44 and wider and only wraps.
+ */
+const NARROW_TIMER_WIDTH = 44;
 const MAX_LABEL_COLUMN = 30;
 const MIN_LABEL_COLUMN = 12;
 const CONTINUATION_INDENT = "    ";
 const TEXT_ASKING_DESCRIPTION = "opens a text field for your answer";
-const OTHER_CAPTION = "Other · recorded exactly as typed";
+const OTHER_CAPTION = `Other${SEP}recorded exactly as typed`;
 const OTHER_POINTER = "[t] type an answer";
 /** With no legend row at all, the Other row is the last place the option keys can be named. */
-const OTHER_POINTER_ALL_KEYS = "[t] · [n] note · [?] details";
+const OTHER_POINTER_ALL_KEYS = `[t]${SEP}[n] note${SEP}[?] details`;
 const OTHER_ROW_ALL_KEYS_MIN_WIDTH = 38;
 const CURSOR_CELL = renderFakeCursor(" ");
-
-type OptionDetail = "all" | "focused" | "none";
 
 /**
  * One way to spend the body's rows. The question and its choices are what the
  * operator acts on, so the rows around them go first: blank spacing, then the
- * header rows, and on a short terminal explanations before the key legend.
+ * header rows, then the key legend. An option's description is its consequence,
+ * so it is part of the decision and never gives way at any tier or size; a list
+ * that cannot show every option whole windows instead.
  */
 interface BodyFit {
 	spacing: boolean;
 	headers: boolean;
 	legend: boolean;
-	detail: OptionDetail;
 }
 
-const FULL_FIT: BodyFit = { spacing: true, headers: true, legend: true, detail: "all" };
+const FULL_FIT: BodyFit = { spacing: true, headers: true, legend: true };
 const TIGHT_FIT: BodyFit = { ...FULL_FIT, spacing: false };
 const HEADERLESS_FIT: BodyFit = { ...TIGHT_FIT, headers: false };
-const BODY_FITS: ReadonlyArray<BodyFit> = [FULL_FIT, TIGHT_FIT, HEADERLESS_FIT, { ...HEADERLESS_FIT, legend: false }];
-const COMPACT_BODY_FITS: ReadonlyArray<BodyFit> = [
-	FULL_FIT,
-	TIGHT_FIT,
-	HEADERLESS_FIT,
-	{ ...HEADERLESS_FIT, detail: "focused" },
-	{ ...HEADERLESS_FIT, detail: "none" },
-	{ ...HEADERLESS_FIT, legend: false, detail: "focused" },
-	{ ...HEADERLESS_FIT, legend: false, detail: "none" },
-];
+const BARE_FIT: BodyFit = { ...HEADERLESS_FIT, legend: false };
+const BODY_FITS: ReadonlyArray<BodyFit> = [FULL_FIT, TIGHT_FIT, HEADERLESS_FIT, BARE_FIT];
 
 export interface OpenAskUserOverlayDeps {
 	onCancel: () => void;
@@ -467,13 +467,12 @@ interface OptionRowLayout {
 	rows: string[][];
 }
 
-/** Full-width labels and explanations; selection never hides another option's explanation. */
+/** Full-width labels and explanations; every option's explanation shows whole, focused or not. */
 function layoutOptionRows(
 	items: ReadonlyArray<SelectItem>,
 	focusedIndex: number,
 	width: number,
 	recommendedIndex = -1,
-	detail: OptionDetail = "all",
 	otherPointer: string | null = null,
 ): OptionRowLayout {
 	const theme = clioTheme();
@@ -482,14 +481,13 @@ function layoutOptionRows(
 		rows: items.map((item, index) => {
 			const focused = index === focusedIndex;
 			// Set off from the label, so `Fast recommended` cannot read as the option's name.
-			const tag =
-				index === recommendedIndex ? `${theme.fg("divider", " · ")}${theme.fg("annotation", "recommended")}` : "";
+			const tag = index === recommendedIndex ? `${theme.fg("divider", SEP)}${theme.fg("annotation", "recommended")}` : "";
 			// The free-text key, on the row it belongs to, when neither rail nor legend has room for it.
 			const pointer = otherPointer !== null && item.value === "other" ? ` ${theme.fg("keyboardHint", otherPointer)}` : "";
 			const label = `${theme.fg("menuOption", item.label, focused ? "selected" : "normal")}${tag}${pointer}`;
 			const prefix = focused ? theme.fg("selectedOption", `${GLYPH.cursor} `) : "  ";
 			const labels = wrapTextWithAnsi(label, safeWidth - 2).map((line, at) => `${at === 0 ? prefix : "  "}${line}`);
-			const description = detail === "all" || (detail === "focused" && focused) ? item.description?.trim() : undefined;
+			const description = item.description?.trim();
 			const explanation = description
 				? formatAskUserQuestion(description, Math.max(4, safeWidth - CONTINUATION_INDENT.length)).map(
 						(line) => `${CONTINUATION_INDENT}${theme.base("decisionConsequence", line)}`,
@@ -502,9 +500,9 @@ function layoutOptionRows(
 
 /**
  * The rows of a windowed list: every option when they fit, otherwise a run of
- * whole options around the focused one, with a position marker. An option is
- * never split across the window edge, so a description is read whole or not
- * at all, and one arrow key brings any hidden option back.
+ * whole options around the focused one, with a position row (`2–3 of 5 options`).
+ * An option is never split across the window edge, so a description is read
+ * whole or not at all, and one arrow key brings any hidden option back.
  */
 function windowOptionRows(
 	layout: OptionRowLayout,
@@ -542,8 +540,14 @@ function windowOptionRows(
 	}
 	const visible = layout.rows.slice(start, end).flat();
 	const otherHidden = otherIndex >= 0 && (otherIndex < start || otherIndex >= end);
-	const marker = `  (${focusedIndex + 1}/${layout.rows.length})${start > 0 ? ` ${GLYPH.up}` : ""}${end < layout.rows.length ? ` ${GLYPH.down}` : ""}${otherHidden ? ` · ${OTHER_POINTER}` : ""}`;
-	return [...visible, fitRow(theme.fg("annotation", marker), width)];
+	// The rail names the arrows that move, so the row states only where the window sits, and the free-text key when
+	// the row that would have named it is out of view; the key gives way whole on a narrow card, never cut.
+	const room = Math.max(1, width - 2);
+	const range = { start: start + 1, end, total: layout.rows.length, unit: "options" };
+	const bare = positionRow(theme, range, room);
+	const pointed = otherHidden ? positionRow(theme, { ...range, keys: [OTHER_POINTER] }, Number.POSITIVE_INFINITY) : bare;
+	const position = visibleWidth(pointed) <= room ? pointed : bare;
+	return [...visible, fitRow(`  ${position}`, width)];
 }
 
 class AskUserOverlayView implements Component {
@@ -569,7 +573,8 @@ class AskUserOverlayView implements Component {
 	/** Whether the last option layout had to window its list. */
 	private controlWindowed = false;
 	private ledgerExpanded = false;
-	private detailsExpanded = false;
+	/** Whether `?` flipped the request facts away from where this tier shows them. */
+	private detailsToggled = false;
 	private presentation: DecisionPresentation = DEFAULT_ASK_USER_PRESENTATION;
 	/** performance.now() before which input other than Esc is dropped. */
 	private inputGuardUntil = 0;
@@ -601,7 +606,7 @@ class AskUserOverlayView implements Component {
 		);
 		this.list = null;
 		this.text = null;
-		this.detailsExpanded = false;
+		this.detailsToggled = false;
 		this.resetQuestionScroll();
 		this.rebuildControl();
 		this.startCountdown(round?.unattended);
@@ -685,51 +690,43 @@ class AskUserOverlayView implements Component {
 	 * The timer row: time left and the automatic outcome while it runs, then a
 	 * held line that stays for the rest of the round, so the operator can tell a
 	 * paused timer from one that was never there. Nothing about it implies work.
+	 * It is the source's sentence for the case at hand, on one row where it fits
+	 * and wrapped under its mark where it does not; never cut, at any fit.
 	 */
 	private renderCountdown(width: number, headers: boolean): string[] {
 		const countdown = this.countdown;
 		if (countdown === null) return [];
-		const theme = clioTheme();
 		if (countdown.state() === "held") {
 			// The keys are the rail's; this row only says the clock stopped, which nothing else on screen says.
-			const line = headers
-				? `${GLYPH.phaseBlocked} no time limit now · nothing is chosen until you answer`
-				: `${GLYPH.phaseBlocked} no time limit now`;
-			return headers
-				? wrapTextWithAnsi(theme.fg("annotation", line), width)
-				: [fitRow(theme.fg("annotation", line), width)];
+			return this.hangingRows(
+				"annotation",
+				GLYPH.phaseBlocked,
+				headers ? `no time limit now${SEP}nothing is chosen until you answer` : "no time limit now",
+				width,
+			);
 		}
 		const left = countdown.remainingMs();
 		if (left === null) return [];
 		const remaining = formatCountdown(left);
-		if (!headers) {
-			// The widest sentence that fits. `4:57 then recommended · key holds` read as a fragment, so
-			// every form keeps a verb; the outcome is what gives way, never the time or the key that holds it.
-			const outcome = this.unattendedOutcomeShort();
-			const candidates = [
-				`${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()} · any key holds`,
-				`${GLYPH.warn} ${remaining} left, then ${outcome} · any key holds`,
-				`${GLYPH.warn} ${remaining}, then ${outcome} · key holds`,
-				// The option rows mark the pick as recommended, so the narrowest form can leave the name to them.
-				...(this.presentation.tier === "outward" || this.operatorOnly() || this.escapes()
-					? []
-					: [`${GLYPH.warn} ${remaining}, then CLIO Coder picks · key holds`]),
-			];
-			const fits = candidates.find((candidate) => visibleWidth(candidate) <= width);
-			if (fits !== undefined) return [fitRow(theme.fg("warning", fits), width)];
-			const frame = `${GLYPH.warn} ${remaining}, then  · key holds`;
-			const cut = truncateToWidth(outcome, Math.max(1, width - visibleWidth(frame)), GLYPH.ellipsis, false);
-			return [fitRow(theme.fg("warning", `${GLYPH.warn} ${remaining}, then ${cut} · key holds`), width)];
-		}
-		return wrapTextWithAnsi(
-			theme.fg(
+		if (width < NARROW_TIMER_WIDTH) {
+			return this.hangingRows(
 				"warning",
-				this.operatorOnly()
-					? `${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()}: nothing is chosen and the turn ends. Any key holds.`
-					: `${GLYPH.warn} No answer in ${remaining} ${this.unattendedOutcome()} and CLIO Coder continues. Any key holds.`,
-			),
-			width,
-		);
+				GLYPH.warn,
+				`${remaining} left, then ${this.unattendedOutcomeShort()}. Any key holds.`,
+				width,
+			);
+		}
+		const sentence = this.operatorOnly()
+			? `No answer in ${remaining} ${this.unattendedOutcome()}: nothing is chosen and the turn ends. Any key holds.`
+			: `No answer in ${remaining} ${this.unattendedOutcome()} and CLIO Coder continues. Any key holds.`;
+		return this.hangingRows("warning", GLYPH.warn, sentence, width);
+	}
+
+	/** A marked sentence wrapped under its text, so a second row reads as the same statement. */
+	private hangingRows(role: ClioToken, mark: string, text: string, width: number): string[] {
+		const theme = clioTheme();
+		const lead = `${mark} `;
+		return wrapLabeledValue(lead, text, width).map((line) => theme.fg(role, line));
 	}
 
 	cancel(): void {
@@ -749,10 +746,6 @@ class AskUserOverlayView implements Component {
 	/** True while the overlay is holding a question the operator has to answer. */
 	isDecisionPending(): boolean {
 		return this.phase === "asking";
-	}
-
-	decisionTitle(): string {
-		return this.presentation.title;
 	}
 
 	interviewTitle(): string | undefined {
@@ -852,7 +845,7 @@ class AskUserOverlayView implements Component {
 			return;
 		}
 		if (data === "?") {
-			this.detailsExpanded = !this.detailsExpanded;
+			this.detailsToggled = !this.detailsToggled;
 			this.deps.requestRender();
 			return;
 		}
@@ -892,7 +885,7 @@ class AskUserOverlayView implements Component {
 		});
 		return Array.from({ length: Math.min(this.maxInnerRows(), Math.max(menu.length, body.length)) }, (_, index) => {
 			const left = menu[index] ?? "";
-			return `${left}${" ".repeat(Math.max(0, menuWidth - visibleWidth(left)))}  ${theme.fg("border", "│")}  ${body[index] ?? ""}`;
+			return `${left}${" ".repeat(Math.max(0, menuWidth - visibleWidth(left)))}  ${theme.fg("border", GLYPH.rail)}  ${body[index] ?? ""}`;
 		});
 	}
 
@@ -903,13 +896,13 @@ class AskUserOverlayView implements Component {
 		const question = this.currentQuestion();
 		if (!question) return emptyState(clioTheme(), "No questions.", safeWidth);
 		const compact = maxRows <= COMPACT_BODY_ROWS;
-		for (const fit of compact ? COMPACT_BODY_FITS : BODY_FITS) {
+		for (const fit of BODY_FITS) {
 			const attempt = this.composeSettled(question, safeWidth, hasMenu, maxRows, fit);
 			if (attempt.fits) return attempt.rows;
 		}
-		// Nothing lists every choice, so the list windows around the focused one.
-		const fallback = compact ? COMPACT_BODY_FITS[COMPACT_BODY_FITS.length - 1] : TIGHT_FIT;
-		return this.composeSettled(question, safeWidth, hasMenu, maxRows, fallback ?? TIGHT_FIT).rows;
+		// Nothing lists every choice whole, so the list windows around the focused one; a short card gives the window
+		// its header and legend rows too.
+		return this.composeSettled(question, safeWidth, hasMenu, maxRows, compact ? BARE_FIT : TIGHT_FIT).rows;
 	}
 
 	/**
@@ -1002,7 +995,7 @@ class AskUserOverlayView implements Component {
 		// spent on a question that then overflows, they vanish once the scroll key takes a legend row and the
 		// layout never settles on whether the question overflows.
 		const spacingRoom = Math.min(controlBudget, freeRows - body.length);
-		const control = this.renderControlLines(width, controlBudget, fit.detail, otherPointer, spacingRoom);
+		const control = this.renderControlLines(width, controlBudget, otherPointer, spacingRoom);
 		const movedDetails = this.optionDetailRows.length > 0;
 		body.push(...this.optionDetailRows);
 		const ledgerBudget = Math.max(
@@ -1040,7 +1033,7 @@ class AskUserOverlayView implements Component {
 	private harnessPosition(): string {
 		const interview = this.harnessInterview;
 		if (!interview) return "";
-		return `Step ${interview.step}${interview.total === undefined ? "" : ` of ${interview.total}`} · Question ${this.index + 1} of ${this.questions.length}`;
+		return `Step ${interview.step}${interview.total === undefined ? "" : ` of ${interview.total}`}${SEP}Question ${this.index + 1} of ${this.questions.length}`;
 	}
 
 	/** Where the round stands on one row, for a body that has given up its header rows. */
@@ -1065,7 +1058,7 @@ class AskUserOverlayView implements Component {
 		const escKeeps = kept > 0 && this.escapeAtRoot() ? kept : 0;
 		const keepsWhole = "kept if you cancel";
 		const keepsNamed = `answer${escKeeps === 1 ? "" : "s"} kept if you cancel${pointer}`;
-		const fits = (parts: string[]): boolean => visibleWidth(parts.join(" · ")) <= width;
+		const fits = (parts: string[]): boolean => visibleWidth(parts.join(SEP)) <= width;
 		const position = this.questions.length > 1 ? `Q${this.index + 1} of ${this.questions.length}` : null;
 		const shortPosition = this.questions.length > 1 ? [`Q${this.index + 1}/${this.questions.length}`] : [];
 		let parts: string[];
@@ -1082,7 +1075,7 @@ class AskUserOverlayView implements Component {
 			if (escKeeps > 0 && !fits(full) && !fits([...narrow, keepsCounted]) && narrow.length > 0) {
 				const counted = `${escKeeps} ${keepsNamed}`;
 				const consequence = fits([counted]) ? counted : keepsCounted;
-				return [narrow.join(" · "), consequence].map((row) =>
+				return [narrow.join(SEP), consequence].map((row) =>
 					fitRow(theme.style("positionCount", row, { bold: true }), width),
 				);
 			}
@@ -1100,7 +1093,7 @@ class AskUserOverlayView implements Component {
 			for (const part of optional) if (fits([...parts, part])) parts.push(part);
 		}
 		if (parts.length === 0) return [];
-		return [fitRow(theme.style("positionCount", parts.join(" · "), { bold: true }), width)];
+		return [fitRow(theme.style("positionCount", parts.join(SEP), { bold: true }), width)];
 	}
 
 	/** The key that moves between this round's questions, as the rail would name it; null with one question. */
@@ -1217,11 +1210,12 @@ class AskUserOverlayView implements Component {
 					},
 				},
 			!text &&
-				this.detailsExpanded && {
+				this.detailsToggled &&
+				this.requestFactsShown() && {
 					verb: "hide details",
 					short: "hide",
 					back: () => {
-						this.detailsExpanded = false;
+						this.detailsToggled = false;
 					},
 				},
 			!text &&
@@ -1313,29 +1307,44 @@ class AskUserOverlayView implements Component {
 	/** The rail hint for a rail of `cells`; the legend in the body draws what this drops. */
 	railHint(cells: number): string {
 		const fitted = fitHintEntries(this.railKept(this.railEntries(), cells), cells);
-		const withDrag = `${fitted} · drag to select/copy`;
+		const withDrag = `${fitted}${SEP}drag to select/copy`;
 		return visibleWidth(withDrag) <= cells ? withDrag : fitted;
 	}
 
 	/**
-	 * The classified context, folded.
+	 * Detailed shows every overlay's full detail inline (`pickerDetail`), so the
+	 * request facts sit on the card there without a key; compact and standard
+	 * keep them behind `?`.
+	 */
+	private requestFactsInline(): boolean {
+		return tierPolicy().pickerDetail === "pane";
+	}
+
+	/** `?` flips the request facts at every tier; the tier only sets where they start. */
+	private requestFactsShown(): boolean {
+		return this.requestFactsInline() !== this.detailsToggled;
+	}
+
+	/**
+	 * The classified context: who asks, the effect and whether it can be undone.
 	 *
 	 * Tier, requester, effect, and reversibility used to take four rows above
 	 * every question, and for a local conversational answer they say nothing the
-	 * title ("Answer a question") does not. They render on `?`; a tier that is
-	 * not the default one keeps its one-line identity on screen because that is
-	 * the row that says the answer reaches outside the workspace.
+	 * title does not. They render on `?`, and inline at detailed; a decision tier
+	 * that is not the default one keeps its one-line identity on screen because
+	 * that is the row that says the answer reaches outside the workspace.
 	 */
 	private renderDecisionContext(width: number): string[] {
 		const theme = clioTheme();
 		const lines: string[] = [];
 		const defaultTier = this.presentation.tier === DEFAULT_ASK_USER_PRESENTATION.tier;
-		if (!defaultTier || this.detailsExpanded) {
+		const shown = this.requestFactsShown();
+		if (!defaultTier || shown) {
 			const tier = theme.style(this.presentation.semanticToken, this.presentation.tierLabel, { bold: true });
 			const requested = theme.fg("annotation", `requested by ${this.presentation.requestedByCopy}`);
-			lines.push(fitRow(`${tier}${dotSep(theme)}${requested}`, width));
+			lines.push(...wrapTextWithAnsi(`${tier}${dotSep(theme)}${requested}`, width));
 		}
-		if (this.detailsExpanded) {
+		if (shown) {
 			lines.push(
 				...wrapTextWithAnsi(
 					`${theme.fg("annotation", "Effect:")} ${theme.fg("decisionExplanation", this.presentation.authorizationCopy)}`,
@@ -1369,7 +1378,7 @@ class AskUserOverlayView implements Component {
 		const theme = clioTheme();
 		const lines = [
 			titleRow(theme, "Interview", width, {
-				meta: this.history.length > 0 ? "answer sent · waiting for the next question" : "waiting for the first question",
+				meta: this.history.length > 0 ? `answer sent${SEP}waiting for the next question` : "waiting for the first question",
 			}),
 		];
 		const ledger = this.renderAnswerLedger(width, Math.max(1, maxRows - lines.length));
@@ -1492,7 +1501,7 @@ class AskUserOverlayView implements Component {
 			parts.push(answered === total ? "all answered" : `${answered} answered`);
 		}
 		if (this.roundsAnswered > 0) parts.push(`Round ${this.roundsAnswered + 1}`);
-		return parts.join(" · ");
+		return parts.join(SEP);
 	}
 
 	private renderQuestionStrip(width: number, spacing = true): string[] {
@@ -1522,7 +1531,6 @@ class AskUserOverlayView implements Component {
 	private renderControlLines(
 		width: number,
 		rowBudget: number,
-		detail: OptionDetail = "all",
 		otherPointer: string | null = null,
 		spacingRoom = rowBudget,
 	): string[] {
@@ -1532,7 +1540,7 @@ class AskUserOverlayView implements Component {
 		if (state?.mode === "text" && question) {
 			return [...(this.text?.render(width) ?? [""]), ...this.textPreview(question, state, width)];
 		}
-		return this.renderSelectControl(width, rowBudget, detail, otherPointer, spacingRoom);
+		return this.renderSelectControl(width, rowBudget, otherPointer, spacingRoom);
 	}
 
 	/** Earlier rounds first, then this round's answered siblings. */
@@ -1571,7 +1579,7 @@ class AskUserOverlayView implements Component {
 			// A narrow box cut it to `kept if you canc…` (B06), so the count gives up words before the consequence does.
 			const n = entries.length;
 			const forms = this.escapeAtRoot()
-				? [`${count} · kept if you cancel`, `${n} answer${n === 1 ? "" : "s"} kept if you cancel`, `${n} kept on cancel`]
+				? [`${count}${SEP}kept if you cancel`, `${n} answer${n === 1 ? "" : "s"} kept if you cancel`, `${n} kept on cancel`]
 				: [count];
 			const row = forms.find((form) => visibleWidth(form) <= width) ?? forms[forms.length - 1] ?? count;
 			return [...(fit.spacing ? [""] : []), fitRow(theme.fg("annotation", row), width)];
@@ -1595,8 +1603,8 @@ class AskUserOverlayView implements Component {
 						"",
 						sectionRule(theme, width, "Answers", {
 							meta:
-								canGoBack && visibleWidth(`Answers ${count} · [${MOVE_KEY}] change one`) + 8 <= width
-									? `${count} · [${MOVE_KEY}] change one`
+								canGoBack && visibleWidth(`Answers ${count}${SEP}[${MOVE_KEY}] change one`) + 8 <= width
+									? `${count}${SEP}[${MOVE_KEY}] change one`
 									: count,
 						}),
 					]
@@ -1614,7 +1622,6 @@ class AskUserOverlayView implements Component {
 	private renderSelectControl(
 		width: number,
 		rowBudget: number,
-		detail: OptionDetail,
 		otherPointer: string | null,
 		spacingRoom: number,
 	): string[] {
@@ -1627,7 +1634,7 @@ class AskUserOverlayView implements Component {
 			0,
 			items.findIndex((item) => item.value === selectedItem.value),
 		);
-		const layout = layoutOptionRows(items, focusedIndex, width, this.recommendedIndex(question), detail, otherPointer);
+		const layout = layoutOptionRows(items, focusedIndex, width, this.recommendedIndex(question), otherPointer);
 		const totalRows = layout.rows.reduce((sum, rows) => sum + rows.length, 0);
 		this.controlWindowed = totalRows > rowBudget;
 		if (totalRows + items.length <= Math.min(rowBudget, spacingRoom)) {
@@ -2043,9 +2050,9 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 		adaptiveHeight: true,
 		// The interview names waiting, sent and between-rounds in its own body.
 		ownsStatus: true,
-		title: () =>
-			view.interviewTitle() ??
-			(view.isDecisionPending() ? `CLIO Coder interview · ${view.decisionTitle()}` : "CLIO Coder interview"),
+		// Chrome per spec 2.5: the rule names the surface, and the body's own rows say who asks and what kind of
+		// decision it is. A harness interview and a confirmation keep their own titles.
+		title: () => view.interviewTitle() ?? "Interview",
 		tone: () => (view.isDecisionPending() ? view.decisionTone() : undefined),
 		awaitingInput: () => view.isDecisionPending(),
 		footerHint: (innerWidth) => view.railHint(Math.max(1, innerWidth - 3)),
