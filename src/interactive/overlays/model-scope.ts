@@ -15,7 +15,7 @@
 import type { ThinkingLevel } from "../../core/defaults.js";
 import { type Component, type OverlayHandle, type TUI, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { FocusBox, fitHintEntries, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme } from "../theme/index.js";
+import { clioTheme, GLYPH } from "../theme/index.js";
 import { type ChoiceItem, ChoiceList } from "./settings-submenus.js";
 
 export const MODEL_SCOPE_OVERLAY_WIDTH = 72;
@@ -55,7 +55,7 @@ export interface OpenModelScopeOverlayDeps {
 /** The swap as the operator typed it, for the dialog title. */
 export function formatPendingModelScope(ref: PendingModelScope): string {
 	const thinking = ref.thinkingLevel ? ` with thinking ${ref.thinkingLevel}` : "";
-	return `${ref.target} · ${ref.model}${thinking}`;
+	return `${ref.target} ${GLYPH.sep} ${ref.model}${thinking}`;
 }
 
 /** Three outcomes, least durable first, matching the settings center's order. */
