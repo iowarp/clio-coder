@@ -462,7 +462,7 @@ for (const mode of ["partial", "thinking", "empty"] as const) {
 			strictEqual(f.audit.length, 1);
 			const live = f.panel.render(120).map(stripTerminalSequences).join("\n");
 			if (mode === "partial") strictEqual(live.split(PARTIAL).length - 1, 1, live);
-			match(live, /cancelled/iu);
+			match(live, /⊘ Stopped/u);
 			doesNotMatch(live, /LiteLLM route|\/model/u);
 
 			const replay = createChatPanel({ getOutputStyle: () => "detailed" });
@@ -471,7 +471,7 @@ for (const mode of ["partial", "thinking", "empty"] as const) {
 			const resumed = resumedLines.map(stripTerminalSequences).join("\n");
 			if (mode === "partial") strictEqual(resumed.split(PARTIAL).length - 1, 1, resumed);
 			if (mode === "thinking") strictEqual(resumed.split(THOUGHT).length - 1, 1, resumed);
-			match(resumed, /cancelled/iu);
+			match(resumed, /⊘ Stopped/u);
 			doesNotMatch(resumed, /LiteLLM route|\/model/u);
 			const meta = f.session.current();
 			ok(meta);
@@ -536,7 +536,7 @@ it("the argument guard remains visible live and after persistence without an ope
 			const rendered = panel.render(120).map(stripTerminalSequences).join("\n");
 			match(rendered, /Tool argument generation stopped/);
 			match(rendered, /byte safety ceiling/);
-			doesNotMatch(rendered, /Cancelled at your request|\bCancelled\b|provider retry/);
+			doesNotMatch(rendered, /Cancelled at your request|\bCancelled\b|⊘ Stopped|provider retry/);
 		}
 		const end = f.events.filter((event) => event.type === "agent_end").at(-1);
 		ok(end?.type === "agent_end");
@@ -617,12 +617,12 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			const live = rows.map(stripTerminalSequences).join("\n");
 			const theme = clioTheme();
 			if (source === "stream_cancel") {
-				// The Cancelled outcome is the one report of an Esc.
-				match(live, /⊘ Cancelled\b/u);
-				strictEqual(live.split("Cancelled").length - 1, 1, live);
+				// The Stopped outcome is the one report of an Esc.
+				match(live, /⊘ Stopped\b/u);
+				strictEqual(live.split("Stopped").length - 1, 1, live);
 				doesNotMatch(live, /\[aborted\]|active response cancelled/u);
 				doesNotMatch(live, new RegExp(GLYPH.warn, "u"));
-				const row = rows.find((line) => stripTerminalSequences(line).includes("Cancelled"));
+				const row = rows.find((line) => stripTerminalSequences(line).includes("Stopped"));
 				ok(row?.includes(GLYPH.cancelled), row);
 			} else {
 				match(live, /! loop guard stopped repeated calls\./u);
@@ -642,9 +642,9 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			// Live and resumed receipts read the turn's spend from the same view: the sent call reported no usage, so its
 			// counts are the journaled estimate as a lower bound, never a zero (#430, #434 §11.3).
 			for (const rendered of [live, resumed]) {
-				match(rendered, /⊘ Cancelled · /u);
-				match(rendered, /in ≥~\S+ · out ≥~0 · [^\n]*1 call had no usage data/u);
-				strictEqual(rendered.split("Cancelled").length - 1, 1, rendered);
+				match(rendered, /⊘ Stopped · /u);
+				match(rendered, /in ≥≈\S+ · out ≥≈0 · [^\n]*1 call had no usage data/u);
+				strictEqual(rendered.split("Stopped").length - 1, 1, rendered);
 				doesNotMatch(rendered, /✦|\[aborted\]/u);
 			}
 			strictEqual(resumed.match(/in .+? · out \S+/u)?.[0], live.match(/in .+? · out \S+/u)?.[0]);
@@ -653,13 +653,13 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 				exportedAt: "2026-09-07T00:00:00Z",
 				ansiLines: resumedLines,
 			}).replace(/<[^>]*>/gu, "");
-			match(html, /⊘ Cancelled · /u);
-			match(html, /in ≥~\S+ · out ≥~0 · [^\n]*1 call had no usage data/u);
-			strictEqual(html.split("Cancelled").length - 1, 1, html);
+			match(html, /⊘ Stopped · /u);
+			match(html, /in ≥≈\S+ · out ≥≈0 · [^\n]*1 call had no usage data/u);
+			strictEqual(html.split("Stopped").length - 1, 1, html);
 			if (source === "loop_guard") {
 				for (const rendered of [resumed, html]) {
 					match(rendered, /! loop guard stopped repeated calls\./u);
-					ok(rendered.indexOf("⊘ Cancelled") < rendered.indexOf("! loop guard"));
+					ok(rendered.indexOf("⊘ Stopped") < rendered.indexOf("! loop guard"));
 				}
 			} else doesNotMatch(resumed, /!|Cancelled at your request\./u);
 			const historicalEntries = f.entries().map((entry) => {
@@ -741,7 +741,7 @@ it("a reply the repetition guard stops after a plain and a changed recovery fail
 		// One turn, one outcome footer, however many recoveries it took (bt-48-1). The guard stopped it, not the operator.
 		const rendered = f.panel.render(120).map(stripTerminalSequences).join("\n");
 		strictEqual(rendered.split("Generation stopped").length - 1, 1, rendered);
-		doesNotMatch(rendered, /Cancelled/u);
+		doesNotMatch(rendered, /Cancelled|⊘ Stopped/u);
 		const envelope = [...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])][0];
 		match(envelope?.outcomeDetail ?? "", /^\[CLIO Coder\] stopped a model response that kept repeating itself/u);
 		doesNotMatch(stderr.join(""), /target 'cancellation-fixture'|Request was aborted/u);
@@ -1182,7 +1182,7 @@ it("a looping stream is stopped and re-prompted once with a nudge, without resen
 		const rendered = f.panel.render(120).map(stripTerminalSequences).join("\n");
 		match(rendered, /PONG/u);
 		// The recovered turn ends once, as Done: the stopped attempt is not a Cancelled outcome (bt-48-1).
-		doesNotMatch(rendered, /Cancelled|✗ \[aborted\]/u);
+		doesNotMatch(rendered, /Cancelled|⊘ Stopped|✗ \[aborted\]/u);
 		strictEqual(rendered.split("✓ Done").length - 1, 1, rendered);
 	} finally {
 		await f.close();

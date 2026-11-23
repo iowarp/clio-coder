@@ -171,7 +171,7 @@ test("actual final failure after tool use retains a failed outcome while success
 				payload: { stopReason, errorMessage: "Request ended", content: [{ type: "text", text: "Final response" }], usage },
 			},
 		]);
-		assert.match(output, stopReason === "error" ? /Failed/ : stopReason === "aborted" ? /Cancelled/ : /Done/);
+		assert.match(output, stopReason === "error" ? /Failed/ : stopReason === "aborted" ? /Stopped/ : /Done/);
 		if (stopReason !== "stop") assert.doesNotMatch(output, /\bDone\b/);
 	}
 });
@@ -1220,9 +1220,9 @@ test("a narrow receipt keeps the cached share beside the amounts it is part of (
 			.map(stripTerminalSequences)
 			.filter((line) => line.length > 0)
 			.at(-1);
-	assert.equal(receipt(120), "✓ Done · 0ms · 2 calls · in 40k · out 8k · cached 100k · 00:00");
+	assert.equal(receipt(120), "✓ Done · 0ms · 2 calls · in 40.0k · out 8.0k · cached 100k · 00:00");
 	// Too narrow for every fact: the call count yields before `cached`, the rest of the prompt beside `in`.
-	assert.equal(receipt(60), "✓ Done · 0ms · in 40k · out 8k · cached 100k · 00:00");
+	assert.equal(receipt(60), "✓ Done · 0ms · in 40.0k · out 8.0k · cached 100k · 00:00");
 	// Narrower still, the amounts leave together instead of reading the uncached remainder as the whole prompt, and a
 	// mark says they were cut, so the call count is not read as the whole spend (bt-11 i22-d).
 	assert.equal(receipt(40), "✓ Done · 0ms · 2 calls · … · 00:00");
