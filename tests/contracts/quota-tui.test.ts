@@ -174,7 +174,8 @@ test("footer keeps unassociated accounts out of compact rows and the dashboard",
 		columns = 50;
 		footer.refresh();
 		const narrow = footer.view.render(50);
-		strictEqual(narrow.length, 1);
+		// Standard keeps its hint row from 44 columns up, so the composer does not move.
+		strictEqual(narrow.length, 2);
 		doesNotMatch(plain(narrow), /Codex|weekly/);
 		ok(narrow.every((line) => visibleWidth(line) <= 50));
 		columns = 160;
