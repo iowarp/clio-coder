@@ -2144,6 +2144,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let compactionLifecycleTrigger: CompactionTrigger = "auto";
 	let compactionFacts: ContextOperationFact[] = [];
 	let compactionTokens: { before: number; after: number; basis: "runtime-estimate" } | undefined;
+	/** The summary line a completed compaction raised, persisted on its operation so a resumed card states it. */
+	let compactionNotice: string | undefined;
 	let compactionConclusion = "Context compaction finished";
 	let compactionActivityPhase: ContextActivityPhase = "compact";
 	const emitCompactionActivity = (
@@ -2494,6 +2496,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const operationCwd = process.cwd();
 		compactionFacts = [];
 		compactionTokens = undefined;
+		compactionNotice = undefined;
 		compactionConclusion = "No useful reduction available";
 		let recordOutcome = true;
 		compactionOperation = createContextOperation(
@@ -2948,17 +2951,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		noGainSummaryDigest = null;
 		summaryRearm = { tokensAfter, band: rearmBand(result.summary.length) };
 
-		deps.emitNotice(
-			renderCompactionSummaryLine({
-				messagesSummarized: result.conversationMessagesSummarized,
-				summaryChars: result.summary.length,
-				tokensBefore,
-				tokensAfter,
-				isSplitTurn: result.isSplitTurn,
-			}),
-			"info",
-			CONTEXT_STATUS_NOTICE_KEY,
-		);
+		compactionNotice = renderCompactionSummaryLine({
+			messagesSummarized: result.conversationMessagesSummarized,
+			summaryChars: result.summary.length,
+			tokensBefore,
+			tokensAfter,
+			isSplitTurn: result.isSplitTurn,
+		});
+		deps.emitNotice(compactionNotice, "info", CONTEXT_STATUS_NOTICE_KEY);
 		// The requireFit summary cleared what the fold could not: the next main request pins the same A4 count.
 		if (requiredFit) pinOverflowFit(agentRuntime, pendingUserText);
 		refreshLiveBudget(pendingUserText);
@@ -2988,6 +2988,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					compactionOperation?.finish(outcome, compactionConclusion, {
 						facts: compactionFacts,
 						...(compactionTokens ? { tokens: compactionTokens } : {}),
+						...(compactionNotice !== undefined ? { notice: compactionNotice } : {}),
 					});
 					if (compactionLifecycleStarted)
 						deps.bus?.emit("compaction.ended", { trigger: compactionLifecycleTrigger, at: Date.now(), outcome });

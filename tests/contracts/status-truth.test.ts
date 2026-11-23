@@ -1092,7 +1092,7 @@ test("a provider failure leads with a plain sentence and the rail gives the bloc
 	doesNotMatch(presentProviderError("Provider stream ended before a finish reason was received."), /finish reason/u);
 });
 
-test("what just happened borrows the footer slot from a standing warning, never from an error", () => {
+test("a standing warning keeps the footer slot over what just happened, and compact shows neither info nor success", () => {
 	const notice = (
 		id: string,
 		level: Notification["level"],
@@ -1108,8 +1108,10 @@ test("what just happened borrows the footer slot from a standing warning, never 
 	});
 	const standing = notice("standing", "warning", 1_000, 121_000);
 	const applied = notice("applied", "success", 5_000, 17_000);
-	strictEqual(topNotification([standing, applied], 6_000)?.id, "applied");
+	strictEqual(topNotification([standing, applied], 6_000)?.id, "standing");
 	strictEqual(topNotification([standing, applied], 18_000)?.id, "standing");
+	strictEqual(topNotification([applied], 6_000, "info")?.id, "applied");
+	strictEqual(topNotification([applied], 6_000, "warning"), undefined);
 	strictEqual(topNotification([standing, notice("older", "info", 500, 12_000)], 6_000)?.id, "standing");
 	strictEqual(topNotification([standing, notice("tip: keys", "info", 5_000, 17_000)], 6_000)?.id, "standing");
 	strictEqual(topNotification([notice("fault", "error", 1_000, null), applied], 6_000)?.id, "fault");
@@ -1302,18 +1304,18 @@ test("a permission_hold frame round-trips at its version and a worker's backstop
 test("a worker's wait states when it ends, what happens then, and that it is held", () => {
 	const fold = createWorkerProgressFold();
 	fold.observe({ type: "clio_coder_permission_escalated", payload: { requestId: "ask", tool: "bash" } });
-	strictEqual(workerActivityWords(fold.snapshot()), "waiting for your approval", "no window, no claimed end");
+	strictEqual(workerActivityWords(fold.snapshot()), "needs approval", "no window, no claimed end");
 	fold.observe({
 		type: "clio_coder_permission_window",
 		payload: { requestId: "ask", held: false, expiresAt: 119_000, fallback: "deny" },
 	});
-	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "waiting for your approval · denied in 1:59");
+	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "needs approval · denied in 1:59");
 	strictEqual(workerActivityWords(fold.snapshot(), { now: 0, room: 30 }), "your approval · denied in 1:59");
 	fold.observe({
 		type: "clio_coder_permission_window",
 		payload: { requestId: "ask", held: true, expiresAt: 822_000, fallback: "fail" },
 	});
-	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "waiting for your approval · held · run fails in 13:42");
+	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "needs approval · held · run fails in 13:42");
 	fold.observe({ type: "clio_coder_permission_resolved", payload: { requestId: "ask", tool: "bash" } });
 	strictEqual(fold.snapshot().approvalWindow, undefined);
 	strictEqual(fold.snapshot().awaitingApproval, undefined);
@@ -1582,8 +1584,8 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 			},
 			width,
 		);
-	match(facts(100) ?? "", /^coder waiting for your approval · denied in 1:59/u);
-	match(facts(40) ?? "", /^coder your approval · denied in 1:59/u);
+	match(facts(100) ?? "", /^coder needs approval · denied in 1:59/u);
+	match(facts(40) ?? "", /^coder needs approval · denied in 1:59/u);
 	// A session that does not hold the ask cannot answer it (bt-11 l): the worker reads as running and the ask as its holder's.
 	Object.assign(progress, { approvalWindow: { ...progress.approvalWindow, owner: "session-p" } });
 	match(facts(100) ?? "", /^coder running · approval held by session session-p · denied in 1:59/u);
@@ -1913,8 +1915,8 @@ test("a wait names who it is on and keeps its time left as the room shrinks", ()
 			{ approvalWindow: { expiresAt: 119_000, held, fallback, decider } },
 			{ now: 0, ...(room === undefined ? {} : { room }) },
 		);
-	strictEqual(words("operator"), "waiting for your approval · run fails in 1:59");
-	strictEqual(words("operator", 34), "your approval · run fails in 1:59");
+	strictEqual(words("operator"), "needs approval · run fails in 1:59");
+	strictEqual(words("operator", 34), "needs approval · run fails in 1:59");
 	strictEqual(words("operator", 26), "asks you · fails in 1:59");
 	strictEqual(words("operator", 13), "fails in 1:59");
 	strictEqual(words("operator", 20, true), "held · fails in 1:59");
@@ -2945,10 +2947,14 @@ test("the exit summary counts a finished worker whose validation failed as Fleet
 	}
 	bus.emit("run.started", { runId: "run-d", agentId: "verifier", targetId: "mini", wireModelId: "m" } as never);
 	bus.emit("run.failed", { runId: "run-d", agentId: "verifier", outcome: "canceled" } as never);
-	const card = renderExitSummary(collector.snapshot(), "standard", 120, false).join("\n");
-	match(card, /Workers: 2 validation failed · 1 succeeded · 1 cancelled/u, card);
-	const detail = renderExitSummary(collector.snapshot(), "report", 120, false).join("\n");
-	match(detail, /Workers \(4; 2 validation failed, 1 succeeded, 1 cancelled\)/u, detail);
+	const card = renderExitSummary(collector.snapshot(), "on", 120, false, "standard").join("\n");
+	match(card, /^ {2}workers +2 validation failed · 1 succeeded · 1 cancelled$/mu, card);
+	const detail = renderExitSummary(collector.snapshot(), "on", 120, false, "detailed").join("\n");
+	match(
+		detail,
+		/^ {2}workers +(?=.*verifier run-a validation failed)(?=.*verifier run-b validation failed).*cancelled/mu,
+		detail,
+	);
 	strictEqual(detail.match(/verifier validation failed/gu)?.length, 2, "the timeline says what each run's record says");
 });
 
@@ -2995,8 +3001,8 @@ test("the exit summary counts a failed-over council member once, by its last att
 	} as never);
 	bus.emit("run.completed", { runId: "seal-1", agentId: "council-synthesis", outcome: "succeeded" } as never);
 	const snapshot = collector.snapshot();
-	const card = renderExitSummary(snapshot, "standard", 120, false).join("\n");
-	match(card, /Workers: 1 failed · 1 succeeded/u, card);
+	const card = renderExitSummary(snapshot, "on", 120, false, "standard").join("\n");
+	match(card, /^ {2}workers +1 failed · 1 succeeded$/mu, card);
 	deepStrictEqual(
 		(snapshot?.workers ?? []).map((worker) => worker.runId),
 		["broken-r2", "alpha-r0"],

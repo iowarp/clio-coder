@@ -86,3 +86,14 @@ export function groupWrappedRows(rows: readonly string[], continues: (row: strin
 export function previewBudget(limit: number, terminalRows = 40): number {
 	return Math.min(limit, Math.max(2, Math.floor((terminalRows - 8) / 2)));
 }
+
+/**
+ * Text a preview shows, before its row budget applies: leading and trailing blank lines removed and each run of blank
+ * lines collapsed to one, so no preview opens or closes on an empty row or spends its budget on a gap.
+ */
+export function tidyPreviewText(text: string): string {
+	return text
+		.replace(/^(?:[ \t]*\r?\n)+/u, "")
+		.replace(/(?:\r?\n[ \t]*)+$/u, "")
+		.replace(/\r?\n(?:[ \t]*\r?\n){2,}/gu, "\n\n");
+}

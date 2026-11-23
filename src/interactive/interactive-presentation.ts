@@ -80,7 +80,7 @@ import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
 import { buildFooterDashboard } from "./footer/dashboard.js";
 import type { ComposerKeyContext } from "./footer/key-hints.js";
-import { besideCardDetail, type LiveWorkFacts, liveWorkStrip, railDetail } from "./footer/live-work.js";
+import { type LiveWorkFacts, liveWorkStrip, overlayRunState, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter, type Notification, routeAppliedNoticeKey } from "./footer/notifications.js";
 import { routeFirstOutput } from "./footer/silence-note.js";
@@ -495,6 +495,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		...(deps.getProjectConfigReminder ? { getProjectConfigReminder: deps.getProjectConfigReminder } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		// The launchpad's `last here` fact; session history loads lazily, off the Stage 0 closure.
+		readLastSession: async (cwd, now) => {
+			const prior = (await import("../domains/session/history.js")).latestPriorSession(cwd, "", now);
+			return prior && { lastActiveAt: prior.lastActiveAt, preview: prior.firstMessagePreview, name: prior.name };
+		},
 	});
 	// A boot-time `--continue`/`--session` resume opens onto an existing
 	// conversation, so the launchpad's fresh-start onboarding would be a lie
@@ -954,11 +959,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return { ...readiness, ...(quiet ? { label: "is idle", glyph: GLYPH.queued } : {}), detail };
 		},
 		getLiveWorkStrip: (width, escVerb) => liveWorkStrip(clioTheme(), currentLiveWork(), width, escVerb),
-		getBesideCard: (room) =>
-			besideCardDetail(currentLiveWork(), room, {
-				streaming: deps.chat.isStreaming(),
-				parked: (deps.getParkedCallCount?.() ?? 0) > 0,
-			}),
+		getBesideCard: (room) => overlayRunState(currentLiveWork(), room),
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
 			: {}),

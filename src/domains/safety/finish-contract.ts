@@ -53,6 +53,20 @@ export const FINISH_CONTRACT_RUN_CHECKS_PREFIX = " Run checks: ";
  */
 export const FINISH_CONTRACT_RAN_CHANGED_PREFIX = " Ran after the edit: ";
 
+/**
+ * Appended when checks passed in this turn but a later call that may change the tree (a commit and its hooks, a
+ * write) came after them (FX-5): they no longer describe the tree, and one run after that call would.
+ */
+export const FINISH_CONTRACT_RETIRED_SUFFIX =
+	" Checks passed earlier in this turn, but a later call that may change the tree came after them; run a check after the last change.";
+
+/** The operator's words for passes a later change retired, shared by the footer and the assessed-done note (FX-5). */
+export function retiredChecksNote(retired: { checks: ReadonlyArray<string>; change: string }): string {
+	const [first = "a check"] = retired.checks;
+	const more = retired.checks.length > 1 ? ` and ${retired.checks.length - 1} more` : "";
+	return `${first}${more} passed before ${retired.change}, and no check ran after it`;
+}
+
 /** The longest failed-check label the operator sees; a longer observed command is cut with an ellipsis. */
 const FAILED_CHECK_LABEL_MAX = 120;
 
@@ -143,6 +157,11 @@ export type FinishContractAssessment =
 			 * redacted, one line, capped). Operator status only: never part of `message`, which reaches the model (CLI-P54).
 			 */
 			failedAfterEdit?: ReadonlyArray<string>;
+			/**
+			 * Passes this turn recorded that a later change retired, and that change, as operator-safe labels (FX-5). Operator
+			 * status only, like `failedAfterEdit`; `message` says it without the labels.
+			 */
+			retiredBy?: { checks: ReadonlyArray<string>; change: string };
 			/** The project quality policy could not be read, so `message` says why rather than naming checks. */
 			policyUnassessable?: true;
 	  };
@@ -329,14 +348,25 @@ function checkFailedSinceLastChange(input: FinishContractInput, scope: Assessmen
 /** The reds that ran on the tree the last change left, as labels safe for an operator surface. */
 function failedAfterEditLabels(input: FinishContractInput, scope: AssessmentScope): string[] {
 	if (input.workspaceRoot === undefined || !capabilityEntries(scope.window).some(failedResult)) return [];
-	return [
-		...new Set(
-			scope.facts().failedAfterChange.map((name) => {
-				const label = sanitizeCallTargetText(redactSecretString(name)).trim();
-				return label.length > FAILED_CHECK_LABEL_MAX ? `${label.slice(0, FAILED_CHECK_LABEL_MAX - 1)}…` : label;
-			}),
-		),
-	].filter((label) => label.length > 0);
+	return [...new Set(scope.facts().failedAfterChange.map(operatorLabel))].filter((label) => label.length > 0);
+}
+
+/** One check or command as a label safe for an operator surface: secrets redacted, one line, capped. */
+function operatorLabel(text: string): string {
+	const label = sanitizeCallTargetText(redactSecretString(text)).trim();
+	return label.length > FAILED_CHECK_LABEL_MAX ? `${label.slice(0, FAILED_CHECK_LABEL_MAX - 1)}…` : label;
+}
+
+/** The passes a later change retired, with that change, as operator-safe labels; null when none did (FX-5). */
+function retiredLabels(
+	input: FinishContractInput,
+	scope: AssessmentScope,
+): { checks: string[]; change: string } | null {
+	const retired = input.workspaceRoot === undefined ? undefined : scope.facts().retired;
+	if (retired === undefined) return null;
+	const checks = [...new Set(retired.checks.map(operatorLabel))].filter((label) => label.length > 0);
+	const change = operatorLabel(retired.change);
+	return checks.length > 0 && change.length > 0 ? { checks, change } : null;
 }
 
 function failedResult(entry: unknown): boolean {
@@ -486,13 +516,15 @@ function assessMutationFinishContract(input: FinishContractInput, scope: Assessm
 	};
 	const ran = changedFilesRunAfterEdit(window, mutatedPaths, input.workspaceRoot);
 	const failedAfterEdit = failedAfterEditLabels(input, scope);
+	const retiredBy = retiredLabels(input, scope);
 	return {
 		kind: "engage",
 		reason: "unvalidated_mutation",
-		message: `${FINISH_CONTRACT_ADVISORY_MESSAGE}${named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, false)}${named(FINISH_CONTRACT_RUN_CHECKS_PREFIX, true)}${ran.length > 0 ? `${FINISH_CONTRACT_RAN_CHANGED_PREFIX}${ran.join(", ")}.` : ""}`,
+		message: `${FINISH_CONTRACT_ADVISORY_MESSAGE}${named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, false)}${named(FINISH_CONTRACT_RUN_CHECKS_PREFIX, true)}${ran.length > 0 ? `${FINISH_CONTRACT_RAN_CHANGED_PREFIX}${ran.join(", ")}.` : ""}${retiredBy !== null ? FINISH_CONTRACT_RETIRED_SUFFIX : ""}`,
 		evidence: [],
 		mutatedPaths,
 		...(failedAfterEdit.length > 0 ? { failedAfterEdit } : {}),
+		...(retiredBy !== null ? { retiredBy } : {}),
 	};
 }
 

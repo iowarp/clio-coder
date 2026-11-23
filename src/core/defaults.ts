@@ -314,19 +314,12 @@ export function nextOutputStyle(style: OutputStyle): OutputStyle {
 export type TuiMode = "regular" | "fullscreen";
 export type FullscreenScrollbar = "hidden" | "auto" | "always";
 export type SmoothStreaming = "off" | "auto" | "on";
-export const EXIT_SUMMARY_STYLES = ["auto", "brief", "standard", "report", "off"] as const;
+/** Whether a clean exit prints the session summary; `outputDetail` sizes it. */
+export const EXIT_SUMMARY_STYLES = ["on", "off"] as const;
 export type ExitSummaryStyle = (typeof EXIT_SUMMARY_STYLES)[number];
 
 export function normalizeExitSummaryStyle(value: unknown): ExitSummaryStyle | undefined {
 	return EXIT_SUMMARY_STYLES.find((style) => style === value);
-}
-
-export function resolveExitSummaryStyle(
-	style: ExitSummaryStyle,
-	outputStyle: OutputStyle,
-): Exclude<ExitSummaryStyle, "auto"> {
-	if (style !== "auto") return style;
-	return outputStyle === "compact" ? "brief" : outputStyle === "detailed" ? "report" : "standard";
 }
 
 export interface InterfaceSettings {
@@ -1024,7 +1017,7 @@ export const DEFAULT_SETTINGS = {
 		} as SafetyJudgeSettings,
 	} as SafetySettings,
 	interface: {
-		exitSummary: "auto",
+		exitSummary: "on",
 		demo: true,
 		terminalProgress: false,
 		outputDetail: "standard",
@@ -1315,8 +1308,8 @@ safety:
     deny: []
 
 interface:
-  # Clean-exit summary: auto follows outputDetail; brief | standard | report | off override it.
-  exitSummary: auto
+  # Clean-exit summary: on | off. outputDetail sizes it; off prints only how to resume.
+  exitSummary: on
   # Capability guidance during project work; disable for a quiet experience.
   demo: true
   outputDetail: standard

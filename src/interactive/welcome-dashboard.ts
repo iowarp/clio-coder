@@ -1,7 +1,11 @@
 import { readClioVersionLabel } from "../core/build-info.js";
 import type { ClioSettings } from "../core/config.js";
 import type { OutputStyle } from "../core/defaults.js";
+import { formatCount } from "../core/format-time.js";
+import { tierPolicy, tierRevision } from "../core/presentation-tier.js";
+import { clioProjectRoot } from "../core/project-root.js";
 import { asciiOnly } from "../core/terminal-preferences.js";
+import { markProjectSeen, projectSeen } from "../core/welcome-seen.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/index.js";
 import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
@@ -11,13 +15,11 @@ import { type Component, type Keybinding, truncateToWidth, visibleWidth, wrapTex
 import {
 	brandMark,
 	type ClioTheme,
-	type ClioToken,
 	clioTheme,
 	collapseHomePath,
 	formatTargetLabel,
-	frame,
 	GLYPH,
-	innerDivider,
+	meter,
 	padAnsi,
 } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
@@ -25,15 +27,16 @@ import {
 	paintWelcomeRowWordmark,
 	paintWelcomeWordmark,
 	WELCOME_WORDMARK,
+	WELCOME_WORDMARK_ROW,
 	WELCOME_WORDMARK_WIDE,
 } from "./welcome-art.js";
 
-/** Reduced terminals and screen readers get the same compact identity as demo-off. */
-function richWelcomeEnabled(demo: boolean | undefined, style: OutputStyle = "standard"): boolean {
-	return demo !== false && style !== "compact" && !asciiOnly() && process.env.CLIO_CODER_SCREEN_READER !== "1";
+/** Reduced terminals and screen readers get the same one-row identity as demo-off. */
+function richWelcomeEnabled(demo: boolean | undefined): boolean {
+	return demo !== false && !asciiOnly() && process.env.CLIO_CODER_SCREEN_READER !== "1";
 }
 
-export const WELCOME_TAGLINES = [
+const WELCOME_TAGLINES = [
 	"Ask CLIO Coder how to use or extend it.",
 	"The pursuit of excellence does not need justification. Your code does!",
 	"Understanding comes before change.",
@@ -103,6 +106,11 @@ export interface WelcomeDashboardDeps {
 	 * while the host probe has not answered. Read on every frame, so it never probes.
 	 */
 	getShellContained?: () => boolean | null;
+	/**
+	 * Reads the latest earlier session in `cwd`, off the frame and only on a terminal. Supplied by the hydrated
+	 * presentation: session history stays out of the Stage 0 closure this module belongs to.
+	 */
+	readLastSession?: (cwd: string, now: number) => Promise<WelcomeLastSession | null>;
 	/** Called when an off-render refresh lands, so the frame owner can ask for one. */
 	onFactsRefreshed?: () => void;
 	/**
@@ -140,6 +148,22 @@ export interface WelcomeDashboardStats {
 	quota: string | null;
 	/** Project configuration that is not applied, and the command that reviews it. */
 	projectConfig?: string | null;
+	/** The first launchpad for this project: the stacked wordmark shows at every tier. */
+	firstBoot?: boolean;
+	/** The route's context window in tokens; absent or null when nothing declared one. */
+	contextWindow?: number | null;
+	/** The latest earlier session here, `checking` until it is read, null when there is none. */
+	lastSession?: WelcomeLastSession | "checking" | null;
+	/** The clock the `last here` age is measured against. */
+	now?: number;
+}
+
+/** The earlier session the `last here` row quotes. */
+export interface WelcomeLastSession {
+	lastActiveAt: string;
+	/** The first operator words, or null when the session withheld them. */
+	preview: string | null;
+	name: string | null;
 }
 
 export type WelcomeDashboardMode = "launchpad" | "session";
@@ -239,27 +263,6 @@ function normalizeProjectContext(state: ContextState | null | undefined): Welcom
 // than in code units.
 // ---------------------------------------------------------------------------
 
-/**
- * Head-truncate a path so the leaf stays whole: `…/iowarp/clio-coder`. The leaf
- * identifies a workspace, and two sibling worktrees differ only there, so it is
- * the last thing given up.
- */
-function fitPathTail(path: string, max: number): string {
-	if (max <= 0) return "";
-	if (visibleWidth(path) <= max) return path;
-	const segments = path.split("/").filter((segment) => segment.length > 0);
-	const leaf = segments.at(-1) ?? path;
-	let best = leaf;
-	for (let index = segments.length - 2; index >= 0; index -= 1) {
-		const candidate = `${segments[index]}/${best}`;
-		if (visibleWidth(`${GLYPH.ellipsis}/${candidate}`) > max) break;
-		best = candidate;
-	}
-	const marked = `${GLYPH.ellipsis}/${best}`;
-	if (visibleWidth(marked) <= max) return marked;
-	return truncateToWidth(leaf, max, GLYPH.ellipsis, false);
-}
-
 interface Unit {
 	text: string;
 	/** Lower survives longer. Units at or below `protectRank` are never dropped. */
@@ -311,39 +314,6 @@ function workspaceBranch(stats: WelcomeDashboardStats): string | null {
 }
 
 /**
- * The one next step, chosen by what actually blocks work.
- *
- * Route faults outrank project-context state: a task cannot be answered by a
- * route that does not respond. A missing CLIO-CODER.md is guidance rather than a
- * blocker, so it keeps the invitation to work alongside the suggestion. A
- * malformed one is a real fault and points at the read-only `/context` view,
- * never at a command that would regenerate the file the operator still has to
- * repair by hand.
- */
-function actionRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number): string {
-	const say = (token: ClioToken, text: string): string =>
-		theme.fg(token, truncateToWidth(text, room, GLYPH.ellipsis, false));
-	if (stats.route === "unset") {
-		// Name the half that is missing; both are fixed at the same surface.
-		const detail = stats.targetLabel === null ? "no route selected" : "no model selected";
-		return say("warning", `${detail} ${GLYPH.dot} /model`);
-	}
-	if (stats.route === "unavailable") return say("error", `route unavailable ${GLYPH.dot} /settings models`);
-	if (stats.route === "degraded") return say("warning", `route degraded ${GLYPH.dot} /settings models`);
-	if (stats.projectConfig) return say("warning", stats.projectConfig);
-	if (stats.projectContext === "malformed")
-		return say("warning", `CLIO-CODER.md malformed ${GLYPH.dot} /context to inspect`);
-	if (stats.projectContext === "none") return say("guidance", "/context init to index this repo");
-	if (stats.projectContext === "stale") return say("guidance", "Stale project awareness: /context refresh to fix.");
-	return say(
-		"guidance",
-		stats.projectContext === "checking"
-			? `Checking project awareness${GLYPH.ellipsis}`
-			: "Next: type a task, then press Enter",
-	);
-}
-
-/**
  * The collapsed session header: one live line naming where Clio is working and
  * which route answers.
  *
@@ -380,107 +350,423 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 	return `${mark} ${fitByPriority(theme, units, room)}`;
 }
 
-const WELCOME_HINT_MIN_WIDTH = 160;
-/** Reserved before provider reads so quota hydration cannot move the frame. */
-const WELCOME_SUBSCRIPTION_ROWS = 2;
+// ---------------------------------------------------------------------------
+// The launchpad: the brand and an open fact table, no frame and no rule.
+// ---------------------------------------------------------------------------
 
-/**
- * One page that holds still (D-TUI 4.8): a welcome that turned every 15 seconds moved under the eye while the
- * operator read it. The lessons the other pages carried live in `/help`.
- */
-const WELCOME_HINT: {
-	title: string;
-	commands: ReadonlyArray<readonly [string, string]>;
-	keys: ReadonlyArray<readonly [Keybinding, string]>;
-} = {
-	title: "Make CLIO Coder yours",
-	commands: [
-		["/model", "Choose a model and target"],
-		["/library", "Browse plugins and extensions"],
-		["/help", "Explore commands and shortcuts"],
-	],
-	keys: [
-		["clio-coder.leader", "Every action by letter"],
-		["clio-coder.model.select", "Model picker"],
-		["clio-coder.thinking.cycle", "Cycle thinking effort"],
-		["clio-coder.editor.external", "Write in your own editor"],
-	],
+/** Cells of a fact label: the widest labels, `awareness` and `last here`. */
+const FACT_LABEL_WIDTH = 9;
+/** Fact rows hang two cells under the header row. */
+const FACT_INDENT = 2;
+/** Cells between the wordmark and the facts, and between the facts and the `start` column. */
+const COLUMN_GAP = 3;
+/** Under this many terminal rows every tier shows the compact form (H1). */
+const SHORT_TERMINAL_ROWS = 20;
+/** Under this many cells a fact label stacks above its value (W1). */
+const STACKED_FACT_WIDTH = 44;
+/** Rows of the stacked wordmark, and so of a launchpad that shows it. */
+const STACKED_ROWS = 11;
+/** Columns from which the stacked wordmark uses its wide letters. */
+const WIDE_ART_MIN_WIDTH = 100;
+/** Columns from which the `start` column may join the facts. */
+const WELCOME_START_MIN_WIDTH = 160;
+
+type FactKey = "model" | "autonomy" | "project" | "awareness" | "rules" | "usage" | "last" | "next";
+/** Display order under the header. */
+const FACT_ORDER: readonly FactKey[] = ["model", "autonomy", "project", "awareness", "rules", "usage", "last", "next"];
+/** Lower survives a tighter row cap longer; `next` always stays. */
+const FACT_RANK: Readonly<Record<FactKey, number>> = {
+	next: 0,
+	model: 1,
+	autonomy: 2,
+	project: 3,
+	awareness: 4,
+	rules: 5,
+	last: 6,
+	usage: 7,
 };
 
-function welcomeHints(theme: ClioTheme, getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"]): string[] {
-	const hint = WELCOME_HINT;
-	const commandWidth = Math.max(...hint.commands.map(([command]) => visibleWidth(command)));
-	const bindings = hint.keys.flatMap(([action, description]) => {
-		const label = getKeyLabel?.(action);
-		return label ? [{ label, description }] : [];
-	});
-	const keyWidth = Math.max(0, ...bindings.map(({ label }) => visibleWidth(label)));
-	const keys = bindings.map(
-		({ label, description }) => `${theme.fg("guidance", padAnsi(label, keyWidth))}  ${theme.fg("body", description)}`,
-	);
-	return [
-		theme.style("sectionHeading", hint.title, { bold: true }),
-		"",
-		...hint.commands.map(
-			([command, description]) =>
-				`${theme.fg("guidance", padAnsi(command, commandWidth))}  ${theme.fg("body", description)}`,
-		),
-		"",
-		...(keys.length ? [theme.fg("sectionHeading", "Keyboard shortcuts"), ...keys] : []),
+/**
+ * The fact rows the tier's cap leaves room for. The header is the first fact row, so a cap of one keeps the header
+ * alone and `next` then speaks only when it blocks, as its own `‖` row.
+ */
+function keptFacts(cap: number, hasRules: boolean): ReadonlySet<FactKey> {
+	const candidates = FACT_ORDER.filter((key) => key !== "rules" || hasRules);
+	return new Set([...candidates].sort((a, b) => FACT_RANK[a] - FACT_RANK[b]).slice(0, Math.max(0, cap - 1)));
+}
+
+/** The fact-row cap of the launchpad for this tier and terminal height. */
+function factCap(style: OutputStyle | undefined, terminalRows: number | undefined): number {
+	const short = terminalRows !== undefined && terminalRows < SHORT_TERMINAL_ROWS;
+	return tierPolicy(short ? "compact" : (style ?? "standard")).welcomeRows;
+}
+
+const START_COMMANDS: ReadonlyArray<readonly [string, string]> = [
+	["/help", "every command and key"],
+	["/context", "what CLIO Coder knows here"],
+	["/usage", "limits and reset times"],
+];
+const START_KEYS: ReadonlyArray<readonly [Keybinding, string]> = [
+	["clio-coder.leader", "every action by letter"],
+	["clio-coder.model.select", "switch the model"],
+	["clio-coder.thinking.cycle", "cycle thinking effort"],
+];
+/** The `start` column joins only a fact block at least as tall as it, so it never adds a row. */
+const START_ROWS = START_COMMANDS.length + START_KEYS.length;
+
+/** Whether the launchpad at this size shows its own `start` column of commands and keys. */
+export function launchpadShowsHints(style: OutputStyle | undefined, width: number, terminalRows?: number): boolean {
+	return factCap(style, terminalRows) >= START_ROWS && width >= WELCOME_START_MIN_WIDTH;
+}
+
+function startRows(theme: ClioTheme, getKeyLabel: WelcomeDashboardDeps["getKeyLabel"]): string[] {
+	const entries = [
+		...START_COMMANDS,
+		...START_KEYS.flatMap(([action, meaning]) => {
+			const label = getKeyLabel?.(action);
+			return label ? [[plainOneLine(label), meaning] as const] : [];
+		}),
 	];
+	const keyWidth = Math.max(0, ...entries.map(([key]) => visibleWidth(key)));
+	return entries.map(
+		([key, meaning], index) =>
+			`${theme.fg("fieldName", (index === 0 ? "start" : "").padEnd(FACT_LABEL_WIDTH))}  ${theme.fg("guidance", padAnsi(key, keyWidth))}  ${theme.fg("body", meaning)}`,
+	);
 }
 
-function awarenessLabel(stats: WelcomeDashboardStats): string {
-	return {
-		checking: `Checking${GLYPH.ellipsis}`,
-		ok: "Up to date",
-		stale: "Out of date",
-		none: "Not indexed yet",
-		malformed: "Needs repair",
-	}[stats.projectContext];
+/**
+ * The brand form, from first boot, the terminal's columns and rows, and the fact rows the tier shows. The wordmark
+ * is chosen by fit and first boot, never by tier.
+ */
+type BrandForm = "stacked" | "band-beside" | "band-above" | "mark";
+
+function brandForm(firstBoot: boolean, columns: number, rows: number, factRows: number): BrandForm {
+	if (rows < SHORT_TERMINAL_ROWS) return "mark";
+	if (firstBoot && columns >= 76 && rows >= 24) return "stacked";
+	if (factRows >= STACKED_ROWS && columns >= 76) return "stacked";
+	if (factRows >= WELCOME_WORDMARK_ROW.length && columns >= 100) return "band-beside";
+	if (columns >= 57 && (rows >= 30 || (firstBoot && columns < 76 && rows >= 24))) return "band-above";
+	return "mark";
 }
 
-function gitSummary(stats: WelcomeDashboardStats): string {
+/**
+ * Keep the leaf of a path whole and elide its middle: `~/…/proj/standard`. The leaf identifies a workspace, and two
+ * sibling worktrees differ only there, so it is the last thing given up.
+ */
+function fitPath(path: string, max: number): string {
+	if (max <= 0) return "";
+	if (visibleWidth(path) <= max) return path;
+	const root = path.startsWith("~/") ? "~/" : path.startsWith("/") ? "/" : "";
+	const segments = path
+		.slice(root.length)
+		.split("/")
+		.filter((segment) => segment.length > 0);
+	const leaf = segments.at(-1) ?? path;
+	let best = leaf;
+	for (let index = segments.length - 2; index >= 0; index -= 1) {
+		const candidate = `${segments[index]}/${best}`;
+		if (visibleWidth(`${root}${GLYPH.ellipsis}/${candidate}`) > max) break;
+		best = candidate;
+	}
+	for (const marked of [`${root}${GLYPH.ellipsis}/${best}`, `${GLYPH.ellipsis}/${best}`])
+		if (visibleWidth(marked) <= max) return marked;
+	return truncateToWidth(leaf, max, GLYPH.ellipsis, false);
+}
+
+function gitUnits(stats: WelcomeDashboardStats): string[] {
 	const workspace = stats.workspace;
 	// Before the first probe lands the placeholder says nothing about Git, so it reads as a check in progress.
-	if (workspace === null || workspace.pending === true) return `Checking${GLYPH.ellipsis}`;
-	// A probe that ran out of time is no answer: a real repository read `No Git repository` under load.
-	if (workspace.gitUnknown === true) return "Git did not answer yet";
-	if (!workspace.isGit) return "No Git repository";
+	if (workspace === null || workspace.pending === true) return ["checking"];
+	// A probe that ran out of time is no answer: a real repository read `no Git repository` under load.
+	if (workspace.gitUnknown === true) return ["Git did not answer yet"];
+	if (!workspace.isGit) return ["no Git repository"];
 	return [
-		workspaceBranch(stats) || "Detached HEAD",
+		workspaceBranch(stats) || "detached HEAD",
 		workspace.dirty === null ? "changes unknown" : workspace.dirty ? "uncommitted changes" : "clean",
 		...(workspace.ahead ? [`${workspace.ahead} ahead`] : []),
 		...(workspace.behind ? [`${workspace.behind} behind`] : []),
-	].join(` ${GLYPH.dot} `);
+	];
 }
 
 function autonomySummary(stats: WelcomeDashboardStats): string {
+	const sep = ` ${GLYPH.sep} `;
 	if (stats.autonomy !== "yolo") {
 		// With no OS sandbox, shell calls keep their approval rails, so only edits are automatic (bt-11 #6).
-		if (stats.shellContained === false) return `Default ${GLYPH.dot} auto edits ${GLYPH.dot} no OS sandbox`;
+		if (stats.shellContained === false) return `default${sep}auto edits${sep}no OS sandbox`;
 		// Before the cached probe answers, claim only the edits; the shell's containment is not known yet.
-		if (stats.shellContained !== true) return `Default ${GLYPH.dot} auto edits`;
-		return `Default ${GLYPH.dot} auto in workspace`;
+		if (stats.shellContained !== true) return `default${sep}auto edits`;
+		return `default${sep}auto in workspace`;
 	}
 	return stats.yoloConfinement === "unconfined"
-		? `YOLO ${GLYPH.dot} UNCONFINED ${GLYPH.dot} never asks`
-		: `YOLO ${GLYPH.dot} contained ${GLYPH.dot} never waits`;
+		? `yolo${sep}UNCONFINED${sep}never asks`
+		: `yolo${sep}contained${sep}never waits`;
 }
 
-/** Under this height the art gives way and the brand moves into the frame title. */
-const WELCOME_ART_MIN_ROWS = 30;
-/** Under this height even the launchpad's blank rows and tagline cost the composer its place. */
-const WELCOME_TIGHT_ROWS = 20;
-
-/** Shared by the instant shell and hydrated UI: one stable, framed welcome. */
-function launchpadHasRoom(terminalRows: number | undefined): boolean {
-	return terminalRows === undefined || terminalRows >= WELCOME_ART_MIN_ROWS;
+function awarenessLabel(state: WelcomeProjectContextState): string {
+	return {
+		checking: "checking",
+		ok: "up to date",
+		stale: "out of date",
+		none: "not indexed yet",
+		malformed: "CLIO-CODER.md needs repair",
+	}[state];
 }
 
-/** Whether the launchpad at this size shows its own column of key hints. */
-export function launchpadShowsHints(style: OutputStyle | undefined, width: number, terminalRows?: number): boolean {
-	return style === "detailed" && width >= WELCOME_HINT_MIN_WIDTH && launchpadHasRoom(terminalRows);
+/** The single action that most improves the session, and whether it blocks. */
+interface NextStep {
+	action: string;
+	/** What waits on it; empty when the action says it all. */
+	effect: string;
+	blocks: boolean;
+}
+
+/** Steps that block work, worst first: a route that cannot answer, then project configuration that is not applied. */
+function blockers(stats: WelcomeDashboardStats): NextStep[] {
+	const steps: NextStep[] = [];
+	if (stats.route === "unset")
+		steps.push({ action: "/config connects a model", effect: "nothing can run until one is connected", blocks: true });
+	if (stats.route === "unavailable")
+		steps.push({ action: "/config repairs the route", effect: "nothing can run until it answers", blocks: true });
+	if (stats.projectConfig) steps.push({ action: plainOneLine(stats.projectConfig), effect: "", blocks: true });
+	return steps;
+}
+
+function optionalStep(stats: WelcomeDashboardStats, getKeyLabel: WelcomeDashboardDeps["getKeyLabel"]): NextStep {
+	if (stats.projectContext === "none")
+		return { action: "/context init indexes this repo", effect: "optional", blocks: false };
+	if (stats.projectContext === "stale")
+		return { action: "/context refresh updates project awareness", effect: "optional", blocks: false };
+	if (stats.projectContext === "malformed")
+		return { action: "/context shows what CLIO-CODER.md needs", effect: "optional", blocks: false };
+	const leader = getKeyLabel?.("clio-coder.leader");
+	const keys = ["? keys", "/ commands", ...(leader ? [`${plainOneLine(leader)} actions`] : [])];
+	return { action: keys.join(` ${GLYPH.sep} `), effect: "", blocks: false };
+}
+
+/** `‖ action · effect`, dropping the effect before the action is cut. Nothing the operator must act on is dim. */
+function stepText(theme: ClioTheme, step: NextStep, room: number): string {
+	const lead = step.blocks ? `${theme.fg("attention", GLYPH.phaseBlocked)} ` : "";
+	const units: Unit[] = [
+		{ text: theme.fg(step.blocks ? "body" : "guidance", step.action), rank: 0 },
+		...(step.effect ? [{ text: theme.fg(step.blocks ? "body" : "annotation", step.effect), rank: 1 }] : []),
+	];
+	return `${lead}${fitByPriority(theme, units, Math.max(1, room - visibleWidth(lead)))}`;
+}
+
+function routeText(stats: WelcomeDashboardStats): string {
+	if (stats.targetLabel === null && stats.modelLabel === null) return "no model connected";
+	return plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false }));
+}
+
+/** The route's verdict when it is adverse, at every tier; the reason drops before the verdict. */
+function routeFault(theme: ClioTheme, stats: WelcomeDashboardStats): Unit[] {
+	const reason = stats.routeReason ? [{ text: theme.fg("body", plainOneLine(stats.routeReason)), rank: 2 }] : [];
+	if (stats.route === "unavailable")
+		return [{ text: theme.fg("error", `${GLYPH.error} unavailable`), rank: 1 }, ...reason];
+	if (stats.route === "degraded") return [{ text: theme.fg("warning", `${GLYPH.warn} degraded`), rank: 1 }, ...reason];
+	return [];
+}
+
+function modelValue(theme: ClioTheme, stats: WelcomeDashboardStats, health: boolean, room: number): string {
+	if (stats.route === "unset")
+		return truncateToWidth(theme.fg("warning", routeText(stats)), room, GLYPH.ellipsis, false);
+	const window =
+		stats.contextWindow !== undefined && stats.contextWindow !== null && stats.contextWindow > 0
+			? [{ text: theme.fg("annotation", `${formatCount(stats.contextWindow)} context`), rank: 3 }]
+			: [];
+	const verdict =
+		health && stats.route === "ready"
+			? [{ text: theme.fg("success", `${GLYPH.ok} healthy`), rank: 4 }]
+			: health && stats.route === "checking"
+				? [{ text: theme.fg("annotation", "checking"), rank: 4 }]
+				: [];
+	return fitByPriority(
+		theme,
+		[{ text: theme.fg("footerIdentity", routeText(stats)), rank: 0 }, ...window, ...routeFault(theme, stats), ...verdict],
+		room,
+	);
+}
+
+function projectValue(theme: ClioTheme, stats: WelcomeDashboardStats, room: number): string {
+	const sep = theme.fg("annotation", ` ${GLYPH.sep} `);
+	const git = gitUnits(stats);
+	const path = workspacePath(stats);
+	// The path keeps at least its leaf's worth of room; Git facts give way from the right before it is cut further.
+	for (let count = git.length; count >= 0; count -= 1) {
+		const tail = git.slice(0, count).join(` ${GLYPH.sep} `);
+		const pathRoom = room - (tail ? visibleWidth(tail) + 3 : 0);
+		if (count > 0 && pathRoom < Math.min(visibleWidth(path), 16)) continue;
+		const shown = theme.fg("workspacePath", fitPath(path, pathRoom));
+		return tail ? `${shown}${sep}${theme.fg("body", tail)}` : shown;
+	}
+	return theme.fg("workspacePath", fitPath(path, room));
+}
+
+/** The files the project instructions came from, then what the preload says about them, dropped before it is cut. */
+function rulesValue(theme: ClioTheme, preload: string, room: number): string {
+	const text = sanitizeCallTargetText(preload);
+	const split = text.indexOf(": ");
+	const files = split > 0 ? text.slice(0, split) : text;
+	const note = split > 0 ? text.slice(split + 2) : "";
+	return fitByPriority(
+		theme,
+		[{ text: theme.fg("body", files), rank: 0 }, ...(note ? [{ text: theme.fg("annotation", note), rank: 1 }] : [])],
+		room,
+	);
+}
+
+/** A meter of the most-used subscription window, then the windows themselves, dropped whole from the right. */
+function usageValue(theme: ClioTheme, stats: WelcomeDashboardStats, room: number): string {
+	if (stats.quota === null) return theme.fg("annotation", "no subscription window reported");
+	const summary = sanitizeCallTargetText(stats.quota).replace(/% used/g, "%");
+	const used = Math.max(0, ...[...summary.matchAll(/(\d+(?:\.\d+)?)%/gu)].map((found) => Number(found[1])));
+	const bar = 10;
+	const units = summary.split(` ${GLYPH.dot} `).map((text, index) => ({ text: theme.fg("body", text), rank: index }));
+	const words = fitByPriority(theme, units, Math.max(1, room - bar - 1));
+	return `${meter(theme, { value: used, max: 100, width: bar, amount: "" })} ${words}`;
+}
+
+function relativeAge(iso: string, now: number): string {
+	const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
+	if (!Number.isFinite(minutes)) return "earlier";
+	if (minutes < 1) return "just now";
+	if (minutes < 60) return `${minutes}m ago`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 48) return `${hours}h ago`;
+	return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** `11m ago · "first words…" · -c resumes`; only the quote is ever cut. */
+function lastValue(theme: ClioTheme, stats: WelcomeDashboardStats, room: number): string {
+	const last = stats.lastSession;
+	if (last === undefined || last === "checking") return theme.fg("annotation", "checking");
+	if (last === null) return theme.fg("annotation", "no earlier session here");
+	const sep = ` ${GLYPH.sep} `;
+	const age = relativeAge(last.lastActiveAt, stats.now ?? Date.now());
+	const resume = "-c resumes";
+	const words = last.preview ?? last.name;
+	const quoteRoom = room - visibleWidth(age) - visibleWidth(resume) - 2 * visibleWidth(sep) - 2;
+	const quote =
+		words && quoteRoom >= 8 ? [`"${truncateToWidth(plainOneLine(words), quoteRoom, GLYPH.ellipsis, false)}"`] : [];
+	return fitByPriority(
+		theme,
+		[
+			{ text: theme.fg("body", age), rank: 0 },
+			...quote.map((text) => ({ text: theme.fg("body", text), rank: 2 })),
+			{ text: theme.fg("guidance", resume), rank: 1 },
+		],
+		room,
+	);
+}
+
+/**
+ * The header row: the mark, the name and the version, and at compact the route. Beside the stacked wordmark the
+ * route takes its own row before the version shortens; elsewhere the build note goes first, then the version.
+ */
+function headerRows(theme: ClioTheme, version: string, room: number, route: string | null, split: boolean): string[] {
+	const mark = brandMark(theme);
+	const name = theme.style("wordmark", "CLIO Coder", { bold: true });
+	const short = version.replace(/ · .*$/u, "");
+	const identities = [`${name} ${theme.fg("annotation", version)}`, `${name} ${theme.fg("annotation", short)}`, name];
+	const sep = theme.fg("annotation", ` ${GLYPH.sep} `);
+	const fits = (text: string): boolean => visibleWidth(text) <= room;
+	if (route === null) {
+		for (const identity of identities) if (fits(`${mark} ${identity}`)) return [`${mark} ${identity}`];
+		return [truncateToWidth(mark, room, "", false)];
+	}
+	const [full] = identities;
+	if (full !== undefined && fits(`${mark} ${full}${sep}${route}`)) return [`${mark} ${full}${sep}${route}`];
+	if (split && full !== undefined && fits(`${mark} ${full}`))
+		return [`${mark} ${full}`, truncateToWidth(route, room, GLYPH.ellipsis, false)];
+	for (const identity of identities.slice(1))
+		if (fits(`${mark} ${identity}${sep}${route}`)) return [`${mark} ${identity}${sep}${route}`];
+	return [truncateToWidth(`${mark} ${route}`, room, GLYPH.ellipsis, false)];
+}
+
+function launchpadFacts(
+	theme: ClioTheme,
+	stats: WelcomeDashboardStats,
+	version: string,
+	width: number,
+	cap: number,
+	split: boolean,
+	getKeyLabel: WelcomeDashboardDeps["getKeyLabel"],
+	/** Physical rows a W1 launchpad may take: whole facts give way from the bottom and `next` stays. */
+	limit = Number.MAX_SAFE_INTEGER,
+): string[] {
+	const kept = keptFacts(cap, Boolean(stats.projectPreload));
+	const blocked = blockers(stats);
+	const compact = !kept.has("next");
+	const stackLabels = width < STACKED_FACT_WIDTH;
+	const valueRoom = Math.max(1, stackLabels ? width - FACT_INDENT : width - FACT_INDENT - FACT_LABEL_WIDTH - 2);
+	const compactRoute = compact
+		? fitByPriority(
+				theme,
+				[
+					{ text: theme.fg(stats.route === "unset" ? "warning" : "footerIdentity", routeText(stats)), rank: 0 },
+					...routeFault(theme, stats),
+				],
+				Number.MAX_SAFE_INTEGER,
+			)
+		: null;
+	const header =
+		stackLabels && compactRoute !== null
+			? [...headerRows(theme, version, width, null, false), ...wrapTextWithAnsi(compactRoute, width)]
+			: headerRows(theme, version, width, compactRoute, split);
+	if (compact) {
+		return [...header, ...blocked.map((step) => stepText(theme, step, width))];
+	}
+	const indent = " ".repeat(FACT_INDENT);
+	const fact = (label: string, value: string): string[] =>
+		stackLabels
+			? [`${indent}${theme.fg("fieldName", label)}`, ...wrapTextWithAnsi(value, valueRoom).map((row) => `${indent}${row}`)]
+			: [`${indent}${theme.fg("fieldName", label.padEnd(FACT_LABEL_WIDTH))}  ${value}`];
+	const values: Record<FactKey, () => string> = {
+		model: () => modelValue(theme, stats, kept.has("awareness"), stackLabels ? Number.MAX_SAFE_INTEGER : valueRoom),
+		autonomy: () =>
+			theme.fg(
+				stats.autonomy === "yolo" ? "warning" : "body",
+				truncateToWidth(autonomySummary(stats), valueRoom, GLYPH.ellipsis, false),
+			),
+		project: () => projectValue(theme, stats, valueRoom),
+		awareness: () =>
+			theme.fg(
+				stats.projectContext === "stale" || stats.projectContext === "malformed" ? "warning" : "body",
+				awarenessLabel(stats.projectContext),
+			),
+		rules: () => rulesValue(theme, stats.projectPreload ?? "", valueRoom),
+		usage: () => usageValue(theme, stats, valueRoom),
+		last: () => lastValue(theme, stats, valueRoom),
+		next: () => stepText(theme, blocked[0] ?? optionalStep(stats, getKeyLabel), valueRoom),
+	};
+	const labels: Record<FactKey, string> = {
+		model: "model",
+		autonomy: "autonomy",
+		project: "project",
+		awareness: "awareness",
+		rules: "rules",
+		usage: "usage",
+		last: "last here",
+		next: "next",
+	};
+	const groups = FACT_ORDER.filter((key) => kept.has(key) && key !== "next").map((key) =>
+		fact(labels[key], values[key]()),
+	);
+	// A second blocker still speaks: state is never cut by the row cap.
+	const more = blocked
+		.slice(1)
+		.map((step) =>
+			stackLabels
+				? `${indent}${stepText(theme, step, valueRoom)}`
+				: `${indent}${" ".repeat(FACT_LABEL_WIDTH + 2)}${stepText(theme, step, valueRoom)}`,
+		);
+	const next = [...fact(labels.next, values.next()), ...more];
+	const body: string[] = [];
+	for (const group of groups) {
+		if (stackLabels && header.length + body.length + group.length + next.length > limit) break;
+		body.push(...group);
+	}
+	return [...header, ...body, ...next];
 }
 
 export function buildWelcomeDashboardLines(
@@ -493,226 +779,79 @@ export function buildWelcomeDashboardLines(
 	terminalRows?: number,
 ): string[] {
 	const version = versionLabel.replace(/ \(unreleased(?: · ([^)]+))?\)$/u, (_match, commit: string | undefined) =>
-		commit ? ` ${GLYPH.dot} ${commit}` : "",
+		commit ? ` ${GLYPH.sep} ${commit}` : "",
 	);
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
-	const coverageRows = (room: number): string[] =>
-		stats.projectPreload
+	if (mode === "session") {
+		const coverage = stats.projectPreload
 			? wrapTextWithAnsi(
 					`${theme.fg("fieldName", "Instructions  ")}${theme.fg("body", sanitizeCallTargetText(stats.projectPreload))}`,
-					room,
+					safeWidth,
 				)
 			: [];
-	if (mode === "session")
-		return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth), ...coverageRows(safeWidth)];
-	// A short terminal spends its rows on the composer and the first answer: the
-	// launchpad keeps identity, place and the next step, and drops the rest.
-	if (safeWidth < 48 || stats.outputStyle !== "detailed" || !launchpadHasRoom(terminalRows))
-		return compactLaunchpad(
-			theme,
-			stats,
-			version,
-			safeWidth,
-			safeWidth < 48 || (terminalRows !== undefined && terminalRows < WELCOME_TIGHT_ROWS),
-			coverageRows,
-		);
-	const panelWidth = safeWidth;
-	const room = Math.max(1, panelWidth - 4);
-	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
-	const wordmark = paintWelcomeWordmark(panelWidth >= 100 ? WELCOME_WORDMARK_WIDE : WELCOME_WORDMARK, theme);
-	const sideBySide = panelWidth >= 76;
-	// Too narrow for the art beside the details: the compact letters sit on one
-	// band above them, and below that the brand moves into the frame title.
-	const bandWordmark = sideBySide ? [] : paintWelcomeRowWordmark(theme);
-	const titleBrand = bandWordmark.length > 0 && visibleWidth(bandWordmark[0] ?? "") > room;
-	const band = titleBrand ? [] : bandWordmark;
-	const artWidth = sideBySide ? visibleWidth(wordmark[0] ?? "") : 0;
-	const showHints = panelWidth >= WELCOME_HINT_MIN_WIDTH;
-	const contentWidth = showHints ? Math.max(artWidth + 3 + 42, Math.min(132, Math.floor((room - 3) * 0.66))) : room;
-	const hintWidth = room - contentWidth - 3;
-	const hints = showHints ? welcomeHints(theme, getKeyLabel) : [];
-	const detailWidth = sideBySide ? contentWidth - artWidth - 3 : contentWidth;
-	// Give the wide three-column panel one value axis, including wrapped quotas.
-	// Narrow layouts keep short labels so padding does not consume the route.
-	const fieldWidth = showHints || sideBySide ? "Awareness".length : 0;
-	const fieldPrefix = (label: string) => `${label.padEnd(fieldWidth)}  `;
-	const field = (label: string, value: string) => `${theme.fg("fieldName", fieldPrefix(label))}${value}`;
-	const wrappedField = (label: string, value: string): string[] => {
-		if (!showHints) return wrapTextWithAnsi(field(label, value), Math.max(1, detailWidth));
-		const prefixWidth = fieldPrefix(label).length;
-		return wrapTextWithAnsi(value, Math.max(1, detailWidth - prefixWidth)).map((line, index) =>
-			index === 0 ? field(label, line) : `${" ".repeat(prefixWidth)}${line}`,
-		);
-	};
-	const subscriptions =
-		stats.quota === null
-			? []
-			: wrappedField(
-					"Accounts",
-					theme.fg(
-						"body",
-						sanitizeCallTargetText(stats.quota)
-							.replace(/% used/g, "%")
-							.replace(/\/wk /g, " · wk "),
-					),
-				);
-	if (subscriptions.length > WELCOME_SUBSCRIPTION_ROWS) {
-		const link = theme.fg("guidance", `${GLYPH.ellipsis} /usage`);
-		const linkWidth = visibleWidth(link);
-		const lastRow = WELCOME_SUBSCRIPTION_ROWS - 1;
-		subscriptions[lastRow] =
-			detailWidth > linkWidth
-				? `${truncateToWidth(subscriptions[lastRow] ?? "", detailWidth - linkWidth - 1, "", false)} ${link}`
-				: truncateToWidth(link, Math.max(1, detailWidth), "", false);
+		return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth), ...coverage];
 	}
-	const subscriptionRows = Array.from({ length: WELCOME_SUBSCRIPTION_ROWS }, (_, index) => subscriptions[index] ?? "");
-	const awareness = awarenessLabel(stats);
-	const git = gitSummary(stats);
-	const modelRows = wrappedField(
-		"Model",
-		theme.fg(
-			"footerIdentity",
-			plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false })),
-		),
-	);
-	const shownModelRows = modelRows.slice(0, 2);
-	if (modelRows.length > 2) {
-		const hint = theme.fg("guidance", `${GLYPH.ellipsis} /model`);
-		shownModelRows[1] = `${truncateToWidth(modelRows[1] ?? "", Math.max(0, detailWidth - visibleWidth(hint) - 1), "", false)} ${hint}`;
-	}
-	const details = [
-		...(band.length > 0 ? [...band, ""] : [""]),
-		...shownModelRows,
-		field("Autonomy", theme.fg(stats.autonomy === "yolo" ? "warning" : "body", autonomySummary(stats))),
-		"",
-		theme.style("sectionHeading", "Project", { bold: true }),
-		field(
-			"Workspace",
-			theme.fg(
-				"workspacePath",
-				fitPathTail(workspacePath(stats), Math.max(1, detailWidth - fieldPrefix("Workspace").length)),
-			),
-		),
-		field("Git", theme.fg("body", git)),
-		field(
-			"Awareness",
-			theme.fg(stats.projectContext === "stale" || stats.projectContext === "malformed" ? "warning" : "body", awareness),
-		),
-		"",
-		// The launchpad's height holds still as a reading arrives. Until one does, or
-		// on a route that never reports one, these rows name what to reach for instead
-		// of announcing an absence. The wide panel has a hints column for that already.
-		...(subscriptions.length > 0
-			? [theme.style("sectionHeading", "AI usage · used", { bold: true }), ...subscriptionRows]
-			: showHints
-				? ["", "", ""]
-				: [
-						theme.style("sectionHeading", "Also", { bold: true }),
-						`${theme.fg("guidance", "/help")}     ${theme.fg("body", "Commands and shortcuts")}`,
-						`${theme.fg("guidance", "/context")}  ${theme.fg("body", "What CLIO Coder knows about this repo")}`,
-					]),
-		showHints
-			? theme.fg("annotation", "/usage for limits and reset times")
-			: subscriptions.length > 0
-				? theme.fg("guidance", "/help  Commands and shortcuts · /usage  Limits")
-				: `${theme.fg("guidance", "/usage")}    ${theme.fg("body", "Account limits and reset times")}`,
-	];
-	const artOffset = Math.floor((details.length - wordmark.length) / 2);
-	const shownDetails = details;
-
-	const rows = Array.from(
-		{ length: Math.max(shownDetails.length, hints.length, sideBySide ? wordmark.length : 0) },
-		(_, index) => {
-			const detail = shownDetails[index] ?? "";
-			const art = sideBySide ? `${padAnsi(wordmark[index - artOffset] ?? "", artWidth)}   ` : "";
-			const content = `${art}${truncateToWidth(detail, detailWidth, GLYPH.ellipsis, false)}`;
-			return fit(
-				showHints
-					? `${padAnsi(content, contentWidth)} ${theme.fg("border", GLYPH.rail)} ${truncateToWidth(hints[index - 1] ?? "", hintWidth, GLYPH.ellipsis, false)}`
-					: content,
-			);
-		},
-	);
-	// Between the art's width and the hints column's, the art and facts stand as
-	// one block in the middle of the panel, with the tagline under its left edge,
-	// rather than leaving the panel's right half empty.
-	const blockWidth = Math.max(0, ...rows.map((row) => visibleWidth(row)));
-	const inset = sideBySide && !showHints ? " ".repeat(Math.max(0, Math.floor((room - blockWidth) / 2))) : "";
-	if (inset.length > 0) for (const [index, row] of rows.entries()) rows[index] = fit(`${inset}${row}`);
-	// The launchpad is an island like every other framed block, so it shares the
-	// one frame recipe and its action row sits under the standard inner divider.
-	// The build note after the version gives way before the action it shares the row with.
-	const fullTag = `v${version}`;
-	const tagText =
-		visibleWidth(actionRow(theme, stats, Number.MAX_SAFE_INTEGER)) + fullTag.length + 1 > room
-			? fullTag.replace(/ · .*$/u, "")
-			: fullTag;
-	const versionTag = titleBrand ? "" : theme.fg("brandCopper", tagText);
-	const leftRoom = Math.max(0, room - visibleWidth(versionTag) - (titleBrand ? 0 : 1));
-	const action = actionRow(theme, stats, leftRoom);
-	const taglineRows =
-		room >= 36 ? wrapTextWithAnsi(theme.fg("body", tagline), room - inset.length).map((row) => `${inset}${row}`) : [];
-	const gap = titleBrand ? "" : " ".repeat(Math.max(1, room - visibleWidth(action) - visibleWidth(versionTag)));
-	const title = titleBrand
-		? `${brandMark(theme)} ${theme.style("wordmark", "CLIO Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`
-		: "";
-	return frame(
+	const rows = terminalRows ?? Number.MAX_SAFE_INTEGER;
+	const cap = factCap(stats.outputStyle, terminalRows);
+	const firstBoot = stats.firstBoot === true;
+	// The form is chosen from the facts as the full width would hold them; a beside form then narrows them.
+	const probe = launchpadFacts(theme, stats, version, safeWidth, cap, false, getKeyLabel);
+	const form = brandForm(firstBoot, safeWidth, rows, probe.length);
+	const art =
+		form === "stacked"
+			? paintWelcomeWordmark(safeWidth >= WIDE_ART_MIN_WIDTH ? WELCOME_WORDMARK_WIDE : WELCOME_WORDMARK, theme)
+			: form === "band-beside" || form === "band-above"
+				? paintWelcomeRowWordmark(theme)
+				: [];
+	const artWidth = form === "stacked" || form === "band-beside" ? visibleWidth(art[0] ?? "") : 0;
+	const factStart = artWidth > 0 ? artWidth + COLUMN_GAP : 0;
+	let factWidth = safeWidth - factStart;
+	// Priority when they compete for width: the facts, then the wordmark, then `start`.
+	const start = launchpadShowsHints(stats.outputStyle, safeWidth, terminalRows) ? startRows(theme, getKeyLabel) : [];
+	const startWidth = Math.max(0, ...start.map((row) => visibleWidth(row)));
+	// `start` joins only where the facts keep their natural width beside it.
+	const factsNatural = Math.max(0, ...probe.map((row) => visibleWidth(row)));
+	const showStart = start.length > 0 && factWidth - startWidth - COLUMN_GAP >= factsNatural;
+	if (showStart) factWidth -= startWidth + COLUMN_GAP;
+	// At W1 labels stack and routes wrap, so the launchpad is cut at half the terminal with `next` kept. An unknown
+	// height is cut as the smallest standard terminal would be.
+	const facts = launchpadFacts(
 		theme,
-		title,
-		[...rows, ...coverageRows(room), ...taglineRows, innerDivider(theme, room), fit(`${action}${gap}${versionTag}`)],
-		panelWidth,
+		stats,
+		version,
+		factWidth,
+		cap,
+		form === "stacked",
+		getKeyLabel,
+		Math.floor((terminalRows ?? 24) / 2),
 	);
-}
-
-/**
- * The launchpad for a terminal under WELCOME_ART_MIN_ROWS rows: about 9 rows,
- * one fact per row on a shared value axis, and 4 rows under
- * WELCOME_TIGHT_ROWS, where only the place and the next step remain. The full
- * panel took 16 of 20 rows and left the composer one.
- */
-function compactLaunchpad(
-	theme: ClioTheme,
-	stats: WelcomeDashboardStats,
-	version: string,
-	width: number,
-	tight: boolean,
-	coverageRows: (room: number) => string[],
-): string[] {
-	const room = Math.max(1, width - 4);
-	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
-	const title = `${brandMark(theme)} ${theme.style("wordmark", "CLIO Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`;
-	const actionLine = (): string => actionRow(theme, stats, room);
-	if (tight) {
-		const route = theme.fg("footerIdentity", plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel)));
-		return frame(theme, title, [fit(route), fit(actionLine())], width);
+	let block = facts.map((row) => truncateToWidth(row, factWidth, GLYPH.ellipsis, false));
+	if (showStart) {
+		const factsWidth = Math.max(0, ...block.map((row) => visibleWidth(row)));
+		const height = Math.max(block.length, start.length);
+		block = Array.from({ length: height }, (_, index) => {
+			const right = start[index];
+			return right === undefined
+				? (block[index] ?? "")
+				: `${padAnsi(block[index] ?? "", factsWidth)}${" ".repeat(COLUMN_GAP)}${right}`;
+		});
 	}
-	const labelWidth = "Awareness".length + 2;
-	const field = (label: string, value: string): string =>
-		fit(`${theme.fg("fieldName", label.padEnd(labelWidth))}${value}`);
-	const coverage = coverageRows(room);
-	return frame(
-		theme,
-		title,
-		[
-			...wrapTextWithAnsi(
-				`${theme.fg("fieldName", "Model".padEnd(labelWidth))}${theme.fg("footerIdentity", plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false })))}`,
-				room,
-			),
-			field("Autonomy", theme.fg(stats.autonomy === "yolo" ? "warning" : "body", autonomySummary(stats))),
-			field(
-				"Awareness",
-				theme.fg(
-					stats.projectContext === "stale" || stats.projectContext === "malformed" ? "warning" : "body",
-					awarenessLabel(stats),
-				),
-			),
-			...(coverage.length > 0 ? [fit(coverage.length > 1 ? `${coverage[0]}${GLYPH.ellipsis}` : (coverage[0] ?? ""))] : []),
-			innerDivider(theme, room),
-			fit(actionLine()),
-		],
-		width,
-	);
+	const besideArt = (lines: readonly string[], offset: number): string[] =>
+		Array.from({ length: Math.max(art.length, lines.length + offset) }, (_, index) => {
+			const fact = lines[index - offset] ?? "";
+			const mark = art[index] ?? "";
+			return fact === "" ? mark : `${padAnsi(mark, artWidth)}${" ".repeat(COLUMN_GAP)}${fact}`;
+		});
+	let lines: string[];
+	if (form === "stacked") {
+		// The rotating tagline shows only beside the stacked wordmark, and only when the art still bounds the height.
+		const taglineRows = wrapTextWithAnsi(theme.fg("body", tagline), Math.max(1, factWidth));
+		const withTagline = block.length + taglineRows.length <= STACKED_ROWS ? [...block, ...taglineRows] : block;
+		lines = besideArt(withTagline, Math.max(0, Math.floor((STACKED_ROWS - withTagline.length) / 2)));
+	} else if (form === "band-beside") lines = besideArt(block, 0);
+	else lines = [...art, ...block];
+	return lines.map((line) => truncateToWidth(line, safeWidth, GLYPH.ellipsis, false));
 }
 
 /**
@@ -740,7 +879,40 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.outputStyle,
 		stats.quota,
 		stats.projectConfig,
+		stats.firstBoot,
+		stats.contextWindow,
+		stats.lastSession === undefined || stats.lastSession === null || typeof stats.lastSession === "string"
+			? stats.lastSession
+			: `${stats.lastSession.lastActiveAt}\x01${stats.lastSession.preview}\x01${stats.lastSession.name}`,
 	].join("\0");
+}
+
+const launchRoots = new Map<string, string>();
+function launchRoot(cwd: string): string {
+	let root = launchRoots.get(cwd);
+	if (root === undefined) {
+		root = clioProjectRoot(cwd);
+		launchRoots.set(cwd, root);
+	}
+	return root;
+}
+
+/**
+ * Whether this launch is the project's first. Only a launchpad painted on a terminal counts, so a piped process
+ * neither reads nor writes the marker and never decides a project's first boot.
+ */
+function firstBootHere(): boolean {
+	return process.stdout.isTTY === true && !projectSeen(launchRoot(process.cwd()));
+}
+
+const markedRoots = new Set<string>();
+/** Records the first launchpad after it painted, off the frame that painted it. */
+function noteLaunchpadPainted(): void {
+	if (process.stdout.isTTY !== true) return;
+	const root = launchRoot(process.cwd());
+	if (markedRoots.has(root)) return;
+	markedRoots.add(root);
+	setTimeout(() => markProjectSeen(root), 0).unref?.();
 }
 
 interface ProjectContextReading {
@@ -762,6 +934,8 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 	private contextRefreshing = false;
 	private pendingTimer: ReturnType<typeof setTimeout> | null = null;
 	private disposed = false;
+	private last: { cwd: string; value: WelcomeLastSession | null } | null = null;
+	private lastReading = false;
 	private mode: WelcomeDashboardMode = "launchpad";
 	private readonly now: () => number;
 	private readonly schedule: (run: () => void) => void;
@@ -788,14 +962,16 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 
 	render(width: number): string[] {
 		const settings = this.deps.getSettings?.();
-		const mode = richWelcomeEnabled(settings?.interface?.demo, settings?.interface?.outputDetail) ? this.mode : "session";
-		const stats = this.stats(mode);
-		const shortcutSignature =
-			mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
-				? WELCOME_HINT.keys.map(([action]) => this.deps.getKeyLabel?.(action)).join("|")
-				: "";
+		const mode = richWelcomeEnabled(settings?.interface?.demo) ? this.mode : "session";
 		const terminalRows = this.deps.getTerminalRows?.();
-		const signature = `${skinEpoch()}\0${mode}\0${statsSignature(stats)}\0${shortcutSignature}\0${terminalRows}`;
+		const stats = this.stats(mode, terminalRows);
+		const keySignature =
+			mode === "launchpad"
+				? (["clio-coder.leader", "clio-coder.model.select", "clio-coder.thinking.cycle"] as const)
+						.map((action) => this.deps.getKeyLabel?.(action))
+						.join("|")
+				: "";
+		const signature = `${skinEpoch()}\0${tierRevision()}\0${mode}\0${statsSignature(stats)}\0${keySignature}\0${terminalRows}`;
 		const cached = this.cachedRender;
 		if (cached !== null && cached.width === width && cached.signature === signature) return cached.lines;
 		const lines = buildWelcomeDashboardLines(
@@ -808,12 +984,13 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			terminalRows,
 		);
 		this.cachedRender = { width, signature, lines };
+		if (mode === "launchpad") noteLaunchpadPainted();
 		return lines;
 	}
 
 	isLaunchpadVisible(): boolean {
 		const settings = this.deps.getSettings?.();
-		return this.mode === "launchpad" && richWelcomeEnabled(settings?.interface?.demo, settings?.interface?.outputDetail);
+		return this.mode === "launchpad" && richWelcomeEnabled(settings?.interface?.demo);
 	}
 
 	/** Collapse once, before first-submit dispatch can append transcript output. */
@@ -856,7 +1033,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		}
 	}
 
-	private stats(mode: WelcomeDashboardMode): WelcomeDashboardStats {
+	private stats(mode: WelcomeDashboardMode, terminalRows: number | undefined): WelcomeDashboardStats {
 		const settings = this.deps.getSettings?.();
 		const statuses = this.deps.providers.list();
 		const current = findCurrentStatus(statuses, settings);
@@ -870,8 +1047,16 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		// changes while the header cannot show it. `/new` returns to the launchpad
 		// and the check resumes on the next frame.
 		const launchpad = mode === "launchpad";
+		const outputStyle = settings?.interface?.outputDetail ?? "standard";
+		const preload = launchpad && this.context?.cwd === cwd ? this.context.preload : null;
+		// Only facts a row shows are read: usage and the earlier session cost a provider read and a history scan.
+		const kept = launchpad ? keptFacts(factCap(outputStyle, terminalRows), Boolean(preload)) : new Set<FactKey>();
+		const window = current?.contextWindowProvenance === "runtime-default" ? null : current?.capabilities.contextWindow;
 		return {
-			outputStyle: settings?.interface?.outputDetail ?? "standard",
+			outputStyle,
+			firstBoot: launchpad && firstBootHere(),
+			contextWindow: typeof window === "number" && window > 0 ? window : null,
+			...(kept.has("last") ? { lastSession: this.lastSessionFor(cwd), now: this.now() } : {}),
 			cwd,
 			workspace,
 			targetLabel,
@@ -879,13 +1064,12 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			route,
 			routeReason,
 			projectContext: launchpad ? this.projectContext(cwd) : "checking",
-			projectPreload: launchpad && this.context?.cwd === cwd ? this.context.preload : null,
+			projectPreload: preload,
 			submitKeyLabel: null,
 			autonomy: settings?.safety?.autonomy ?? "default",
 			yoloConfinement: effectiveYoloConfinement(settings?.safety),
 			shellContained: this.deps.getShellContained?.() ?? null,
-			quota:
-				launchpad && settings?.interface?.outputDetail === "detailed" ? (this.deps.getQuotaSummary?.() ?? null) : null,
+			quota: kept.has("usage") ? (this.deps.getQuotaSummary?.() ?? null) : null,
 			targets: "",
 			fleet: "",
 			projectConfig: this.deps.getProjectConfigReminder?.() ?? null,
@@ -918,6 +1102,29 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		// A refresh is in flight or pending; keep showing the last real reading
 		// rather than flickering to `checking` on every TTL boundary.
 		return cached.state;
+	}
+
+	/**
+	 * The earlier session, or `checking` while its read is pending. The read runs once per directory off the frame;
+	 * off a terminal it never runs, since a piped process has no launchpad an operator reads.
+	 */
+	private lastSessionFor(cwd: string): WelcomeLastSession | null | "checking" {
+		if (this.last?.cwd === cwd) return this.last.value;
+		const read = process.stdout.isTTY === true ? this.deps.readLastSession : undefined;
+		if (read === undefined || this.lastReading || this.disposed) return "checking";
+		this.lastReading = true;
+		this.schedule(() => {
+			void read(cwd, this.now())
+				.catch(() => null)
+				.then((value) => {
+					this.lastReading = false;
+					if (this.disposed) return;
+					this.last = { cwd, value };
+					this.cachedRender = null;
+					this.deps.onFactsRefreshed?.();
+				});
+		});
+		return "checking";
 	}
 
 	private scheduleContextRefresh(cwd: string): void {
@@ -979,9 +1186,11 @@ export function createBootWelcome(
 	const target = settings.targets.find((entry) => entry.id === settings.chat.target);
 	const model = settings.chat.model ?? target?.defaultModel ?? null;
 	const version = readClioVersionLabel();
-	const mode = richWelcomeEnabled(settings.interface.demo, settings.interface.outputDetail) ? "launchpad" : "session";
+	const mode = richWelcomeEnabled(settings.interface.demo) ? "launchpad" : "session";
 	const stats: WelcomeDashboardStats = {
 		outputStyle: settings.interface.outputDetail,
+		firstBoot: mode === "launchpad" && firstBootHere(),
+		lastSession: "checking",
 		cwd: process.cwd(),
 		workspace: null,
 		targetLabel: settings.chat.target ?? null,
@@ -1004,6 +1213,7 @@ export function createBootWelcome(
 			if (cached?.width === width && cached.rows === rows && cached.epoch === skinEpoch()) return cached.lines;
 			const lines = buildWelcomeDashboardLines(stats, version, width, mode, getKeyLabel, SESSION_TAGLINE, rows);
 			cached = { width, rows, epoch: skinEpoch(), lines };
+			if (mode === "launchpad") noteLaunchpadPainted();
 			return lines;
 		},
 		invalidate: () => {

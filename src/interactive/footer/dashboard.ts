@@ -461,14 +461,15 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 						actionKeyLabel("clio-coder.status.toggle") ?? "",
 						scrollOffset,
 					)
-				: renderCompactDashboard(current, width);
+				: renderCompactDashboard(current, width, terminalRows());
 		if (!Array.isArray(grid)) {
 			scrollOffset = grid.offset;
 			maxScrollOffset = grid.maxOffset;
 			scrollRows = Math.max(1, grid.rows.length - 4);
 		}
 		const lines = [...(Array.isArray(grid) ? grid : grid.rows), ...supplementary];
-		deps.onHeightChange?.(Math.max(2, lines.length));
+		// The footer's own height per tier (1, 2 or 3 rows, a notice adds one), so the dock above it sizes to what is left.
+		deps.onHeightChange?.(Math.max(1, lines.length));
 		return lines.join("\n");
 	}
 	const refresh = (): void => {

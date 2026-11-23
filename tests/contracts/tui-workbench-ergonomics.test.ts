@@ -130,17 +130,22 @@ for (const width of widths) {
 		assert.equal(editor.getText(), "Research 研究 é");
 	});
 
-	test(`footer keeps workspace and context while the composer owns the phase at ${width} columns`, () => {
+	test(`footer keeps workspace and model identity while the composer owns the phase at ${width} columns`, () => {
 		const snapshot = footerState();
+		snapshot.session.targetId = "blade";
+		snapshot.session.modelId = "dynamo/qwopus";
 		snapshot.workspace.cwd = `/tmp/${"very-long-parent/".repeat(5)}研究-worktree`;
 		snapshot.agent.statusText = "Needs approval";
 		snapshot.dispatchRows = [];
 		const rows = renderCompactDashboard(snapshot, width);
 		bounded(rows, width);
 		assert.match(plain(rows), /v050/u);
-		assert.match(plain(rows), /68\.5K\/262\.1K/u);
-		if (width > 60) assert.match(plain(rows), /tree/u);
-		else assert.equal(rows.length, 1);
+		assert.match(plain(rows), /qwopus/u);
+		// Context fill is the rail's; the status line never repeats it.
+		assert.doesNotMatch(plain(rows), /68\.5K\/262\.1K/u);
+		assert.match(plain(rows), /tree/u);
+		// Standard is two rows; a W1 width keeps the status line alone.
+		assert.equal(rows.length, width < 44 ? 1 : 2);
 	});
 
 	test(`empty board and multiple-worker navigation fit ${width} columns`, () => {
@@ -172,11 +177,13 @@ for (const width of widths) {
 		const original = structuredClone(entry);
 		let rows = renderWorkerEntryLines(entry, width, { detail: transcriptDetail("detailed"), terminalRows: 14 });
 		bounded(rows, width);
-		// Slice T 1b keeps current work inline and omits unknown telemetry.
+		// The row states the current call; detailed adds one telemetry row with the route and the last call, and omits
+		// unknown telemetry.
 		assert.equal(rows.length, 2);
 		assert.equal(rows[0], renderWorkerEntryLines(entry, width, { detail: transcriptDetail("compact") })[0]);
-		assert.match(plain(rows), /\n {2}│ blade-gateway .*▹ current-研究/u);
-		assert.doesNotMatch(plain(rows), /state |tools |tokens|last:|newest|\?/u);
+		assert.match(plain(rows), /^● ◆ scout +current-研究/u);
+		assert.match(plain(rows), /\n {2}│ blade-gateway /u);
+		assert.doesNotMatch(plain(rows), /state |tools |\?/u);
 		assert.deepEqual(entry, original);
 		entry.result = { outcome: "succeeded", durationMs: 1000 };
 		entry.pending = false;
@@ -267,6 +274,8 @@ for (const width of widths) {
 for (const width of widths) {
 	test(`idle footer still names live workers at ${width} columns`, () => {
 		const snapshot = footerState();
+		snapshot.session.targetId = "blade";
+		snapshot.session.modelId = "dynamo/qwopus";
 		snapshot.workspace.cwd = `/tmp/${"parent/".repeat(15)}worktree`;
 		snapshot.agent.statusText = "Ready";
 		snapshot.dispatchRows = [
@@ -277,7 +286,7 @@ for (const width of widths) {
 		bounded(rows, width);
 		assert.match(plain(rows), /2 workers/u);
 		if (width > 60) assert.match(plain(rows), /tree/u);
-		else assert.equal(rows.length, 2);
+		else assert.equal(rows.length, width < 44 ? 1 : 2);
 	});
 }
 

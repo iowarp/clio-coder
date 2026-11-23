@@ -462,6 +462,8 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 			if (effect.audience !== undefined) cloned.audience = effect.audience;
 			if (effect.fact !== undefined) cloned.fact = effect.fact;
 			if (effect.failedChecks !== undefined) cloned.failedChecks = [...effect.failedChecks];
+			if (effect.retired !== undefined)
+				cloned.retired = { checks: [...effect.retired.checks], change: effect.retired.change };
 			return cloned;
 		}
 		case "annotate_tool_result": {

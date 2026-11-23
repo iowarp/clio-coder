@@ -1,6 +1,7 @@
 import type { ExitSummaryStyle, OutputStyle } from "../core/defaults.js";
-import { resolveExitSummaryStyle } from "../core/defaults.js";
 import { formatFooterTokens } from "../core/display-units.js";
+import { formatCount } from "../core/format-time.js";
+import { tierPolicy } from "../core/presentation-tier.js";
 import { plainOutcomeLabel, refusedCallsWords } from "../domains/dispatch/failure-headline.js";
 import { formatOpenDecision } from "../domains/safety/autonomy-window.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -8,12 +9,15 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.j
 import type { ExitSummarySnapshot } from "./exit-summary-collector.js";
 import {
 	brandMark,
+	type ClioTheme,
 	clioTheme,
 	exactRouteLabel,
 	formatElapsed,
 	formatTargetLabel,
-	frame,
-	innerDivider,
+	GLYPH,
+	rule,
+	type SemanticRole,
+	widthClass,
 } from "./theme/index.js";
 import { economyReceipt, USAGE_NOT_MEASURED } from "./usage-words.js";
 
@@ -23,25 +27,61 @@ const countLabel = (value: number | string, noun: string): string =>
 
 const SPEND_NOT_AVAILABLE = "not available";
 
+/** What joins the facts of one row, and the only place a narrow row may break (E4). */
+const FACT_SEPARATOR = ` ${GLYPH.sep} `;
+
 /**
- * `3 outcomes · 2 reproduce or numeric-compare passes · 1 worker run host-verified · 4,115 session tokens per outcome ·
- * ~$0.0041 est per outcome`, or the words saying there is nothing to divide by. The share divides the whole session's
- * spend, so it says so: `172,879 tokens each` beside one worker's outcome read as that worker's 75,311 (bt-11). A
- * share keeps the session row's own mark, so an unpriced route reads `cost not measured` here as it does on /usage.
+ * How the collector and the read model join the facts of one display. It is their data format, not this card's
+ * chrome, so it stays the literal they write whatever the glyph mode.
  */
+const DISPLAY_SEPARATOR = " · ";
+
+/** A display the collector joined, back into its facts. No read-model display contains the separator. */
+const factsOf = (line: string): string[] => line.split(DISPLAY_SEPARATOR).filter((fact) => fact.length > 0);
+
+/** Body rows start two cells in, under the title rule's text. */
+const INDENT = "  ";
+
+/**
+ * Token figures in the short form a shared row uses (`2.0k`, `455.9k`), keeping their `≥` or `≈` mark; the cache
+ * read reads `cached`. Only figures of 1,000 and more change, so a note's small counts stay as written.
+ */
+function shortFigures(text: string): string {
+	return text
+		.replace(/^cache read /u, "cached ")
+		.replace(/\d{1,3}(?:,\d{3})+|\d{4,}/gu, (digits) => formatCount(Number(digits.replaceAll(",", ""))));
+}
+
+/** A labelled token figure of the collector's breakdown, as opposed to a note on what no call reported. */
+const TOKEN_FIGURE = /^(?:in|out|cache read|cache write|reasoning) \S+$/u;
+
 /**
  * The route-priced cost, then the receipt the economics fold gives: extra cost, seat credits, API equivalent. A
  * declared pool fee belongs to its period, so it is never on this per-session line.
  */
-function sessionCostFacts(spend: ExitSummarySnapshot["spend"]): string[] {
+function sessionCostFacts(spend: ExitSummarySnapshot["spend"], tier: OutputStyle): string[] {
 	if (spend.kind !== "ready") return [SPEND_NOT_AVAILABLE];
-	return [spend.cost, ...(spend.economy ? economyReceipt(spend.economy, null).map((part) => part.text) : [])];
+	const facts = [spend.cost, ...(spend.economy ? economyReceipt(spend.economy, null).map((part) => part.text) : [])];
+	if (tier === "detailed") return facts;
+	// Below detailed a row states one unknown at most (2.9): the measured parts, else the route cost's own words.
+	const known = facts.filter((fact) => !UNKNOWN_COST.test(fact));
+	return known.length > 0 ? known : [spend.cost];
 }
 
-function verifiedFacts(spend: ExitSummarySnapshot["spend"]): string[] {
+/** A cost part that states no amount: `not measured`, `extra unknown`, `API equiv unknown`. */
+const UNKNOWN_COST = new RegExp(`${USAGE_NOT_MEASURED}|\\bunknown\\b|${SPEND_NOT_AVAILABLE}`, "u");
+
+/**
+ * `3 outcomes · 2 reproduce or numeric-compare passes · 4,115 session tokens per outcome · ~$0.0041 est per outcome`,
+ * or the words saying there is nothing to divide by. The share divides the whole session's spend, so it says so
+ * (bt-11).
+ */
+function verifiedFacts(spend: ExitSummarySnapshot["spend"], tier: OutputStyle): string[] {
 	if (spend.kind !== "ready") return [SPEND_NOT_AVAILABLE];
 	const verified = spend.verified;
-	if (verified.kind === "none") return [verified.words];
+	// Below detailed a row states one unknown, so the none case keeps its two facts short (2.9).
+	if (verified.kind === "none")
+		return tier === "detailed" ? verified.words.split("; ") : ["no judged outcome", "command checks are not counted"];
 	return [
 		countLabel(verified.count, "outcome"),
 		...verified.parts,
@@ -51,12 +91,6 @@ function verifiedFacts(spend: ExitSummarySnapshot["spend"]): string[] {
 		verified.cost === USAGE_NOT_MEASURED ? `cost ${USAGE_NOT_MEASURED}` : `${verified.cost} per outcome`,
 	];
 }
-
-/** What joins the facts of one row, and the only place a narrow row may break (E4). */
-const FACT_SEPARATOR = " · ";
-
-/** A wrapped row's continuation starts here, so it reads as the same row rather than a new one. */
-const HANG = "  ";
 
 /**
  * The route as the session header spells it, `target · model`, naming the target once: a model id that already starts
@@ -68,11 +102,11 @@ function routeLabel(target: string, model: string): string {
 }
 
 /**
- * `lead` then the facts, laid out in `room` cells. A row breaks only between facts and drops the separator at the
- * break, so no row starts or ends with `·` and no fact is split across rows (E4). A fact wider than a whole row has no
- * boundary to break at, so it alone wraps at its spaces.
+ * `lead` then the facts, laid out in `room` cells, each later row starting with `hang`. A row breaks only between
+ * facts and drops the separator at the break, so no row starts or ends with `·` and no fact is split across rows
+ * (E4). A fact wider than a whole row has no boundary to break at, so it alone wraps at its spaces.
  */
-function factRows(lead: string, facts: ReadonlyArray<string>, room: number): string[] {
+function factRows(lead: string, facts: ReadonlyArray<string>, room: number, hang: string): string[] {
 	const rows: string[] = [];
 	let row = lead;
 	let bare = true;
@@ -84,33 +118,28 @@ function factRows(lead: string, facts: ReadonlyArray<string>, room: number): str
 			bare = false;
 			continue;
 		}
-		const alone = visibleWidth(`${HANG}${fact}`) <= room;
-		if (!alone && fact.includes(FACT_SEPARATOR)) {
+		const alone = visibleWidth(`${hang}${fact}`) <= room;
+		if (!alone && fact.includes(DISPLAY_SEPARATOR)) {
 			// A compound fact too wide for any row, such as a `target · model` route, breaks at its own boundaries by the
-			// same rule, rather than at a space that leaves its `·` ending a row. It starts a row of its own, so its first
-			// part never reads as one more fact of the row before it.
+			// same rule. It starts a row of its own, so its first part never reads as one more fact of the row before it.
 			if (!bare) {
 				rows.push(row);
-				row = HANG;
+				row = hang;
 				bare = true;
 			}
-			queue.unshift(...fact.split(FACT_SEPARATOR));
+			queue.unshift(...fact.split(DISPLAY_SEPARATOR));
 			continue;
 		}
 		if (!bare) {
 			rows.push(row);
-			row = HANG;
-		} else if (row === lead && lead !== "" && alone) {
-			// A first fact that fits a row of its own moves under its label rather than splitting beside it.
-			rows.push(lead.trimEnd());
-			row = HANG;
+			row = hang;
 		}
 		if (visibleWidth(`${row}${fact}`) <= room) {
 			row = `${row}${fact}`;
 			bare = false;
 			continue;
 		}
-		const firstRoom = Math.max(1, room - Math.max(visibleWidth(row), HANG.length));
+		const firstRoom = Math.max(1, room - visibleWidth(row));
 		const [first = "", ...overflow] = wrapTextWithAnsi(fact, firstRoom);
 		bare = false;
 		if (overflow.length === 0) {
@@ -118,18 +147,15 @@ function factRows(lead: string, facts: ReadonlyArray<string>, room: number): str
 			continue;
 		}
 		// Only the first piece sits beside the label; the rest rewraps at the row's width under the hanging indent, or a
-		// 40-column card wrapped every continuation as narrow as the label left the first (CLI-P57).
+		// narrow card wrapped every continuation as narrow as the label left the first (CLI-P57).
 		const remainder = fact.startsWith(first) ? fact.slice(first.length).trimStart() : overflow.join(" ");
-		const rest = wrapTextWithAnsi(remainder, Math.max(1, room - HANG.length));
-		rows.push(`${row}${first}`, ...rest.slice(0, -1).map((piece) => `${HANG}${piece}`));
-		row = `${HANG}${rest.at(-1) ?? ""}`;
+		const rest = wrapTextWithAnsi(remainder, Math.max(1, room - hang.length));
+		rows.push(`${row}${first}`, ...rest.slice(0, -1).map((piece) => `${hang}${piece}`));
+		row = `${hang}${rest.at(-1) ?? ""}`;
 	}
 	if (!bare || rows.length === 0) rows.push(row);
 	return rows;
 }
-
-/** A display the collector joined with ` · `, back into its facts. No read-model display contains the separator. */
-const factsOf = (line: string): string[] => line.split(FACT_SEPARATOR).filter((fact) => fact.length > 0);
 
 type ModelSpend = Extract<ExitSummarySnapshot["spend"], { kind: "ready" }>["models"][number];
 
@@ -144,16 +170,6 @@ function modelList(snapshot: ExitSummarySnapshot): Array<{ target: string; model
 		(model) => !recorded.some((row) => row.target === model.target && row.model === model.model),
 	);
 	return [...recorded, ...unreported];
-}
-
-/** `2 questions auto-resolved`, `1 permission ask timed out`, or null when Clio answered nothing alone (#421). */
-function unattendedSummary(snapshot: Pick<ExitSummarySnapshot, "unattended">): string[] | null {
-	const { questions, permissions } = snapshot.unattended;
-	const parts = [
-		...(questions > 0 ? [`${countLabel(questions, "question")} auto-resolved`] : []),
-		...(permissions > 0 ? [`${countLabel(permissions, "permission ask")} timed out and denied`] : []),
-	];
-	return parts.length > 0 ? parts : null;
 }
 
 /** Hook files shown before the line says how many more there are. */
@@ -197,33 +213,71 @@ function internalGitSummary(snapshot: Pick<ExitSummarySnapshot, "internalGit">):
 }
 
 /**
- * `contained yolo · 42 tool calls, 12 min, 310k cap tokens · paused at the 40-call cap · 2 open decisions`, then the
- * decisions themselves when `list`, or null when the session never ran at yolo (ob-yolo D7).
+ * The autonomy disclosure: what ran without the operator this visit. A yolo window says how long and how many calls
+ * ran unasked, then what stopped it and the decisions it left; what Clio answered for an absent operator follows
+ * (#421). Standard and up add the confinement and the cap tokens, detailed lists the open decisions. Null when the
+ * visit had no yolo window and answered nothing alone (ob-yolo D7).
  */
-function autonomySummary(snapshot: Pick<ExitSummarySnapshot, "autonomy">, list: boolean): string[] | null {
+function autonomyFacts(snapshot: ExitSummarySnapshot, tier: OutputStyle): string[] | null {
+	const facts: string[] = [];
 	const report = snapshot.autonomy;
-	if (report === undefined) return null;
-	const used = report.usage;
-	const total = report.openDecisions.length + report.openDecisionsOmitted;
-	const halted =
-		report.halted === null
-			? []
-			: [
-					report.halted.kind === "judge"
-						? `ended by the safety judge (${report.halted.detail})`
-						: report.halted.kind === "exploration"
-							? `ended by the read-streak gate (${report.halted.detail})`
-							: `paused at the ${report.halted.detail}`,
-				];
-	const shown = list ? report.openDecisions.slice(-GIT_HOOKS_SHOWN).map(formatOpenDecision) : [];
-	return [
-		`${report.confinement} yolo`,
-		`${countLabel(used.toolCalls, "tool call")}, ${formatElapsed(used.activeMs)}, ${formatFooterTokens(used.tokens)} cap tokens`,
-		...halted,
-		total === 0 ? "no open decisions" : countLabel(total, "open decision"),
-		...shown,
-		...(shown.length > 0 && total > shown.length ? [`${count(total - shown.length)} more`] : []),
+	if (report !== undefined) {
+		const total = report.openDecisions.length + report.openDecisionsOmitted;
+		facts.push(
+			`yolo for ${formatElapsed(report.usage.activeMs)}`,
+			`${countLabel(report.usage.toolCalls, "call")} ran unasked`,
+		);
+		if (report.halted !== null)
+			facts.push(
+				report.halted.kind === "judge"
+					? `ended by the safety judge (${report.halted.detail})`
+					: report.halted.kind === "exploration"
+						? `ended by the read-streak gate (${report.halted.detail})`
+						: `paused at the ${report.halted.detail}`,
+			);
+		if (total > 0) facts.push(countLabel(total, "open decision"));
+		if (tier !== "compact") {
+			facts.push(report.confinement, `${formatFooterTokens(report.usage.tokens)} cap tokens`);
+			if (total === 0) facts.push("no open decisions");
+		}
+		if (tier === "detailed") {
+			const shown = report.openDecisions.slice(-GIT_HOOKS_SHOWN).map(formatOpenDecision);
+			facts.push(...shown);
+			if (shown.length > 0 && total > shown.length) facts.push(`${count(total - shown.length)} more`);
+		}
+	}
+	const { questions, permissions } = snapshot.unattended;
+	if (questions > 0) facts.push(`${countLabel(questions, "question")} auto-resolved`);
+	if (permissions > 0) facts.push(`${countLabel(permissions, "permission ask")} timed out and denied`);
+	return facts.length > 0 ? facts : null;
+}
+
+/**
+ * The failed-check disclosure, worst first: workers whose validation failed or whose record was compromised, check
+ * commands that failed, then records left unverified. Null when every check this visit held.
+ */
+function checkFacts(snapshot: ExitSummarySnapshot): { facts: string[]; failed: boolean } | null {
+	const against = new Map<string, number>();
+	let compromised = 0;
+	let unverified = 0;
+	for (const worker of snapshot.workers) {
+		if (worker.against !== undefined) against.set(worker.against, (against.get(worker.against) ?? 0) + 1);
+		else if (worker.record === "compromised") compromised += 1;
+		else if (worker.record === "unverified") unverified += 1;
+	}
+	const failedChecks = snapshot.tools.find((tool) => tool.tool === "verify")?.failures ?? 0;
+	const facts = [
+		...[...against].map(([words, n]) =>
+			words === "validation failed"
+				? `${GLYPH.error} ${countLabel(n, "worker")} failed validation`
+				: `${GLYPH.error} ${countLabel(n, "worker")}: ${words}`,
+		),
+		...(compromised > 0 ? [`${GLYPH.error} ${count(compromised)} compromised`] : []),
+		...(failedChecks > 0 ? [`${GLYPH.error} ${countLabel(failedChecks, "check")} failed`] : []),
+		...(unverified > 0 ? [`${GLYPH.warn} ${count(unverified)} unverified`] : []),
 	];
+	if (facts.length === 0) return null;
+	return { facts, failed: against.size > 0 || compromised > 0 || failedChecks > 0 };
 }
 
 function workerOutcome(worker: ExitSummarySnapshot["workers"][number]): string {
@@ -249,21 +303,72 @@ function outcomes(snapshot: ExitSummarySnapshot): string[] {
 }
 
 /**
+ * One worker as the detailed card names it: its state glyph, agent, run id and the word that state rests on. The
+ * worst of the process outcome, the validation verdict and the record's integrity wins (2.7).
+ */
+function workerFact(worker: ExitSummarySnapshot["workers"][number]): string {
+	const ended = worker.outcome === "succeeded" || worker.outcome === "completed";
+	const [glyph, word] =
+		worker.against !== undefined
+			? [GLYPH.error, worker.against]
+			: !ended
+				? [
+						worker.outcome === "running" || worker.outcome === "cancelled" || worker.outcome === "canceled"
+							? GLYPH.cancelled
+							: GLYPH.error,
+						worker.outcome === "running" ? "stopped by quitting" : plainOutcomeLabel(worker.outcome),
+					]
+				: worker.record === "compromised"
+					? [GLYPH.error, worker.record]
+					: worker.record === "reviewed" || worker.record === "grounded"
+						? [GLYPH.ok, worker.record]
+						: [GLYPH.warn, worker.record === "not available" ? "record not read" : worker.record];
+	return `${glyph} ${worker.agent} ${worker.runId} ${word}`;
+}
+
+/** A timeline event's offset into the visit, `M:SS`. */
+function clock(ms: number): string {
+	const seconds = Math.floor(Math.max(0, ms) / 1000);
+	return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+interface Section {
+	label: string;
+	/** Each entry is one logical line of facts; a later entry starts a row of its own. */
+	lines: ReadonlyArray<ReadonlyArray<string>>;
+	/** What a cut counts: `… 5 more events`. */
+	noun?: string;
+	/** Said after the cut count: `resume to inspect`. */
+	tail?: string;
+	/** The most physical rows the section may take whatever the budget left. */
+	maxRows?: number;
+	role?: SemanticRole;
+}
+
+/** A physical row before painting: the label cells, then the value. */
+interface Row {
+	label: string;
+	value: string;
+}
+
+/**
  * The closing line for a visit with no conversation: a launch that sent nothing,
  * or one that only ran a fleet plan. There is no session a resume line could
  * name, so it says that rather than leaving the exit silent.
  */
-export function renderExitWithoutConversation(
-	preference: ExitSummaryStyle,
-	outputStyle: OutputStyle,
-	tty: boolean,
-): string[] {
-	if (resolveExitSummaryStyle(preference, outputStyle) === "off") return [];
-	const line = "CLIO Coder · no conversation this visit, so there is nothing to resume.";
+export function renderExitWithoutConversation(preference: ExitSummaryStyle, tty: boolean): string[] {
+	if (preference === "off") return [];
+	const line = `CLIO Coder ${GLYPH.sep} no conversation this visit, so there is nothing to resume.`;
 	return [tty ? clioTheme().fg("annotation", line) : line];
 }
 
-/** Pure formatting: no ledger readers, filesystem work, or provider calls on exit. */
+/**
+ * The exit summary (5.2): an open island of a titled light rule, a label column of facts and the resume command last.
+ * `outputStyle` sizes it and `height` caps it in physical rows (`exitRows`), claimed in order: the title, the resume
+ * command, the autonomy and failed-check disclosures, then routine facts in tier order. A section that does not fit
+ * shortens to its first rows and says how much it left out. Without a TTY the rows are plain, unwrapped and carry no
+ * rule. Pure formatting: no ledger readers, filesystem work, or provider calls on exit.
+ */
 export function renderExitSummary(
 	snapshot: ExitSummarySnapshot | null,
 	preference: ExitSummaryStyle,
@@ -273,222 +378,279 @@ export function renderExitSummary(
 	height = 48,
 ): string[] {
 	if (snapshot === null) return [];
-	const style = resolveExitSummaryStyle(preference, outputStyle);
-	const resume = `To resume: clio-coder --resume ${sanitizeCallTargetText(snapshot.sessionId)}`;
-	if (style === "off") return [resume];
+	const id = sanitizeCallTargetText(snapshot.sessionId);
+	const resumeCommand = `clio-coder --resume ${id}`;
+	if (preference === "off") return [`To resume: ${resumeCommand}`];
+	const tier = outputStyle;
 	const theme = tty ? clioTheme() : null;
-	const room = Math.max(1, Math.floor(width) - (tty ? 4 : 0));
-	const lines: string[] = [];
-	const paint = (row: string, lead: number): string =>
-		theme ? `${theme.fg("fieldName", row.slice(0, lead))}${theme.fg("body", row.slice(lead))}` : row;
-	/** One row of facts; the lead is the row's own `Key: ` and is painted as a field name. */
-	const add = (key: string, facts: ReadonlyArray<string>): void => {
-		const lead = `${key}: `;
-		const clean = facts.map((fact) => sanitizeCallTargetText(fact));
-		if (!tty) {
-			lines.push(`${lead}${clean.join(FACT_SEPARATOR)}`);
-			return;
-		}
-		const rows = factRows(lead, clean, room);
-		lines.push(paint(rows[0] ?? lead, lead.length), ...rows.slice(1).map((row) => paint(row, 0)));
-	};
-	const divide = (): void => {
-		if (theme) lines.push(innerDivider(theme, room));
-	};
-	const models = modelList(snapshot);
+	const cells = Math.max(1, Math.floor(width));
+	const narrow = tty && widthClass(cells) !== "W3" && widthClass(cells) !== "W4" && widthClass(cells) !== "W5";
+	// Labels stack above their values under 44 cells (W1).
+	const stacked = tty && widthClass(cells) === "W1";
+	const room = tty ? Math.max(1, cells - INDENT.length) : Number.POSITIVE_INFINITY;
+	const cap = tierPolicy(tier).exitRows(Math.max(1, Math.floor(height)));
+
 	const spend = snapshot.spend;
-	const unattended = unattendedSummary(snapshot);
-	const gitHooks = gitHooksSummary(snapshot);
-	const internalGit = internalGitSummary(snapshot);
-	const autonomy = autonomySummary(snapshot, style !== "brief");
-	const session = snapshot.sessionName ? `${snapshot.sessionName} · ${snapshot.sessionId}` : snapshot.sessionId;
-	// The command and its id are one thing to type, so a narrow card breaks before the command, never inside it (E7).
-	const resumeCommand = `clio-coder --resume ${sanitizeCallTargetText(snapshot.sessionId)}`;
-	const resumeRows =
-		!tty || visibleWidth(resume) <= room
-			? [resume]
-			: ["To resume:", resumeCommand].flatMap((row) => wrapTextWithAnsi(row, room));
-	const resumeLines = resumeRows.map((row) => theme?.fg("commandHint", row) ?? row);
-	const visitTime = `${formatElapsed(snapshot.wallMs)} this visit`;
-	if (!tty) lines.push(`CLIO Coder · Session ${style === "report" ? "report" : "summary"} · this visit`);
-	// Session names can be arbitrarily long; keep identity from consuming the page.
-	lines.push(truncateToWidth(paint(`Session: ${sanitizeCallTargetText(session)}`, "Session: ".length), room));
-	// Tokens, cost and verified outcomes cover every visit and branch the session paid for, workers included, so their
-	// rows say "Session" under a card headed "this visit"; the visit's own share is its call count (#434 §11.3). A fork's
-	// visit card otherwise read its visit turns beside an unlabeled whole-fork Verified count (drv-tui11).
-	if (style === "brief") {
+	const models = modelList(snapshot);
+	const sessions = snapshot.visitSessions ?? 1;
+	const otherTools = snapshot.otherSessionToolCalls ?? 0;
+	const autonomy = autonomyFacts(snapshot, tier);
+	const checks = checkFacts(snapshot);
+	const clean = (facts: ReadonlyArray<string>): string[] => facts.map((fact) => sanitizeCallTargetText(fact));
+
+	const disclosures: Section[] = [
+		...(autonomy ? [{ label: "autonomy", lines: [clean(autonomy)], role: "body" as const }] : []),
+		...(checks
+			? [
+					{ label: "checks", lines: [clean(checks.facts)], role: checks.failed ? ("error" as const) : ("warning" as const) },
+				]
+			: []),
+	];
+	const routine: Section[] = [];
+	if (tier === "compact") {
 		const model = models.at(-1);
-		add("Model", [
-			model
-				? `${routeLabel(model.target, model.model)}${models.length > 1 ? ` (+${countLabel(models.length - 1, "other")})` : ""}`
-				: "not reported",
-		]);
-		add("Session tokens", spend.kind === "ready" ? factsOf(spend.tokens) : [SPEND_NOT_AVAILABLE]);
-		add("Session cost", [...sessionCostFacts(spend), visitTime]);
-		add("Session verified", verifiedFacts(spend));
-		// What Clio decided while the operator was away is never folded away.
-		if (unattended !== null) add("Unattended", unattended);
-		// Nor is a hook that runs outside the sandbox on the next git command.
-		if (gitHooks !== null) add("Git hooks", gitHooks);
-		if (internalGit !== null) add("Internal git", internalGit);
-		// Yolo's account of what it ran alone and what it left for the operator.
-		if (autonomy !== null) add("Autonomy", autonomy);
+		routine.push({
+			label: "",
+			lines: [
+				clean([
+					spend.kind === "ready"
+						? `${shortFigures(factsOf(spend.tokens)[0] ?? "")} tokens`
+						: `tokens ${SPEND_NOT_AVAILABLE}`,
+					spend.kind === "ready" ? (sessionCostFacts(spend, tier)[0] ?? spend.cost) : `cost ${SPEND_NOT_AVAILABLE}`,
+					...(model ? [routeLabel(model.target, model.model)] : []),
+					...(spend.kind !== "ready"
+						? []
+						: spend.verified.kind === "none"
+							? ["no judged outcome"]
+							: [countLabel(spend.verified.count, "verified outcome")]),
+				]),
+			],
+		});
 	} else {
-		// A turn is one operator prompt; a model call is one request sent, so a turn that used tools or retried makes
-		// several. Workers' calls count here as /usage counts them, their observed writes count as files, and the key
-		// says so; a worker whose writes went unrecorded is named rather than read as one that changed nothing.
+		const hooks = gitHooksSummary(snapshot);
+		const git = internalGitSummary(snapshot);
+		// A hook runs outside the sandbox on the next git command, so these follow the disclosures.
+		if (hooks) disclosures.push({ label: "hooks", lines: [clean(hooks)], role: "warning" });
+		if (git) disclosures.push({ label: "git", lines: [clean(git)], role: "warning" });
+		// A turn is one operator prompt; a model call is one request sent, workers' included as /usage counts them.
 		// A visit that switched sessions keeps its counts across them, but the call count is the named session's.
 		const unrecorded = snapshot.unrecordedWorkerFiles;
-		const sessions = snapshot.visitSessions ?? 1;
-		const otherTools = snapshot.otherSessionToolCalls ?? 0;
-		// Turns name the session's own share beside the visit's, as the call count beside them is the session's (TUI-6).
-		add(snapshot.workers.length > 0 ? "This visit, workers included" : "This visit", [
-			`${countLabel(snapshot.turns, "turn")}${snapshot.sessionTurns !== undefined && sessions > 1 ? ` (${count(snapshot.sessionTurns)} in this session)` : ""}`,
-			...(spend.kind === "ready"
-				? [`${countLabel(spend.visitCalls, "model call")}${sessions > 1 ? " in this session" : ""}`]
-				: []),
-			`${countLabel(snapshot.files.length, "file")} changed${unrecorded > 0 ? ` (${countLabel(unrecorded, "worker")} kept no write record)` : ""}`,
-			countLabel(snapshot.workers.length, "worker"),
-			...(sessions > 1 ? [countLabel(sessions, "session")] : []),
-		]);
-		add("Time", [
-			visitTime,
-			...(spend.kind !== "ready"
-				? [`model time ${SPEND_NOT_AVAILABLE}`]
-				: spend.callTime !== null
-					? [`${spend.callTime} in model calls`]
-					: []),
-			...(spend.kind === "ready" && spend.callTimeCoverage !== null ? [spend.callTimeCoverage] : []),
-		]);
-		add("Session tokens", spend.kind === "ready" ? factsOf(spend.breakdown) : [SPEND_NOT_AVAILABLE]);
-		add("Session cost", sessionCostFacts(spend));
-		add("Session verified", verifiedFacts(spend));
-		if (style === "report" && spend.kind === "ready" && spend.cache !== null) {
-			add("Cache", [
-				`${spend.cache.share} of prompt tokens read from cache`,
-				...(spend.cache.lastTurn !== null ? [`last turn ${spend.cache.lastTurn}`] : []),
-				...(spend.cache.replay !== null ? [spend.cache.replay] : []),
-			]);
-		}
-		if (snapshot.compactions > 0) add("Compactions", [count(snapshot.compactions)]);
-		if (unattended !== null) add("Unattended", unattended);
-		if (gitHooks !== null) add("Git hooks", gitHooks);
-		if (internalGit !== null) add("Internal git", internalGit);
-		// Yolo's account of what it ran alone and what it left for the operator.
-		if (autonomy !== null) add("Autonomy", autonomy);
-		if (style === "standard") {
-			divide();
-			if (models.length > 0) {
-				for (const model of models.slice(0, 3)) add("Model", [routeLabel(model.target, model.model)]);
-				if (models.length > 3) add("Models", [`${count(models.length - 3)} more`]);
-			}
-			// Tools are the named session's own; a visit that switched sessions says what the others ran instead of
-			// dropping the row when this session ran none (TUI-6).
-			if (snapshot.tools.length > 0 || otherTools > 0) {
-				add("Tools", [
-					...(snapshot.tools.length === 0 ? ["none in this session"] : []),
-					...snapshot.tools.slice(0, 8).map(({ tool, count: n }) => `${tool} ${count(n)}`),
-					...(snapshot.tools.length > 8 ? [countLabel(snapshot.tools.length - 8, "more kind")] : []),
-					...(otherTools > 0 ? [`${countLabel(otherTools, "call")} in other sessions this visit`] : []),
-				]);
-			}
-			if (snapshot.workers.length > 0) add("Workers", outcomes(snapshot));
-		} else {
-			const sections: Array<{ title: string; rows: string[]; shown: number }> = [];
-			/** Each entry is one detail line's facts, wrapped between them like any row. */
-			const section = (title: string, entries: ReadonlyArray<ReadonlyArray<string>>): void => {
-				if (entries.length === 0) return;
-				const rows = entries.flatMap((facts) => {
-					const clean = facts.map((fact) => sanitizeCallTargetText(fact));
-					return tty ? factRows("", clean, room) : [clean.join(FACT_SEPARATOR)];
-				});
-				sections.push({ title, rows, shown: 0 });
-			};
-			section(
-				`Models (${models.length})`,
-				models.flatMap(({ target, model, spend: recorded }) =>
-					recorded
-						? [
-								[routeLabel(target, model), countLabel(recorded.calls, "model call"), `cost ${recorded.cost}`],
-								factsOf(recorded.breakdown),
-							]
-						: [[routeLabel(target, model), "no call record names it"]],
-				),
-			);
-			if (spend.kind === "ready" && spend.byRole.length > 0) section("Model calls by agent", [factsOf(spend.byRole)]);
-			section(
-				`Tools (${countLabel(
-					snapshot.tools.reduce((sum, tool) => sum + tool.count, 0),
-					"call",
-				)}${sessions > 1 ? " in this session" : ""})`,
-				[
-					...snapshot.tools.map((tool) => [
-						`${tool.tool}: ${countLabel(tool.count, "call")}`,
-						countLabel(tool.failures, "observed failure"),
-					]),
-					...(otherTools > 0 ? [[`other sessions this visit: ${countLabel(otherTools, "call")}`]] : []),
-				],
-			);
-			section(
-				`Workers (${count(snapshot.workers.length)}; ${outcomes(snapshot).join(", ")})`,
-				snapshot.workers.map((worker) => [
-					worker.agent,
-					plainOutcomeLabel(workerOutcome(worker)),
-					`run record ${worker.record}`,
-					routeLabel(worker.target, worker.model),
-					worker.runId,
+		routine.push({
+			label: "work",
+			lines: [
+				clean([
+					`${countLabel(snapshot.turns, "turn")}${snapshot.sessionTurns !== undefined && sessions > 1 ? ` (${count(snapshot.sessionTurns)} in this session)` : ""}`,
+					...(spend.kind === "ready"
+						? [`${countLabel(spend.visitCalls, "model call")}${sessions > 1 ? " in this session" : ""}`]
+						: []),
+					countLabel(snapshot.workers.length, "worker"),
+					`${countLabel(snapshot.files.length, "file")} changed${unrecorded > 0 ? ` (${countLabel(unrecorded, "worker")} kept no write record)` : ""}`,
+					...(sessions > 1 ? [countLabel(sessions, "session")] : []),
+					...(snapshot.compactions > 0 ? [countLabel(snapshot.compactions, "compaction")] : []),
 				]),
-			);
-			section(
-				`Files (${count(snapshot.files.length)}; change observations)`,
-				snapshot.fileChanges.map((file) => [file.path, count(file.count)]),
-			);
-			const permissions = Object.entries(snapshot.permissions).filter(([, n]) => n > 0);
-			section(
-				"Approvals & refusals",
-				permissions.map(([status, n]) => [`${status}: ${count(n)}`]),
-			);
-			section(
-				`Timeline${snapshot.timelineOmitted ? ` (${countLabel(snapshot.timelineOmitted, "earlier highlight")} omitted)` : ""}`,
-				snapshot.timeline.map((event) => [formatElapsed(event.elapsedMs), event.text]),
-			);
-			// One terminal page, capped at 80 rows; reserve resume and an omission row per group.
-			const page = Math.max(16, Math.min(80, Math.floor(height) - 1));
-			const budget = Math.max(0, page - (tty ? 2 : 0) - lines.length - resumeLines.length - 1);
-			const active = sections.slice(0, Math.max(0, Math.floor((budget - 1) / 3)));
-			let spare = budget - active.length * 2 - (active.length < sections.length ? 1 : 0);
-			while (spare > 0) {
-				let progressed = false;
-				for (const group of active) {
-					if (group.shown >= group.rows.length || spare <= 0) continue;
-					group.shown += 1;
-					spare -= 1;
-					progressed = true;
-				}
-				if (!progressed) break;
-			}
-			for (const group of active) {
-				lines.push(truncateToWidth(theme ? theme.fg("heading", group.title) : group.title, room));
-				lines.push(...group.rows.slice(0, group.shown));
-				if (group.shown < group.rows.length)
-					lines.push(truncateToWidth(`… ${countLabel(group.rows.length - group.shown, "more detail line")}`, room));
-			}
-			if (active.length < sections.length)
-				lines.push(
-					truncateToWidth(`… ${countLabel(sections.length - active.length, "more section")}; resume to inspect`, room),
-				);
+			],
+		});
+		routine.push({
+			label: "time",
+			lines: [
+				clean([
+					formatElapsed(snapshot.wallMs),
+					...(spend.kind !== "ready"
+						? [`model time ${SPEND_NOT_AVAILABLE}`]
+						: spend.callTime !== null
+							? [`${spend.callTime} in model calls`]
+							: []),
+					...(spend.kind === "ready" && spend.callTimeCoverage !== null ? [spend.callTimeCoverage] : []),
+				]),
+			],
+		});
+		routine.push({
+			label: "tokens",
+			lines: [
+				clean(
+					spend.kind === "ready"
+						? factsOf(spend.breakdown)
+								// Standard states the figures; detailed adds the notes on what no call reported (2.9).
+								.filter((fact) => tier === "detailed" || TOKEN_FIGURE.test(fact))
+								.map(shortFigures)
+						: [SPEND_NOT_AVAILABLE],
+				),
+			],
+		});
+		routine.push({ label: "cost", lines: [clean(sessionCostFacts(spend, tier))] });
+		routine.push({ label: "verified", lines: [clean(verifiedFacts(spend, tier))] });
+		if (tier === "detailed" && spend.kind === "ready" && spend.cache !== null) {
+			routine.push({
+				label: "cache",
+				lines: [
+					clean([
+						`${spend.cache.share} of prompt tokens read from cache`,
+						...(spend.cache.lastTurn !== null ? [`last turn ${spend.cache.lastTurn}`] : []),
+						...(spend.cache.replay !== null ? [spend.cache.replay] : []),
+					]),
+				],
+			});
 		}
+		if (models.length > 0) {
+			routine.push(
+				tier === "detailed"
+					? {
+							label: models.length > 1 ? "models" : "model",
+							lines: models.map(({ target, model, spend: recorded }) =>
+								clean([routeLabel(target, model), recorded ? countLabel(recorded.calls, "call") : "no call record names it"]),
+							),
+							noun: "models",
+						}
+					: {
+							label: models.length > 1 ? "models" : "model",
+							lines: [
+								clean([
+									...models.slice(0, 3).map((model) => routeLabel(model.target, model.model)),
+									...(models.length > 3 ? [`+${count(models.length - 3)} more`] : []),
+								]),
+							],
+						},
+			);
+		}
+		if (tier === "detailed" && spend.kind === "ready" && spend.byRole.length > 0)
+			routine.push({ label: "calls", lines: [clean(factsOf(spend.byRole))] });
+		// Tools are the named session's own; a visit that switched sessions says what the others ran instead of
+		// dropping the row when this session ran none (TUI-6). Kinds sort by count, then name.
+		if (snapshot.tools.length > 0 || otherTools > 0) {
+			const kinds = [...snapshot.tools]
+				.filter((tool) => tool.count > 0)
+				.sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool))
+				.map(({ tool, count: n }) => `${tool} ${count(n)}`);
+			const failures = snapshot.tools.reduce((sum, tool) => sum + tool.failures, 0);
+			const extras = [
+				...(kinds.length === 0 ? ["none in this session"] : []),
+				...(otherTools > 0 ? [`${countLabel(otherTools, "call")} in other sessions this visit`] : []),
+				...(tier === "detailed" && failures > 0 ? [`${count(failures)} failed`] : []),
+			];
+			routine.push({ label: "tools", lines: [clean([...kinds, ...extras])], noun: "kinds", maxRows: stacked ? 2 : 1 });
+		}
+		if (snapshot.workers.length > 0)
+			routine.push(
+				tier === "detailed"
+					? { label: "workers", lines: [clean(snapshot.workers.map(workerFact))], noun: "workers" }
+					: { label: "workers", lines: [clean(outcomes(snapshot))] },
+			);
+		if (tier === "detailed" && snapshot.timeline.length > 0)
+			routine.push({
+				label: "timeline",
+				lines: [clean(snapshot.timeline.map((event) => `${clock(event.elapsedMs)} ${event.text}`))],
+				noun: "events",
+				tail: "resume to inspect",
+			});
 	}
-	divide();
-	lines.push(...resumeLines);
-	return theme
-		? frame(
-				theme,
-				`${brandMark(theme)} ${theme.style("wordmark", "CLIO Coder", { bold: true })} ${theme.fg("brandCopper", style === "report" ? "· Session report" : "· Session summary")}`,
-				lines,
-				Math.max(4, Math.floor(width)),
-				// Whole or absent: `t…` in the corner said nothing; the Time row still says `this visit`.
-				Math.floor(width) >= 52 ? { rightMeta: "this visit" } : {},
-			)
-		: lines;
+
+	const resumeSection: Section = { label: "resume", lines: [[resumeCommand]], role: "commandHint" };
+	const all = [...disclosures, ...routine, resumeSection];
+	const column = all.reduce((widest, section) => Math.max(widest, section.label.length), 0) + 2;
+	const pad = (label: string): string => (label.length === 0 ? "" : label.padEnd(column));
+	const hang = " ".repeat(column);
+
+	/** A section's rows showing `shown` of its units, then the count of the rest when `mark` asks for it. */
+	const layout = (section: Section, shown: number, mark: boolean): Row[] => {
+		const multi = section.lines.length > 1;
+		const units = multi ? section.lines.length : (section.lines[0]?.length ?? 0);
+		const hidden = units - shown;
+		const more =
+			hidden > 0 && mark
+				? [
+						`${GLYPH.ellipsis} ${count(hidden)} more${section.noun ? ` ${section.noun}` : ""}${section.tail ? `${FACT_SEPARATOR}${section.tail}` : ""}`,
+					]
+				: [];
+		const lines = multi
+			? [...section.lines.slice(0, shown), ...(more.length > 0 ? [more] : [])]
+			: [[...(section.lines[0] ?? []).slice(0, shown), ...more]];
+		if (stacked) {
+			const values = lines.flat().flatMap((fact) => wrapTextWithAnsi(fact, room));
+			return section.label.length === 0
+				? values.map((value) => ({ label: "", value }))
+				: [{ label: section.label, value: "" }, ...values.map((value) => ({ label: "", value }))];
+		}
+		const rows: Row[] = [];
+		lines.forEach((facts, index) => {
+			const lead = index === 0 ? pad(section.label) : hang;
+			const indent = section.label.length === 0 ? "" : hang;
+			factRows(lead, facts, room, indent).forEach((row, at) => {
+				const labelCells = index === 0 && at === 0 ? lead.length : 0;
+				rows.push({ label: row.slice(0, labelCells), value: row.slice(labelCells) });
+			});
+		});
+		return rows;
+	};
+
+	/**
+	 * The most of a section that fits `budget` rows. Compact drops whole facts silently, so each row stays one row (a
+	 * label and its value under 44 cells); the other tiers say how much they cut. A compact disclosure whose first fact
+	 * alone is too wide keeps its first rows, the last closed with an ellipsis. Null when not even the cut count fits.
+	 */
+	const fit = (section: Section, budget: number): Row[] | null => {
+		const perSection = tier === "compact" ? (stacked ? 2 : 1) : budget;
+		const limit = Math.min(budget, perSection, section.maxRows ?? budget);
+		if (limit <= 0) return null;
+		const units = section.lines.length > 1 ? section.lines.length : (section.lines[0]?.length ?? 0);
+		const mark = tier !== "compact";
+		for (let shown = units; shown >= (mark ? 0 : 1); shown -= 1) {
+			const rows = layout(section, shown, mark);
+			if (rows.length <= limit) return rows;
+		}
+		if (mark) return null;
+		const rows = layout(section, 1, false).slice(0, limit);
+		const last = rows.at(-1);
+		if (last === undefined) return null;
+		const valueRoom = Math.max(1, room - visibleWidth(last.label) - 2);
+		rows[rows.length - 1] = {
+			label: last.label,
+			value: `${truncateToWidth(last.value, valueRoom, "", false)} ${GLYPH.ellipsis}`,
+		};
+		return rows;
+	};
+
+	// The command and its id are one thing to copy, so under 72 cells it takes a row of its own, never broken inside.
+	const resumeRows: Row[] =
+		narrow || stacked
+			? [{ label: "resume", value: "" }, ...wrapTextWithAnsi(resumeCommand, room).map((value) => ({ label: "", value }))]
+			: [{ label: pad("resume"), value: resumeCommand }];
+
+	let left = cap - 1 - resumeRows.length;
+	const body: Array<{ section: Section; rows: Row[] }> = [];
+	for (const section of [...disclosures, ...routine]) {
+		const rows = fit(section, left);
+		if (rows === null) continue;
+		body.push({ section, rows });
+		left -= rows.length;
+	}
+	body.push({ section: resumeSection, rows: resumeRows });
+
+	const sessionText = `${narrow ? "" : "session "}${snapshot.sessionName ? `${sanitizeCallTargetText(snapshot.sessionName)} ${GLYPH.sep} ` : ""}${id}`;
+	const meta = tier === "compact" ? formatElapsed(snapshot.wallMs) : "this visit";
+	const paint = (row: Row, role: SemanticRole): string => {
+		const text = `${row.label}${row.value}`;
+		if (!theme) return `${INDENT}${text}`.trimEnd();
+		return `${INDENT}${theme.fg("annotation", row.label)}${theme.fg(role, row.value)}`;
+	};
+	const lines = body.flatMap(({ section, rows }) => rows.map((row) => paint(row, section.role ?? "body")));
+	if (!theme) return [`CLIO Coder ${GLYPH.sep} ${sessionText} ${GLYPH.sep} ${meta}`, ...lines];
+	return [titleRule(theme, cells, sessionText, meta), ...lines];
+}
+
+/**
+ * `>C_ CLIO Coder · session <id> ───── this visit ─`: the meta goes before the title is shortened, and a title wider
+ * than the row closes with an ellipsis.
+ */
+function titleRule(theme: ClioTheme, cells: number, sessionText: string, meta: string): string {
+	const head = `${GLYPH.brand} CLIO Coder ${GLYPH.sep} `;
+	const metaCells = visibleWidth(meta) + 4;
+	const withMeta = visibleWidth(head) + visibleWidth(sessionText) + 3 + metaCells <= cells;
+	const textRoom = Math.max(1, cells - visibleWidth(head) - 3 - (withMeta ? metaCells : 0));
+	const text = truncateToWidth(sessionText, textRoom, GLYPH.ellipsis, false);
+	const title = `${brandMark(theme)} ${theme.style("wordmark", "CLIO Coder", { bold: true })} ${theme.fg("annotation", GLYPH.sep)} ${theme.style("heading", text, { bold: true })}`;
+	return rule(theme, cells, {
+		left: title,
+		leftRaw: true,
+		...(withMeta ? { right: meta, rightTail: theme.fg("divider", GLYPH.rule) } : {}),
+	});
 }

@@ -1,20 +1,25 @@
 /**
  * Transcript notices. Routine notices keep a mark in the gutter:
  * `i` information, `✓` success,
- * `⚠` a warning, `✗` an error, `↻` a provider retry and `⊘` a turn the
+ * `!` a warning, `✗` an error, `↻` a provider retry and `⊘` a turn the
  * operator cancelled. The mark carries the level in shape and color, the text
- * stays neutral, and a wrapped notice hangs in the content column. The
- * `[Clio Coder]` product tag is dropped because the whole transcript is
- * Clio's; a subsystem tag such as `[/context compact]` or `[model]` stays,
- * dim, because it names which part of Clio is speaking. An advisory, text
- * addressed to the operator such as a tip, a reminder, a memory note or a
- * multi-sentence approval, budget or fleet notice, gets a titled frame instead
- * so it does not read as part of the assistant's answer.
+ * stays neutral. The `[Clio Coder]` product tag is dropped because the whole
+ * transcript is Clio's; a subsystem tag such as `[/context compact]` or
+ * `[model]` names which part of Clio is speaking. An advisory, text addressed
+ * to the operator such as a tip, a reminder, a memory note or a multi-sentence
+ * approval, budget or fleet notice, gets a titled open island instead so it
+ * does not read as part of the assistant's answer.
  * Which of the two a notice gets is decided by its `source`, never by width.
+ *
+ * `renderTranscriptNotice` is the tier-aware form an event notice takes in the
+ * transcript: one row, info suppressed at compact, the subsystem tag kept only
+ * at detailed. `renderNoticeRow` is the whole notice, as command output and
+ * /view print it.
  *
  * Pure: no I/O, no module-level mutable state beyond the shared theme handle.
  */
 
+import { tierPolicy } from "../../core/presentation-tier.js";
 import { reminderGist } from "../../core/reminder-gist.js";
 import { taskMemoryNoteForDisplay } from "../../domains/memory/task-memory-ref.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
@@ -22,7 +27,7 @@ import { redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { NoticeSource } from "../../session-control/notice-source.js";
 import { CARD_CALLOUT_MAX_WIDTH, CARD_GUTTER } from "../card.js";
-import { type ClioToken, clioTheme, frame, GLYPH } from "../theme/index.js";
+import { type ClioToken, clioTheme, GLYPH, rule } from "../theme/index.js";
 
 const theme = clioTheme();
 
@@ -88,15 +93,20 @@ const CALLOUTS: Readonly<Record<NoticeSource, { title: string; body(text: string
 	hooks: { title: "Hooks", body: withoutTag("middleware") },
 };
 
+/**
+ * An advisory as an open island: the level's mark and the source's title on a light rule, the text indented 2 under
+ * it and no bottom rule. Transcript scrollback is not repainted on resize, so the island stops at 88 cells.
+ */
 function renderCallout(source: NoticeSource, text: string, mark: NoticeMark, width: number): string[] {
 	const { title, body: display } = CALLOUTS[source];
 	const shown = display(text);
 	if (shown.length === 0) return [];
 	if (width < 8) return wrapTextWithAnsi(theme.fg("body", shown), Math.max(1, width));
-	const boxWidth = Math.min(CARD_CALLOUT_MAX_WIDTH, width - CARD_GUTTER.length);
+	const islandWidth = Math.min(CARD_CALLOUT_MAX_WIDTH, width);
 	const { glyph, token } = MARKS[mark];
-	const heading = theme.style(token, `${glyph} ${title}`, { bold: true });
-	return frame(theme, heading, wrapTextWithAnsi(shown, boxWidth - 4), boxWidth).map((line) => `${CARD_GUTTER}${line}`);
+	const heading = `${theme.fg(token, glyph)} ${theme.style("sectionHeading", title, { bold: true })}`;
+	const rows = wrapTextWithAnsi(theme.fg("body", shown), islandWidth - CARD_GUTTER.length);
+	return [rule(theme, islandWidth, { left: heading, leftRaw: true }), ...rows.map((row) => `${CARD_GUTTER}${row}`)];
 }
 
 /**
@@ -118,10 +128,9 @@ function renderReminderRow(text: string, mark: NoticeMark, width: number): strin
 }
 
 /**
- * One transcript notice. An event keeps its mark in the gutter; an advisory,
- * which the emitting source names, sits in a titled frame. A reminder keeps one
- * row unless `full` asks for its whole text, as /view does. Empty text renders
- * nothing.
+ * One whole notice. An event keeps its mark in the gutter and wraps; an advisory, which the emitting source names,
+ * is an open island. A reminder keeps one row unless `full` asks for its whole text, as /view does. Empty text
+ * renders nothing.
  */
 export function renderNoticeRow(
 	text: string,
@@ -145,6 +154,37 @@ export function renderNoticeRow(
 				? packFacts(body, inner).map((row) => theme.fg("body", row))
 				: trimStrandedSeparators(wrapTextWithAnsi(styled, inner));
 	return rows.map((row, index) => (index === 0 ? `${theme.fg(token, glyph)} ${row}` : `${CARD_GUTTER}${row}`));
+}
+
+/** Info and success restate what went well; compact shows outcomes that need the operator and suppresses them. */
+function isQuiet(mark: NoticeMark): boolean {
+	return mark === "info" || mark === "success";
+}
+
+/**
+ * A notice as the transcript shows it at the current tier. Compact suppresses info and success; every tier gives an
+ * event one row, cut with `…`, and only detailed keeps its subsystem tag. An advisory keeps its island or reminder
+ * row. `full` is /view, which prints the whole notice at every tier.
+ */
+export function renderTranscriptNotice(
+	text: string,
+	mark: NoticeMark,
+	width: number,
+	source?: NoticeSource,
+	full = false,
+): string[] {
+	if (full) return renderNoticeRow(text, mark, width, source, true);
+	const policy = tierPolicy();
+	if (policy.noticeFloor === "warning" && isQuiet(mark)) return [];
+	if (source !== undefined) return renderNoticeRow(text, mark, width, source);
+	const body = noticeText(text);
+	if (body.length === 0) return [];
+	const tagged = LEADING_TAG.exec(body);
+	const untagged = tagged ? (tagged[2] ?? "").trimStart() : body;
+	const styled =
+		tagged && (policy.noticeSourceTag || untagged.length === 0) ? styleTaggedNotice(body) : theme.fg("body", untagged);
+	const { glyph, token } = MARKS[mark];
+	return [truncateToWidth(`${theme.fg(token, glyph)} ${styled}`, Math.max(1, width), GLYPH.ellipsis)];
 }
 
 /**

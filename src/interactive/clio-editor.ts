@@ -107,10 +107,16 @@ export interface EditorChrome {
 		detail?: string;
 		namesRoute?: boolean;
 	} | null;
-	/** What keeps running behind a dock that hides this rail; null at idle. `escVerb` is what the dock's Esc does. */
+	/**
+	 * What kept running behind a dock that hid the rail. The overlay rule now carries the run's state (`getBesideCard`), so
+	 * the editor no longer draws this strip; the field stays until the sweep removes the strip.
+	 */
 	getLiveWorkStrip?: (width: number, escVerb: string | null) => string | null;
-	/** What keeps going beside a card holding the rail, in at most `room` cells; null when nothing does. */
-	getBesideCard?: (room: number) => string | null;
+	/**
+	 * The live run's short state for a focused surface's top rule: cue, state and elapsed, then the actor (units 3 and 4
+	 * of the overlay rule). `room` bounds the quoted object of the fullest form. Null when nothing runs.
+	 */
+	getBesideCard?: (room: number) => OverlayRunState | null;
 	/** An active extension workspace's rail segment, painted in place of the model nickname. */
 	getWorkspaceRail?: (width: number) => string | null;
 	/** Published context accounting; rendering never refreshes the estimate. */
@@ -164,6 +170,50 @@ export interface EditorChrome {
 }
 
 type ComposerMode = "MESSAGE" | "FOLLOW-UP" | "STEER" | "CONFIRM" | "PREPARING" | "COMPACTING";
+
+/** The run's state as an overlay rule shows it right of the title, after the surface's own pending state. */
+export interface OverlayRunState {
+	/** The state words and elapsed after the cue, fullest first: `running `pytest -q` · 13s`, then `running · 13s`. */
+	forms: readonly string[];
+	/** Work that is moving takes the animated cue; anything else holds `glyph` still. */
+	live: boolean;
+	glyph: string;
+	token: ClioToken;
+	/** Who the state belongs to, when the words do not already say it (`GPT-6-luna`); null for a worker count. */
+	actor: string | null;
+}
+
+/** One unit of an overlay rule's right end: plain text for fitting, painted when drawn. */
+interface RuleUnit {
+	text: string;
+	paint: (text: string) => string;
+}
+
+/**
+ * Cells an overlay rule spends around its labels: `━ ` and a space around the title, at least one cell of fill, and a
+ * space and `━` on each side of the right units. Without right units the title keeps `━ `, its space and one fill cell.
+ */
+const OVERLAY_RULE_CHROME = 7;
+const OVERLAY_RULE_BARE = 4;
+
+/**
+ * The shell unit that leads the bottom rail while the draft is a shell line, fullest first. The distinguishing word
+ * comes first, so every shorter form keeps it.
+ */
+const SHELL_RAIL_FORMS: Readonly<Record<"shared" | "private", readonly string[]>> = {
+	shared: [
+		`$ shared shell ${GLYPH.sep} Enter runs ${GLYPH.sep} CLIO Coder sees the output`,
+		`$ shared shell ${GLYPH.sep} Enter runs`,
+		`$ shared ${GLYPH.sep} Enter runs`,
+		"$ shared",
+	],
+	private: [
+		`$ private shell ${GLYPH.sep} Enter runs ${GLYPH.sep} output stays with you`,
+		`$ private shell ${GLYPH.sep} Enter runs`,
+		`$ private ${GLYPH.sep} Enter runs`,
+		"$ private",
+	],
+};
 
 function composerMode(chrome: EditorChrome, text: string): ComposerMode {
 	if (chrome.isAwaitingApproval?.() ?? false) return "CONFIRM";
@@ -270,11 +320,6 @@ function thinkingRailHint(
 	return Array.from({ length: THINKING_BRAIN_SLOTS }, (_, index) =>
 		theme.fg(index < count ? activeRole : "thinkingInactive", index < count || nerdFontEnabled() ? glyph : "○"),
 	).join(" ");
-}
-
-/** What the rail says Esc does on this surface, read from the same fitted hint the operator sees. */
-function dockEscVerb(hint: string | undefined): string | null {
-	return /\[Esc\] ([^·]+?)(?: ·|$)/u.exec(hint?.trim() ?? "")?.[1] ?? null;
 }
 
 /** The line the empty composer shows for the mode it is in. */
@@ -632,8 +677,7 @@ export class ClioEditor extends Editor {
 		const mode = composerMode(this.chrome, text);
 		const rail = this.railState(mode);
 		const steer = this.steerTarget(text);
-		// `!!` runs a shell line whose output stays out of the model's context, so the rail says so even when idle.
-		const keptShell = text.trimStart().startsWith("!!");
+		// A shell draft says so on the bottom rail, so the top rail keeps the run's state, wait cause and Esc.
 		const draftLabel = steer
 			? theme.style(
 					steer.live && !steer.queued ? "draftState" : "warning",
@@ -648,11 +692,9 @@ export class ClioEditor extends Editor {
 				)
 			: mode === "STEER"
 				? theme.fg("draftState", mode)
-				: (mode === "FOLLOW-UP" || mode === "MESSAGE") && this.chrome.getDraftOperator?.(text) === "shell" && keptShell
-					? theme.fg("draftState", `SHELL ${GLYPH.dot} output kept from CLIO Coder`)
-					: mode === "FOLLOW-UP" && this.chrome.getDraftOperator?.(text)
-						? theme.fg("draftState", this.chrome.getDraftOperator(text) === "shell" ? "SHELL" : "COMMAND")
-						: "";
+				: mode === "FOLLOW-UP" && this.chrome.getDraftOperator?.(text) === "command"
+					? theme.fg("draftState", "COMMAND")
+					: "";
 		const join = (parts: readonly string[]): string =>
 			parts.filter(Boolean).join(theme.fg("separator", ` ${GLYPH.dot} `));
 		const note = this.draftNote(width);
@@ -787,36 +829,73 @@ export class ClioEditor extends Editor {
 	/**
 	 * Thinking and context stay together; permission and menu keys have priority.
 	 * An approval passes its own `room` and the rail then carries its keys alone.
+	 * `lead` is the draft's own units at the rail's left end: the shell unit's forms, fullest first, and the line count
+	 * of a draft taller than the editor.
 	 */
-	private bottomRail(width: number, theme: ClioTheme, rail: EditorRailState, right = "", keysOnlyRoom?: number): string {
-		const room = keysOnlyRoom ?? this.railLabelRoom(width);
-		const fittedRight = truncateToWidth(right, room, GLYPH.ellipsis, false);
-		const groupRoom =
-			keysOnlyRoom !== undefined ? 0 : Math.max(0, room - visibleWidth(fittedRight) - (fittedRight ? 3 : 0));
-		// The status after the keys fits whole or is dropped whole: a menu's
-		// keys own the room and `think high` cut to `th…` told the operator nothing.
-		const thinkingText =
-			groupRoom > 0
-				? thinkingRailHint(
-						theme,
-						this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
-						groupRoom,
-					)
-				: "";
-		const thinking = visibleWidth(thinkingText) <= groupRoom ? thinkingText : "";
-		// The occupancy bar is drawn at its full width or not at all: a bar
-		// shrunk to one cell beside a menu's keys is a fragment, not a reading.
-		const context = this.chrome.getContextUsage?.();
-		const cells = width >= 100 ? 10 : 6;
-		const usageRoom = Math.max(0, groupRoom - visibleWidth(thinking) - (thinking ? 3 : 0));
-		const usageLabel = "ctx ";
-		const usageBar =
-			context && usageRoom >= cells + usageLabel.length
-				? contextRailHint(context, cells, usageRoom - usageLabel.length, theme)
-				: "";
-		// The bar alone is a shape to guess at; the word says what fills it.
-		const usage = usageBar ? `${theme.fg("annotation", usageLabel)}${usageBar}` : "";
-		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("separator", ` ${GLYPH.dot} `));
+	private bottomRail(
+		width: number,
+		theme: ClioTheme,
+		rail: EditorRailState,
+		right = "",
+		keysOnlyRoom?: number,
+		lead?: { shell: readonly string[]; lines: string | null },
+	): string {
+		const separator = theme.fg("separator", ` ${GLYPH.dot} `);
+		const group = (room: number): { hint: string; thinking: string; usage: string } => {
+			const fittedRight = truncateToWidth(right, Math.max(0, room), GLYPH.ellipsis, false);
+			const groupRoom =
+				keysOnlyRoom !== undefined ? 0 : Math.max(0, room - visibleWidth(fittedRight) - (fittedRight ? 3 : 0));
+			// The status after the keys fits whole or is dropped whole: a menu's
+			// keys own the room and `think high` cut to `th…` told the operator nothing.
+			const thinkingText =
+				groupRoom > 0
+					? thinkingRailHint(
+							theme,
+							this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
+							groupRoom,
+						)
+					: "";
+			const thinking = visibleWidth(thinkingText) <= groupRoom ? thinkingText : "";
+			// The occupancy bar is drawn at its full width or not at all: a bar
+			// shrunk to one cell beside a menu's keys is a fragment, not a reading.
+			const context = this.chrome.getContextUsage?.();
+			const cells = width >= 100 ? 10 : 6;
+			const usageRoom = Math.max(0, groupRoom - visibleWidth(thinking) - (thinking ? 3 : 0));
+			const usageLabel = "ctx ";
+			const usageBar =
+				context && usageRoom >= cells + usageLabel.length
+					? contextRailHint(context, cells, usageRoom - usageLabel.length, theme)
+					: "";
+			// The bar alone is a shape to guess at; the word says what fills it.
+			const usage = usageBar ? `${theme.fg("annotation", usageLabel)}${usageBar}` : "";
+			return { hint: [fittedRight, usage, thinking].filter(Boolean).join(separator), thinking, usage };
+		};
+		if (lead !== undefined && keysOnlyRoom === undefined && (lead.shell.length > 0 || lead.lines !== null)) {
+			const leftOf = (shell: string | undefined): string =>
+				[shell === undefined ? "" : this.paintShellUnit(theme, shell), lead.lines ?? ""].filter(Boolean).join(separator);
+			// The right side's units leave in their own order; the shell unit gives up one step before each of them does.
+			// A unit that changes form has given up one piece, and one that leaves the rail whole has given up two: its
+			// lesser form and its last.
+			const full = group(Number.MAX_SAFE_INTEGER);
+			const cost = (shown: string, whole: string): number => (shown === whole ? 0 : !shown && whole ? 2 : 1);
+			const dropped = (shown: { thinking: string; usage: string }): number =>
+				cost(shown.thinking, full.thinking) + cost(shown.usage, full.usage);
+			const forms = lead.shell.length > 0 ? lead.shell : [undefined];
+			let chosen: { left: string; hint: string } | null = null;
+			for (const [step, form] of forms.entries()) {
+				const left = leftOf(form);
+				const room = width - OVERLAY_RULE_CHROME - visibleWidth(left);
+				if (room < 0) continue;
+				const shown = group(room);
+				chosen = { left, hint: shown.hint };
+				if (dropped(shown) <= step) break;
+			}
+			if (chosen !== null) {
+				const left = `${theme.fg(rail.tone ?? "composerRail", GLYPH.laneRule)} ${chosen.left}`;
+				return renderEditorRail(theme, width, { left, leftRaw: true, right: chosen.hint, rightRaw: true }, rail);
+			}
+		}
+		const hint = group(keysOnlyRoom ?? this.railLabelRoom(width)).hint;
 		const loopRoom = Math.max(0, width - visibleWidth(hint) - (hint ? 7 : 4));
 		const loop = loopRoom > 0 ? this.chrome.getLoopRail?.(loopRoom) : null;
 		// The current task takes only what the rail's state left over, and an active loop outranks it.
@@ -824,6 +903,32 @@ export class ClioEditor extends Editor {
 		const leftText = loop ?? task;
 		const left = leftText ? `${theme.fg(rail.tone ?? "composerRail", GLYPH.laneRule)} ${leftText}` : "";
 		return renderEditorRail(theme, width, { left, leftRaw: true, right: hint, rightRaw: true }, rail);
+	}
+
+	/** `$ shared shell · Enter runs · CLIO Coder sees the output`: the kind of shell first, then the key, then who sees it. */
+	private paintShellUnit(theme: ClioTheme, form: string): string {
+		const [kind = "", key, disclosure] = form.split(` ${GLYPH.sep} `);
+		return [
+			theme.style("draftState", kind, { bold: true }),
+			key === undefined ? "" : theme.fg("keyboardHint", key),
+			disclosure === undefined ? "" : theme.fg("annotation", disclosure),
+		]
+			.filter(Boolean)
+			.join(theme.fg("separator", ` ${GLYPH.sep} `));
+	}
+
+	/** The draft's own units for the bottom rail: which shell a `!` line runs in, and how tall a draft is that overflows. */
+	private draftRailLead(
+		text: string,
+		hidden: number,
+		theme: ClioTheme,
+	): { shell: readonly string[]; lines: string | null } {
+		const shell =
+			this.chrome.getDraftOperator?.(text) === "shell"
+				? SHELL_RAIL_FORMS[text.trimStart().startsWith("!!") ? "private" : "shared"]
+				: [];
+		const count = this.getLines().length;
+		return { shell, lines: hidden > 0 ? theme.fg("positionCount", `${count} lines`) : null };
 	}
 
 	private railLabelRoom(width: number): number {
@@ -901,8 +1006,76 @@ export class ClioEditor extends Editor {
 			rail,
 			right,
 			(steer || this.isShowingAutocomplete()) && mode !== "CONFIRM" ? this.approvalLabelRoom(width) : undefined,
+			mode === "CONFIRM" ? undefined : this.draftRailLead(text, this.renderedTopHidden + hiddenLineCount, theme),
 		);
 		return this.renderedBottomRail;
+	}
+
+	/**
+	 * The top rule of a focused surface: its title at the left (`━ Models ━`), and at the right, fitted from what is
+	 * left and dropped from the end, the surface's own pending state, the live run's cue, state and elapsed, and the
+	 * actor. The title never drops; it shortens only once every right unit but the pending state is gone. The rule never
+	 * carries the run's Esc: the surface owns Esc while it is focused, and its key rail says what Esc does.
+	 */
+	private overlayRule(
+		width: number,
+		theme: ClioTheme,
+		rail: EditorRailState,
+		title: { plain: (room: number) => string; paint: (text: string) => string },
+		pending: RuleUnit | null,
+	): string {
+		const run = this.chrome.getBesideCard?.(width) ?? null;
+		const cue =
+			run === null
+				? ""
+				: run.live
+					? activityCue(this.railAnimationTime, this.chrome.getMotionEnabled?.() ?? true)
+					: run.glyph;
+		const separator = theme.fg("separator", ` ${GLYPH.sep} `);
+		const runUnits: RuleUnit[] =
+			run?.forms.map((form) => ({
+				text: `${cue} ${form}`,
+				paint: (text) => {
+					const [state = "", ...facts] = text.split(` ${GLYPH.sep} `);
+					return [theme.fg(run.token, state), ...facts.map((fact) => theme.fg("annotation", fact))].join(separator);
+				},
+			})) ?? [];
+		const actor: RuleUnit | null =
+			run?.actor != null ? { text: run.actor, paint: (text) => theme.fg("activeModelIdentity", text) } : null;
+		const head = pending === null ? [] : [pending];
+		const withActor = actor === null ? [] : runUnits.map((unit) => [...head, unit, actor]);
+		const withoutActor = [...runUnits.map((unit) => [...head, unit]), head];
+		const cells = (units: readonly RuleUnit[]): number =>
+			units.reduce((sum, unit, index) => sum + visibleWidth(unit.text) + (index === 0 ? 0 : 3), 0);
+		const chrome = (units: readonly RuleUnit[]): number => (units.length > 0 ? OVERLAY_RULE_CHROME : OVERLAY_RULE_BARE);
+		const whole = title.plain(Math.max(1, width - OVERLAY_RULE_BARE));
+		let fitted: { title: string; units: readonly RuleUnit[] } | null = null;
+		for (const units of [...withActor, ...withoutActor, []]) {
+			if (visibleWidth(whole) + cells(units) + chrome(units) <= width) {
+				fitted = { title: whole, units };
+				break;
+			}
+		}
+		// Past that the title shortens to keep the pending state, and is cut only when nothing else is left on the rule.
+		if (fitted === null) {
+			for (const units of [head, []]) {
+				const room = width - cells(units) - chrome(units);
+				const shorter = room > 0 ? title.plain(room) : "";
+				if (room > 0 && visibleWidth(shorter) <= room) {
+					fitted = { title: shorter, units };
+					break;
+				}
+			}
+		}
+		const room = Math.max(1, width - OVERLAY_RULE_BARE);
+		const shown = fitted ?? { title: truncateToWidth(title.plain(room), room, GLYPH.ellipsis, false), units: [] };
+		const right = shown.units.map((unit) => unit.paint(unit.text)).join(separator);
+		return renderEditorRail(
+			theme,
+			width,
+			{ left: title.paint(shown.title), leftRaw: true, leftLead: 1, right, rightRaw: true },
+			rail,
+		);
 	}
 
 	/** A docked command or menu: its title and keys on the composer's rails, its body between them. */
@@ -933,30 +1106,35 @@ export class ClioEditor extends Editor {
 		// A body that stops asking to grow returns to the shared height, so the slice is also capped at what it was given.
 		body = body.slice(0, adaptive ? dockAdaptiveRows(this.dockHost, used, fill) : Math.min(entry.rowsUsed, bodyRows));
 		const pad = " ".repeat(gutter);
-		// A title that can shorten itself is told the rail's room, the way an approval's title is.
-		const plainTitle = entry.frame.dockTitle({ room, actor: "" });
-		const titleText = theme.style(entry.frame.dockTone() ?? "sectionHeading", plainTitle, { bold: true });
-		// A question holds the rail like a card does, so it says what it is not holding up too.
-		const beside = entry.frame.dockAwaitingInput?.()
-			? (this.chrome.getBesideCard?.(room - visibleWidth(plainTitle) - 5) ?? null)
+		// A title that can shorten itself is told the room it may take.
+		const tone = entry.frame.dockTone() ?? "sectionHeading";
+		// A question holds the keyboard like a card does, so the rule says it waits for the operator.
+		const pending: RuleUnit | null = entry.frame.dockAwaitingInput?.()
+			? {
+					text: `${GLYPH.phaseBlocked} waiting for you`,
+					paint: () =>
+						`${theme.fg("attentionRail", GLYPH.phaseBlocked)} ${theme.style("decisionCue", "waiting for you", { bold: true })}`,
+				}
 			: null;
-		const title = entry.frame.dockAwaitingInput?.()
-			? `${theme.fg(rail.tone ?? "composerRail", GLYPH.phaseBlocked)} ${titleText}${beside === null ? "" : theme.fg("annotation", ` · ${beside}`)}`
-			: titleText;
 		const hint = entry.frame.dockHint(room + 4);
 		const lines = [
-			this.topRail(width, theme, rail, title),
+			this.overlayRule(
+				width,
+				theme,
+				rail,
+				{
+					plain: (titleRoom) => entry.frame.dockTitle({ room: titleRoom, actor: "" }),
+					paint: (text) => theme.style(tone, text, { bold: true }),
+				},
+				pending,
+			),
 			...body.map((row) => padAnsi(`${pad}${row}${pad}`, width)),
 			// The dock's keys get the hint role like every other rail; unpainted, they took the terminal's own
 			// foreground, which a light scheme such as Solarized sets below 4.5:1.
 			this.bottomRail(width, theme, rail, hint?.trim().length ? theme.base("keyboardHint", hint) : "", room),
 		];
-		// The rail this body replaced is the only place the run's phase showed. A
-		// surface that reports its own lifecycle keeps its rows.
-		const bodyEnd = lines.length - 1;
-		if (entry.ownsStatus === true) return { lines, bodyEnd };
-		const strip = this.chrome.getLiveWorkStrip?.(Math.max(1, width - 2), dockEscVerb(hint));
-		return { lines: strip ? [...lines, padAnsi(` ${strip}`, width)] : lines, bodyEnd };
+		// The run's state rides on the top rule, so nothing joins the dock under its key rail.
+		return { lines, bodyEnd: lines.length - 1 };
 	}
 
 	/**
@@ -979,14 +1157,17 @@ export class ClioEditor extends Editor {
 		const room = this.approvalLabelRoom(width);
 		const route = this.chrome.getModelLabel();
 		const cue = GLYPH.phaseBlocked;
-		const up = draft.hiddenAbove > 0 ? theme.fg("positionCount", `${GLYPH.up}${draft.hiddenAbove}`) : "";
-		const titleRoom = Math.max(1, room - visibleWidth(cue) - 1 - (up ? visibleWidth(up) + 3 : 0) - (rail.yolo ? 7 : 0));
-		const title = entry.frame.dockTitle({
-			room: titleRoom,
-			actor: modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId),
-		});
-		const beside = this.chrome.getBesideCard?.(titleRoom - visibleWidth(title) - 3) ?? null;
-		const label = `${theme.fg("attentionRail", cue)} ${theme.style(entry.frame.dockTone() ?? "decisionCue", title, { bold: true })}${beside === null ? "" : theme.fg("annotation", ` · ${beside}`)}`;
+		const up = draft.hiddenAbove > 0 ? `${GLYPH.up}${draft.hiddenAbove}` : "";
+		const tone = entry.frame.dockTone() ?? "decisionCue";
+		const actor = modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId);
+		// The decision's mark leads its title; draft rows hidden above the card are its own position, kept before the run.
+		const label = {
+			plain: (titleRoom: number) =>
+				`${cue} ${entry.frame.dockTitle({ room: Math.max(1, titleRoom - visibleWidth(cue) - 1), actor })}`,
+			paint: (text: string) =>
+				`${theme.fg("attentionRail", cue)} ${theme.style(tone, text.slice(cue.length + 1), { bold: true })}`,
+		};
+		const position: RuleUnit | null = up ? { text: up, paint: (text) => theme.fg("positionCount", text) } : null;
 		// The draft's rows and its divider come out of the card's budget, so the whole surface keeps the dock's height.
 		const draftRows = draft.rows.length > 0 ? draft.rows.length + 1 : 0;
 		const down = draft.hiddenBelow > 0 ? theme.fg("positionCount", `${GLYPH.down}${draft.hiddenBelow}`) : "";
@@ -1001,7 +1182,7 @@ export class ClioEditor extends Editor {
 			.join(theme.fg("separator", ` ${GLYPH.dot} `));
 		return {
 			card: [
-				this.topRail(width, theme, rail, label, up, room),
+				this.overlayRule(width, theme, rail, label, position),
 				...rendered.slice(0, bodyEnd).map((row) => padAnsi(`${pad}${row}${pad}`, width)),
 				...(draft.rows.length > 0
 					? [padAnsi(`${pad}${rule(theme, contentWidth, { left: "Your draft", leftToken: "annotation" })}`, width)]
