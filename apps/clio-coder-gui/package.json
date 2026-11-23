@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder-gui",
-	"version": "0.8.5-dev",
+	"version": "0.9.0-dev",
 	"private": true,
 	"description": "CLIO Coder desktop app (alpha): a local web workspace for sessions, usage, artifacts and evidence.",
 	"type": "module",
