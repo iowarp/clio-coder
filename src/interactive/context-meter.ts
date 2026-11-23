@@ -183,7 +183,8 @@ export function renderContextMeterGrid(
  */
 export function renderEvictedTokensLine(evictedTokens: number, theme: ClioTheme = clioTheme()): string {
 	const tokens = Math.round(Math.max(0, evictedTokens)).toLocaleString("en-US");
-	return `${theme.fg("annotation", GLYPH.contextReserve)} ${theme.fg("body", "evicted (outside window)")} ${theme.fg("annotation", `${tokens} tokens`)}`;
+	// The count is a value, so a reading role: `NO_COLOR` dims the glyph and not the figure.
+	return `${theme.fg("annotation", GLYPH.contextReserve)} ${theme.fg("body", "evicted (outside window)")} ${theme.fg("counter", `${tokens} tokens`)}`;
 }
 
 /** A small colored swatch for a category, for inline legends. */
