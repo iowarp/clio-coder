@@ -99,7 +99,8 @@ test("the docked board never cuts a section it cannot reach (BT-015)", () => {
 	const board = mount();
 	const first = board.render();
 	doesNotMatch(first.join("\n"), /more rows/u, "the frame never has to cut the board");
-	match(first.join("\n"), /tasks \d+(?:–\d+)? of \d+ · PgUp/u, "an overflowing board says where the window is");
+	// The rail names PgUp/PgDn while the board windows, so the position row does not repeat it.
+	match(first.join("\n"), /^\d+(?:–\d+)? of \d+ tasks$/mu, "an overflowing board says where the window is");
 	match(first.slice(0, 2).join("\n"), /Divide rounding/u, "the board opens at its top");
 
 	// Paging down reaches the end, and every row of the whole board was on screen once.
