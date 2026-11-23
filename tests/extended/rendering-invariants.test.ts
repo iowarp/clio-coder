@@ -4255,6 +4255,46 @@ describe("agent invocations", () => {
 		strictEqual(cards.filter((row) => row.startsWith(`  ${GLYPH.warn} `)).length, 2, rows.join("\n"));
 	});
 
+	it("keeps the run tally and elapsed on a failed fan-out at every tier, ending on the failed state", () => {
+		const verifiedAxes = { artifactIntegrity: "verified", validationGrounding: "validated" };
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const panel = createChatPanel({ getOutputStyle: () => style });
+			panel.applyEvent({ type: "agent_start" } as never);
+			dispatchStart(panel, "fail", { tasks: [{ task: "a" }, { task: "b" }, { task: "c" }] });
+			for (const index of [0, 1, 2]) {
+				panel.applyWorkerState(
+					card({
+						assignmentId: `x${index}`,
+						agentId: "scout",
+						parentToolCallId: "fail",
+						...(index === 1 ? { result: { outcome: "failed", failureMessage: "no model", durationMs: 2_000 } } : {}),
+					}),
+				);
+			}
+			panel.applyEvent({
+				type: "tool_execution_end",
+				toolCallId: "fail",
+				toolName: "dispatch",
+				result: {
+					content: [{ type: "text", text: "dispatch (parallel) total=3 failed=1" }],
+					details: {
+						runCount: 3,
+						failedCount: 1,
+						runs: [
+							{ agentId: "scout", exitCode: 0, trust: { axes: verifiedAxes } },
+							{ agentId: "scout", exitCode: 1, outcome: "failed" },
+							{ agentId: "scout", exitCode: 0, trust: { axes: verifiedAxes } },
+						],
+					},
+				},
+				isError: true,
+				durationMs: 15_000,
+			} as never);
+			const first = plainRender(panel, 120).split("\n")[0];
+			strictEqual(first, `${GLYPH.workerAgent} delegated 3 tasks · 1 failed · 2 ok · 15s ✗ failed`, style);
+		}
+	});
+
 	it("groups a council round under one header with each member's roster label", () => {
 		const panel = createChatPanel({ getOutputStyle: () => "standard" });
 		panel.appendUser("/council should retry() own its clock?");

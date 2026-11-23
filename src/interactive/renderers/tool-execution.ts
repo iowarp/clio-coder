@@ -1525,7 +1525,7 @@ function sublineParts(
 	const local = call.excludeFromContext === true ? toolMeta(" · not sent to model") : "";
 	// A check here would state the call beside a card whose run may read `!` or `✗`, so the card alone states the outcome.
 	// A tally of runs states their outcomes itself, worst first, so it carries no `✓` beside a `1 failed` either.
-	// The batch's elapsed time is the run's own fact, so it shows at every tier.
+	// The batch's elapsed time is the run's own fact, so it shows at every tier, a failed batch's included.
 	const tallied =
 		row.spec.class === "delegate" && finished !== null && numberField(detailsOf(finished.result), "runCount") !== null;
 	const cardDuration = optionalCompactMs(meta.durationMs);
@@ -1539,7 +1539,8 @@ function sublineParts(
 				: status === "running" && row.spec.class === "interaction"
 					? // The person owns this wait: a ticking `● 5.7s` read as Clio still working on it (HS11).
 						` ${theme.fg("attentionRail", GLYPH.phaseBlocked)}${toolMeta(" waiting for you")}`
-					: statusGlyph(status, meta);
+					: // A failed batch keeps its elapsed at every tier too, then ends on its state.
+						statusGlyph(status, status === "error" && tallied ? { ...meta, policy: undefined } : meta);
 	const reason = refusalReason(status, meta);
 	return ledger !== null
 		? { lead: `${head}${ledger.facts}${reason}`, tail: `${tail}${ledger.offload}` }
