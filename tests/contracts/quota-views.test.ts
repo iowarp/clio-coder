@@ -9,6 +9,7 @@ import { foldEconomy } from "../../src/domains/telemetry/economy-fold.js";
 import { quotaAccountDetails } from "../../src/domains/telemetry/read-model.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
+import { createDispatchBoardStore, runTableRows } from "../../src/interactive/dispatch-board.js";
 import {
 	bindingQuotaWindow,
 	bindingWindowPart,
@@ -157,6 +158,51 @@ test("worker quota joins only known local credential owners and does not claim a
 		plain(renderWorkerUsage([{ ...row, usage: { kind: "pending" } }], [], quotaRows([account]), 80)),
 		/researcher {2}1\.0s {3}— {4}—[\s\S]*— not measured, or no calls yet/,
 	);
+});
+
+test("after a resume the Workers tab shows the board's earlier-session runs with the board's table and state words", () => {
+	const earlier: DispatchBoardRow = {
+		runId: "earlier-reviewer",
+		agentId: "reviewer",
+		runtimeKind: "subprocess",
+		runtimeId: "copilot-sdk",
+		targetId: "copilot",
+		wireModelId: "gpt-6-luna",
+		taskSummary: "Reply with the single word alpha.",
+		status: "failed",
+		elapsedMs: 5840,
+		settledAtMs: now,
+		usage: runUsageOf("run", [{ usage: { input: 12_100, output: 98 }, usd: null }]),
+		lastContextTokens: null,
+		ttft: null,
+		earlier: true,
+	};
+	// The store a restarted Clio builds: nothing in this process, one run read back from the ledger (FX-20).
+	const store = createDispatchBoardStore(
+		{
+			snapshot: () => ({ runs: [], generatedAt: now }),
+			subscribe: () => () => {},
+			reconcileRuns: () => {},
+			setFleetPhase: () => {},
+		} as never,
+		undefined,
+		() => ({ rows: [earlier], complete: true }),
+	);
+	deepStrictEqual(
+		store.workerRows().map((row) => row.runId),
+		["earlier-reviewer"],
+		"what /usage reads holds the earlier-session runs the board shows",
+	);
+	// The session's telemetry references the same run and records its worker exit as a success.
+	const recorded = [{ run: { row: { runId: "earlier-reviewer" } }, enqueued: null }] as never;
+	const lines = renderWorkerUsage(store.workerRows(), recorded, [], 80).map(stripTerminalSequences);
+	const board = runTableRows([{ kind: "run", row: earlier }], 80, { selectedRunId: null }).map(stripTerminalSequences);
+	ok(
+		board.every((line) => lines.includes(line)),
+		"header, earlier-sessions rule and row are the board's",
+	);
+	match(board.join("\n"), /state +agent[\s\S]*earlier sessions · 1 run[\s\S]*✗ failed +reviewer/);
+	doesNotMatch(lines.join("\n"), /Recorded|completed/, "the run is not listed again with another state word");
 });
 
 test("weekly badges select the model's own group and never infer another account's quota", () => {

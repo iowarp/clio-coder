@@ -1947,7 +1947,14 @@ export function runTableRows(
 	options: RunTableOptions = {},
 ): string[] {
 	const table = runTable(items, width, options);
-	return [...(table.header === null ? [] : [table.header]), ...table.rows, ...(table.note === null ? [] : [table.note])];
+	const rows = [...table.rows];
+	// What an earlier Clio recorded sits under the board's own rule here too, so a list of runs reads as the board does.
+	const firstEarlier = items.findIndex(itemFromEarlierSession);
+	if (firstEarlier >= 0) {
+		const safe = Math.max(1, Math.floor(width));
+		rows.splice(firstEarlier, 0, earlierSessionsRule(clioTheme(), items.length - firstEarlier, safe));
+	}
+	return [...(table.header === null ? [] : [table.header]), ...rows, ...(table.note === null ? [] : [table.note])];
 }
 
 /** The run identity the board's detail rule names: the agent and its run id. */
@@ -2861,7 +2868,10 @@ export function createDispatchBoardStore(
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
 	/** What the fleet card shows: plans running now, then the active workers. */
 	liveRows(): ReadonlyArray<DispatchBoardRow>;
-	/** Every worker run, without the plan rows: what a count or usage of workers reads. */
+	/**
+	 * Every worker run the board shows, without the plan rows, in the board's order: this process's, then the ones an
+	 * earlier Clio recorded. What a count or usage of workers reads.
+	 */
 	workerRows(): ReadonlyArray<DispatchBoardRow>;
 	reconcile(): void;
 	setFleetPhase(runId: string, phase: DispatchBoardPhase): void;
@@ -2966,7 +2976,7 @@ export function createDispatchBoardStore(
 			const byRun = new Map(all.map((row) => [row.runId, row]));
 			return [...live.map((plan) => fleetPlanRow(planWithWorkers(plan, byRun), Date.now())), ...workers];
 		},
-		workerRows: () => projectRows(false),
+		workerRows: () => [...boardOrder(projectRows(false)), ...boardOrder(historyRows())],
 		reconcile() {
 			projection.reconcileRuns();
 			current = projection.snapshot();
