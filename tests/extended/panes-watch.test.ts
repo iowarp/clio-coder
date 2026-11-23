@@ -312,6 +312,32 @@ it("explicitly reports a reason-free null without retaining a prior failure", as
 	controller.dispose();
 });
 
+it("hands ASCII mode to the dock in the pane's environment, since the glyph table loads before argv (FX-19)", async () => {
+	const saved = process.env.CLIO_CODER_ASCII;
+	const envs: Array<Readonly<Record<string, string>> | undefined> = [];
+	const open = async (ascii: boolean) => {
+		const f = fixture();
+		const original = f.runtime.contract.openUtilityPane;
+		f.runtime.contract.openUtilityPane = async (request) => {
+			envs.push(request.env);
+			return original(request);
+		};
+		if (ascii) process.env.CLIO_CODER_ASCII = "1";
+		else delete process.env.CLIO_CODER_ASCII;
+		const controller = f.watch();
+		await controller.watch("run");
+		controller.dispose();
+	};
+	try {
+		await open(true);
+		await open(false);
+		deepStrictEqual(envs, [{ CLIO_CODER_ASCII: "1" }, undefined]);
+	} finally {
+		if (saved === undefined) delete process.env.CLIO_CODER_ASCII;
+		else process.env.CLIO_CODER_ASCII = saved;
+	}
+});
+
 it("keeps concurrent diagnostics request-scoped and legacy callers best-effort", async () => {
 	const f = fixture();
 	f.client.paneSplit = async (request) => {

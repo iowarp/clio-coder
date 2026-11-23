@@ -108,6 +108,8 @@ const FULL_RESULT_PREVIEW_LIMIT = 60_000;
 const FULL_RESULT_ROW_LIMIT = 120;
 const STATUS_OK_GLYPH = GLYPH.ok;
 const STATUS_ERROR_GLYPH = GLYPH.error;
+/** The fact separator, from the glyph table so ASCII mode replaces it. */
+const SEP = ` ${GLYPH.sep} `;
 
 const RAIL_NORMAL = (): string => cardRail();
 const RAIL_ERROR = (): string => cardRail(true);
@@ -707,7 +709,7 @@ function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow, prove
 			const total = numberField(counts, "total");
 			if (completed !== null && total !== null) {
 				const blocked = numberField(counts, "blocked") ?? 0;
-				parts.push(`${completed}/${total} done${blocked > 0 ? ` · ${blocked} blocked` : ""}`);
+				parts.push(`${completed}/${total} done${blocked > 0 ? `${SEP}${blocked} blocked` : ""}`);
 			}
 			break;
 		}
@@ -943,10 +945,10 @@ function ledgerTail(
 	// Every fact is held together, so a narrow row wraps between facts
 	// (`… · exit 0 ·` then `18 lines`), never inside one.
 	const statText =
-		stat === null ? "" : `${toolMeta(" · ")}${green(`+${stat.added}`)}${holdFact(" ")}${red(`-${stat.removed}`)}`;
+		stat === null ? "" : `${toolMeta(SEP)}${green(`+${stat.added}`)}${holdFact(" ")}${red(`-${stat.removed}`)}`;
 	// A skill whose content no longer matches its recorded hash is the one
 	// skill fact that is a warning rather than provenance.
-	const driftText = skillLoadFacts(finished)?.drifted === true ? `${toolMeta(" · ")}${yellow("drifted")}` : "";
+	const driftText = skillLoadFacts(finished)?.drifted === true ? `${toolMeta(SEP)}${yellow("drifted")}` : "";
 	// A request the browser session's host grant refused is a warning the folded row states with the grant that admits it.
 	const blockedDetails = executed && row.toolName === ToolNames.Browser ? (detailsOf(finished.result) ?? null) : null;
 	const blockedGrant = stringField(blockedDetails, "blockedGrant");
@@ -954,7 +956,7 @@ function ledgerTail(
 	const blockedText =
 		blockedGrant === null
 			? ""
-			: `${toolMeta(" · ")}${yellow(sanitizeCallTargetText(`blocked ${blockedHosts}; to admit: ${blockedGrant}`))}`;
+			: `${toolMeta(SEP)}${yellow(sanitizeCallTargetText(`blocked ${blockedHosts}; to admit: ${blockedGrant}`))}`;
 	// An offloaded result says where the rest is, not what its path is: the
 	// path is a 64-hex name that wrapped a row across three, and /view and the
 	// full body's footer state it.
@@ -965,8 +967,8 @@ function ledgerTail(
 			offloadPath === null
 				? ""
 				: offloadFileMissing(finished)
-					? toolMeta(" · full output gone after the 14-day retention sweep")
-					: toolMeta(" · full output · /view"),
+					? toolMeta(`${SEP}full output gone after the 14-day retention sweep`)
+					: toolMeta(`${SEP}full output${SEP}/view`),
 	};
 }
 
@@ -1030,7 +1032,7 @@ export function renderToolAwaitingApproval(
 		...(view.mutation !== undefined ? [["mutation", mutationFactsLine(view.mutation)]] : []),
 	] as const;
 	for (const [label, value] of facts) {
-		lines.push(...cardRows(`${toolMeta(`${label} ·`)} ${value}`, width, false));
+		lines.push(...cardRows(`${toolMeta(`${label} ${GLYPH.sep}`)} ${value}`, width, false));
 	}
 	return lines;
 }
@@ -1066,7 +1068,7 @@ function approvalReceiptRows(
 	// The operator's own mark: `?` is the class of a call that asks, and read as a question still open under a call
 	// that had already been allowed.
 	const by = "result" in call ? call.grantedBy : undefined;
-	return cardRows(`${yellow(GLYPH.user)} ${toolMeta(`allowed by ${by ?? "you"} · ${axis}`)}`, width, failure);
+	return cardRows(`${yellow(GLYPH.user)} ${toolMeta(`allowed by ${by ?? "you"}${SEP}${axis}`)}`, width, failure);
 }
 
 /**
@@ -1142,7 +1144,7 @@ function refusalTail(reason: string): string {
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === undefined) return "";
 	const budget = meta.policy?.toolDurations;
-	const live = meta.live === undefined ? "" : toolMeta(` · ${meta.live}`);
+	const live = meta.live === undefined ? "" : toolMeta(`${SEP}${meta.live}`);
 	if (status === "forming") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" preparing")}${live}`;
 	if (status === "ready") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" queued")}${live}`;
 	if (status === "running") {
@@ -1152,7 +1154,7 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 		return ` ${theme.fg("activity", GLYPH.running)}${elapsed === null ? "" : toolMeta(` ${elapsed}`)}${live}`;
 	}
 	const duration = budgetedDuration(meta.durationMs, budget);
-	const durationSuffix = duration ? toolMeta(` · ${duration}`) : "";
+	const durationSuffix = duration ? toolMeta(`${SEP}${duration}`) : "";
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
 	if (status === "unfinished") return ` ${yellow(GLYPH.warn)}${durationSuffix}`;
 	if (status === "cancelled") return ` ${toolMeta(GLYPH.cancelled)}${durationSuffix}`;
@@ -1171,7 +1173,7 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 function refusalReason(status: HeaderStatus, meta: StatusMeta): string {
 	if (status !== "error") return "";
 	const reason = meta.outcome !== undefined ? meta.blockReason?.trim() : undefined;
-	return reason ? toolMeta(` · ${refusalTail(reason)}`) : "";
+	return reason ? toolMeta(`${SEP}${refusalTail(reason)}`) : "";
 }
 
 /** A running process whose stop already went out: its card must not keep the live mark beside a stop row. */
@@ -1277,7 +1279,7 @@ function rowObject(
 ): string {
 	if (row.externalLabel !== null) {
 		const [server, capability] = sanitizeCallTargetText(row.externalLabel).split(" › ");
-		return `${theme.fg("toolMetadata", server ?? "")}${theme.fg("divider", " › ")}${theme.fg("toolCapability", capability ?? "")}`;
+		return `${theme.fg("toolMetadata", server ?? "")}${theme.fg("divider", ` ${GLYPH.crumb} `)}${theme.fg("toolCapability", capability ?? "")}`;
 	}
 	const skill = finished === null ? null : skillLoadFacts(finished);
 	if (skill !== null)
@@ -1464,7 +1466,7 @@ function sublineParts(
 		return { lead, tail: "" };
 	}
 	if (refusal !== null) {
-		const lead = `${classMark("knowledge", status === "error")}${toolMeta("skill")} ${theme.fg("skillIdentity", sanitizeCallTargetText(refusal.name))} ${functionText(theme, "skill", "not loaded")}${toolMeta(" · ")}${refusalFact(refusal)}${refusalReason(status, meta)}`;
+		const lead = `${classMark("knowledge", status === "error")}${toolMeta("skill")} ${theme.fg("skillIdentity", sanitizeCallTargetText(refusal.name))} ${functionText(theme, "skill", "not loaded")}${toolMeta(SEP)}${refusalFact(refusal)}${refusalReason(status, meta)}`;
 		return { lead, tail: statusGlyph(status, meta) };
 	}
 	const settled =
@@ -1507,7 +1509,7 @@ function sublineParts(
 	const resourceLabel = classifyResourceRead(call.toolName, call.args);
 	const resource =
 		resourceLabel !== null && !stripTerminalSequences(object).toLowerCase().includes(resourceLabel)
-			? toolMeta(` · ${resourceLabel}`)
+			? toolMeta(`${SEP}${resourceLabel}`)
 			: "";
 	// A process states who started it, because the two read the same otherwise and only one was the model's doing.
 	const executed = call.actor !== undefined && !notRun && status !== "forming" && status !== "ready";
@@ -1522,7 +1524,7 @@ function sublineParts(
 	const head = `${classMark(row.spec.class, status === "error")}${actor}${notRun || failedChange ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${requestedBy}${scope}${answer}${resource}`;
 	const provenance = meta.policy === undefined || meta.policy.runSubRows > 0;
 	const ledger = finished === null ? null : ledgerTail(finished, row, provenance);
-	const local = call.excludeFromContext === true ? toolMeta(" · not sent to model") : "";
+	const local = call.excludeFromContext === true ? toolMeta(`${SEP}not sent to model`) : "";
 	// A check here would state the call beside a card whose run may read `!` or `✗`, so the card alone states the outcome.
 	// A tally of runs states their outcomes itself, worst first, so it carries no `✓` beside a `1 failed` either.
 	// The batch's elapsed time is the run's own fact, so it shows at every tier, a failed batch's included.
@@ -1533,7 +1535,7 @@ function sublineParts(
 		status === "ok" && (row.context.cardAttached === true || tallied)
 			? cardDuration === null
 				? ""
-				: toolMeta(` · ${cardDuration}`)
+				: toolMeta(`${SEP}${cardDuration}`)
 			: stoppingCall(call) && status === "running"
 				? stoppingGlyph(meta)
 				: status === "running" && row.spec.class === "interaction"
@@ -1611,7 +1613,7 @@ export function renderToolArguments(
 			typeof value === "string"
 				? value
 				: joinScalarLists && isScalarList(value)
-					? value.map((item) => String(item)).join(" · ")
+					? value.map((item) => String(item)).join(SEP)
 					: JSON.stringify(value, null, 2);
 		const full = String(text ?? value);
 		const chars = Number.isFinite(maxRows) ? Math.max(1, maxRows * Math.max(1, width) * 4) : full.length;
@@ -1630,7 +1632,7 @@ export function renderToolArguments(
 		};
 		out.push(
 			...cardRows(
-				`${theme.fg("toolArgumentName", sanitizeCallTargetText(key))} ${toolMeta("›")} ${argumentLine(lines[0] ?? "")}`,
+				`${theme.fg("toolArgumentName", sanitizeCallTargetText(key))} ${toolMeta(GLYPH.crumb)} ${argumentLine(lines[0] ?? "")}`,
 				width,
 				isError,
 			),
@@ -1642,7 +1644,7 @@ export function renderToolArguments(
 		if (out.length > maxRows || full.length > chars) {
 			return [
 				...out.slice(0, Math.max(0, maxRows - 1)),
-				...cardRows(toolMeta("… more arguments · /view"), width, isError),
+				...cardRows(toolMeta(`${GLYPH.ellipsis} more arguments${SEP}/view`), width, isError),
 			];
 		}
 	}
@@ -1748,7 +1750,7 @@ function resultEnvelopeText(result: unknown): unknown {
 			const mimeType = typeof block.mimeType === "string" ? block.mimeType : "image/unknown";
 			const padding = block.data.endsWith("==") ? 2 : block.data.endsWith("=") ? 1 : 0;
 			const bytes = Math.max(0, Math.floor((block.data.length * 3) / 4) - padding);
-			parts.push(`[image ${mimeType} · ${formatSize(bytes)}]`);
+			parts.push(`[image ${mimeType}${SEP}${formatSize(bytes)}]`);
 			continue;
 		}
 		if (typeof block.type === "string") {
@@ -1986,7 +1988,7 @@ function renderOutputMeta(
 	label = "output",
 ): string[] {
 	const facts = outputFacts(finished);
-	const suffix = facts.length > 0 ? toolMeta(` · ${facts.join(" · ")}`) : "";
+	const suffix = facts.length > 0 ? toolMeta(`${SEP}${facts.join(SEP)}`) : "";
 	return cardRows(`${theme.fg("toolSummary", label)}${suffix}`, width, isError);
 }
 
@@ -2823,9 +2825,9 @@ export function renderToolPreview(
 		// nothing of the operator: Detailed states it as one toolMeta row, Standard leaves
 		// it out, and /view keeps the result as the model read it.
 		if (notes.length > 0 && detail.provenance) {
-			const more = notes.length > 1 ? ` · +${notes.length - 1} more` : "";
+			const more = notes.length > 1 ? `${SEP}+${notes.length - 1} more` : "";
 			rows.push(
-				`${failure ? RAIL_ERROR() : RAIL_NORMAL()}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model · ${operatorNoteText(notes[0] ?? "")}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
+				`${failure ? RAIL_ERROR() : RAIL_NORMAL()}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model${SEP}${operatorNoteText(notes[0] ?? "")}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
 			);
 		}
 	}
@@ -2948,9 +2950,9 @@ function settledStepLine(step: ToolExecutionFinished, width: number, unresolved 
 	// A step whose `$from` input could not be resolved never ran; its object
 	// is the unresolved request, so say so instead of implying execution.
 	const blocked = unresolved
-		? toolMeta(" · input unresolved, not run")
+		? toolMeta(`${SEP}input unresolved, not run`)
 		: step.outcome === "blocked"
-			? toolMeta(" · blocked")
+			? toolMeta(`${SEP}blocked`)
 			: "";
 	return `${glyph} ${name}${object.length > 0 ? ` ${object}` : ""}${scope}${blocked}${unresolved ? "" : ledgerTail(step, row).facts}`;
 }
@@ -2960,7 +2962,7 @@ function plannedStepLine(step: PlannedChainStep, note: string | null, width: num
 	const row = resolveToolRow(step.capability, redactToolArgs(step.args), undefined, undefined, { cwd: process.cwd() });
 	const name = toolMeta(sanitizeCallTargetText(row.externalLabel ?? step.capability));
 	const object = row.externalLabel === null ? rowObject(row, null, stepObjectWidth(width)) : "";
-	return `${toolMeta(GLYPH.queued)} ${name}${object.length > 0 ? ` ${object}` : ""}${note === null ? "" : toolMeta(` · ${note}`)}`;
+	return `${toolMeta(GLYPH.queued)} ${name}${object.length > 0 ? ` ${object}` : ""}${note === null ? "" : toolMeta(`${SEP}${note}`)}`;
 }
 
 /** One row per step under a chain, settled steps in the order they settled and then the ones it never ran. */
@@ -2975,7 +2977,7 @@ function chainStepRows(call: ToolExecutionStart | ToolExecutionFinished, width: 
 					...gatewayChainPending(finished.result).map((id) => {
 						const planned = plan.find((step) => step.id === id);
 						return planned === undefined
-							? `${toolMeta(GLYPH.queued)} ${toolMeta(sanitizeCallTargetText(id))}${toolMeta(" · not run")}`
+							? `${toolMeta(GLYPH.queued)} ${toolMeta(sanitizeCallTargetText(id))}${toolMeta(`${SEP}not run`)}`
 							: plannedStepLine(planned, "not run", width);
 					}),
 				];
@@ -2996,7 +2998,9 @@ function chainOutputRows(finished: ToolExecutionFinished, width: number, failure
 		const { body } = splitModelNotes(resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY));
 		const tidy = tidyPreviewText(body);
 		if (tidy.trim().length === 0) continue;
-		rows.push(...cardRows(toolMeta(sanitizeCallTargetText(`${call.toolName} · ${id} ›`)), width, failure));
+		rows.push(
+			...cardRows(toolMeta(sanitizeCallTargetText(`${call.toolName}${SEP}${id} ${GLYPH.crumb}`)), width, failure),
+		);
 		rows.push(...cardRows(redactSecretString(tidy), width, failure));
 	}
 	return rows;
@@ -3068,7 +3072,7 @@ function renderChainExecution(finished: ToolExecutionFinished, width: number, op
 		return out;
 	}
 	for (const { id, call } of steps) {
-		out.push(...renderOutputMeta(call, width, call.isError, `${call.toolName} · ${id}`));
+		out.push(...renderOutputMeta(call, width, call.isError, `${call.toolName}${SEP}${id}`));
 		const bashArgs = resolveRow(call).spec.class === "execute" ? asBashArgs(redactToolArgs(call.args)) : null;
 		out.push(
 			...(bashArgs === null
@@ -3165,7 +3169,7 @@ export function renderFoldedGroup(
 	}
 	const toolClass: ToolClass = family === "explore" ? "observe" : family;
 	const verb = family === "explore" ? "explored" : family === "knowledge" ? "consulted" : "edited";
-	const totals = family === "mutate" && complete ? `${toolMeta(" · ")}${green(`+${added}`)} ${red(`-${removed}`)}` : "";
+	const totals = family === "mutate" && complete ? `${toolMeta(SEP)}${green(`+${added}`)} ${red(`-${removed}`)}` : "";
 	const head = `${classMark(toolClass)}${styledVerb(verb)} ${theme.fg("toolSummary", countNouns(calls))}${totals} ${green(STATUS_OK_GLYPH)}`;
 	const body = cardRows(joinFacts(targets, toolMeta), width, false);
 	return [
