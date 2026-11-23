@@ -1,4 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
+import { relative } from "../../core/format-time.js";
+import { type PickerDetail, tierPolicy } from "../../core/presentation-tier.js";
 import { listRecentModels } from "../../core/recent-models.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type {
@@ -47,18 +49,17 @@ import {
 	showClioOverlayFrame,
 	windowRows,
 } from "../overlay-frame.js";
-import type { ClioToken, Fact, StatusKind, TableCell, TableColumn } from "../theme/index.js";
+import type { ClioToken, Fact, SideUnit, StatusKind, TableCell, TableColumn } from "../theme/index.js";
 import {
 	chip,
-	chipRow,
 	clioTheme,
 	emptyState,
 	factRows,
 	fitIdentityLabel,
+	fitSides,
 	GLYPH,
 	padAnsi,
 	positionRow,
-	statusChip,
 	tableRows,
 } from "../theme/index.js";
 
@@ -187,6 +188,8 @@ export interface ModelRow {
 	reason: string;
 	healthToken: ClioToken;
 	healthText: string;
+	/** When the target's health was last checked, as the provider recorded it; null before any check. */
+	healthCheckedAt?: string | null;
 	caps: CapabilityFlags;
 	capabilityDecisions?: RuntimeCapabilityDecision;
 	thinking?: string;
@@ -483,6 +486,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				reason: status.reason,
 				healthToken: healthToken(status),
 				healthText: healthText(status),
+				healthCheckedAt: status.health.lastCheckAt,
 				caps: rowCaps,
 				capabilityDecisions: decisions,
 				thinking: resolution?.thinking ?? "unresolved",
@@ -545,6 +549,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				reason: status.reason,
 				healthToken: healthToken(status),
 				healthText: healthText(status),
+				healthCheckedAt: status.health.lastCheckAt,
 				caps: rowCaps,
 				capabilityDecisions: decisions,
 				thinking: resolution.thinking,
@@ -712,18 +717,90 @@ function modelTableLines(rows: ReadonlyArray<ModelRow>, selectedIndex: number, w
 			: theme.fg("menuOption", label, row.selectable ? "normal" : "disabled");
 		return [
 			`${pointer} ${activeMark(row)} ${model}`,
-			// The column is headed ctx, so its cells are bare counts: `128k`, or `?` for unknown.
-			theme.fg(
-				row.context === "-" || row.context === "?" || row.context === "?ctx" ? "unknownValue" : "counter",
-				row.context.replace(/ctx$/u, ""),
-			),
+			contextCell(row),
 			{ text: row.badges, tone: "muted" },
-			...(layout.showState ? [row.residency ? theme.fg(RESIDENCY_TONES[row.residency], row.residency) : ""] : []),
+			...(layout.showState ? [residencyCell(row)] : []),
 			...(layout.showTarget ? [theme.fg("modelIdentity", row.target)] : []),
 			...(layout.showRuntime ? [{ text: row.runtimeShortName, tone: "muted" } satisfies TableCell] : []),
 		];
 	});
-	return tableRows(theme, { columns, rows: table, header: true, gap: MODEL_TABLE_GAP }, width);
+	const lines = tableRows(theme, { columns, rows: table, header: true, gap: MODEL_TABLE_GAP }, width);
+	const chosen = rows[selectedIndex];
+	// Header and divider lead; no column wraps, so every row is one line after them.
+	const at = 2 + selectedIndex;
+	if (chosen === undefined || lines[at] === undefined) return lines;
+	// The model column as the table drew it: its natural width, bounded by the layout's.
+	const drawnModel = Math.min(
+		modelColumnWidth,
+		Math.max(visibleWidth(columns[0]?.label ?? ""), ...table.map((cells) => visibleWidth(String(cells[0] ?? "")))),
+	);
+	const whole = selectedRowLines(chosen, layout, width, drawnModel - SELECTED_PREFIX_WIDTH);
+	return whole === null ? lines : [...lines.slice(0, at), ...whole, ...lines.slice(at + 1)];
+}
+
+/** The ctx cell: a bare count under its header, `128k`, or `?` for unknown. */
+function contextCell(row: ModelRow): string {
+	return clioTheme().fg(
+		row.context === "-" || row.context === "?" || row.context === "?ctx" ? "unknownValue" : "counter",
+		row.context.replace(/ctx$/u, ""),
+	);
+}
+
+function residencyCell(row: ModelRow): string {
+	return row.residency ? clioTheme().fg(RESIDENCY_TONES[row.residency], row.residency) : "";
+}
+
+function alignRight(text: string, width: number): string {
+	return `${" ".repeat(Math.max(0, width - visibleWidth(text)))}${text}`;
+}
+
+/**
+ * The selected row with its model and target printed whole, or null when the table's own row already does. The
+ * picker is where the full route is always one key away (Alt+M), so the row the cursor is on never shortens the id
+ * or loses the target to a narrow column. It stays one row when it can, giving up runtime and then residency (the
+ * status row under the table names the route and its health); ctx and caps keep their place beside the id. When the
+ * target still does not fit beside them it moves to a continuation row under the id, and an id wider than the row
+ * wraps rather than being cut.
+ */
+function selectedRowLines(row: ModelRow, layout: ModelLayout, width: number, drawnModelWidth: number): string[] | null {
+	const theme = clioTheme();
+	const id = row.model.length > 0 ? row.model : "(no model ids)";
+	const idRoom = Math.max(1, layout.modelWidth - MODEL_COL_GUTTER);
+	const idFits = visibleWidth(id) <= idRoom;
+	const targetFits = layout.showTarget && visibleWidth(row.target) <= layout.targetWidth;
+	if (idFits && targetFits) return null;
+	const gap = " ".repeat(MODEL_TABLE_GAP);
+	const lead = `${theme.fg("selectedOption", GLYPH.cursor)} ${activeMark(row)} `;
+	const model = theme.style("selectedOption", id, { bold: true });
+	const target = theme.fg("modelIdentity", row.target);
+	// While the id fits its column the row keeps the column stops; past it the cells follow the id at the gap.
+	const modelCell = idFits ? padAnsi(model, drawnModelWidth) : `${model}${" ".repeat(MODEL_COL_GUTTER)}`;
+	const facts = [
+		alignRight(contextCell(row), CONTEXT_COL_WIDTH),
+		padAnsi(chip(theme, row.badges, "muted"), CAPS_COL_WIDTH),
+	];
+	const state = layout.showState ? padAnsi(residencyCell(row), STATE_COL_WIDTH) : null;
+	const runtime = layout.showRuntime ? chip(theme, row.runtimeShortName, "muted") : null;
+	const fit = (line: string): boolean => visibleWidth(line) <= width;
+	const join = (cells: ReadonlyArray<string | null>): string =>
+		cells
+			.filter((cell): cell is string => cell !== null)
+			.join(gap)
+			.trimEnd();
+	for (const line of [
+		join([`${lead}${modelCell}`, ...facts, state, target, runtime]),
+		join([`${lead}${modelCell}`, ...facts, state, target]),
+		join([`${lead}${modelCell}`, ...facts, target]),
+	]) {
+		if (fit(line)) return [line];
+	}
+	const indent = " ".repeat(SELECTED_PREFIX_WIDTH);
+	const room = Math.max(1, width - SELECTED_PREFIX_WIDTH);
+	const first = join([`${lead}${modelCell}`, ...facts]);
+	const idLines = fit(first)
+		? [first]
+		: wrapTextWithAnsi(model, room).map((part, index) => `${index === 0 ? lead : indent}${part}`);
+	return [...idLines, ...wrapTextWithAnsi(target, room).map((part) => `${indent}${part}`)];
 }
 
 function capabilityNames(caps: CapabilityFlags): string {
@@ -750,40 +827,118 @@ function healthStatus(row: ModelRow): StatusKind {
 	}
 }
 
-/**
- * The selected row, explained: its state and ref with the target's health and
- * auth on one row, then the facts that decide whether it can run a turn, then
- * any diagnostic in its own tone. Everything but the health and the
- * diagnostics stays dim, so the table above keeps the eye. `maxRows` is what
- * the body can spare; the facts give way first and say where they were cut.
- */
-function formatModelDetail(row: ModelRow, width: number, maxRows: number, switchCost?: string | null): string[] {
-	const theme = clioTheme();
+function statusGlyph(status: StatusKind): string {
+	switch (status) {
+		case "ok":
+			return GLYPH.ok;
+		case "error":
+			return GLYPH.error;
+		case "warning":
+			return GLYPH.warn;
+		default:
+			return GLYPH.info;
+	}
+}
+
+/** What the selected model is to the operator, in words: in use, a default, in the cycle, or none of those. */
+function selectionStateWords(row: ModelRow): string {
 	const tags: string[] = [];
 	if (row.active) tags.push("in use");
 	if (row.defaultModel) tags.push("its connection's default");
 	if (row.scoped) tags.push("in the model cycle");
 	if (row.favorite) tags.push("favorite");
 	if (row.recent) tags.push("used recently");
-	const state = tags.length > 0 ? tags.join(", ") : row.selectable ? "not in use" : "cannot be picked";
+	return tags.length > 0 ? tags.join(", ") : row.selectable ? "not in use" : "cannot be picked";
+}
+
+/**
+ * The selection's status row: the health glyph, the route whole, then its health, what it is to you and its sign-in.
+ * Those three give way whole from the right (a health that is not healthy keeps its word), and the route never does:
+ * the picker is where the operator reads the full target and model, so when the row cannot hold it the route wraps
+ * onto as many rows as it takes instead of being cut.
+ */
+function selectionStatusRows(row: ModelRow, width: number): string[] {
+	const theme = clioTheme();
+	const status = healthStatus(row);
+	const glyph = statusGlyph(status);
+	const route = modelRefWords(row.target, row.model);
 	const availability = row.available ? row.healthText : `${row.healthText}; ${row.reason || "unavailable"}`;
+	const healthWord = row.healthText.split(/[:\s]/u)[0] ?? row.healthText;
+	const healthy = status === "ok" && row.available;
+	if (visibleWidth(`${glyph} ${route}`) > width) {
+		const lines = wrapTextWithAnsi(
+			`${theme.fg(row.healthToken, glyph)} ${theme.fg("activeModelIdentity", route)}`,
+			width,
+		);
+		return healthy ? lines : [...lines, ...wrapTextWithAnsi(theme.fg(row.healthToken, healthWord), width)];
+	}
+	const units: SideUnit[] = [
+		{ text: glyph, lead: true, paint: (text) => theme.fg(row.healthToken, text) },
+		{ text: route, paint: (text) => theme.fg("activeModelIdentity", text) },
+		{
+			text: availability,
+			paint: (text) => theme.fg(row.healthToken, text),
+			...(availability !== healthWord ? { shorter: [{ text: healthWord, rank: 2 }] } : {}),
+			// A healthy route's word is the reassuring fact, so it gives way before what the model is to you.
+			...(healthy ? { drop: 2.5 } : {}),
+		},
+		{ text: selectionStateWords(row), drop: 3, paint: (text) => theme.fg("annotation", text) },
+		{ text: authWords(row.authText), drop: 1, paint: (text) => chip(theme, text, "muted") },
+	];
+	return [fitSides(theme, units, [], width).trimEnd()];
+}
+
+/** The target's last health check: its answer, its latency or error, and how long ago it ran. */
+function healthHistoryWords(row: ModelRow): string {
+	const checked = row.healthCheckedAt ? `checked ${relative(row.healthCheckedAt)}` : "not checked yet";
+	return `${row.healthText} ${GLYPH.sep} ${checked}`;
+}
+
+/** The credential in words, with the source it was read from when the words do not already say it. */
+function signInWords(authText: string): string {
+	const words = authWords(authText);
+	return words === authText || authText === "unknown" || authText === "disconnected" || authText === "not required"
+		? words
+		: `${words} ${GLYPH.sep} ${authText}`;
+}
+
+/**
+ * The selected row, explained, as deep as the tier's `pickerDetail` reaches. Every tier leads with the status row
+ * (health, the route whole, what it is to you, sign-in), then what blocks it: an unreachable route's next step and
+ * any warning or error the resolution raised, which no tier hides. Standard adds the facts a switch is decided on
+ * (residency, what the switch costs the cache, context and thinking); detailed adds the full pane (capabilities,
+ * replies, load state, runtime, the health check's history and the sign-in source). `maxRows` is what the body can
+ * spare; the facts give way first and say where they were cut.
+ */
+function formatModelDetail(
+	row: ModelRow,
+	width: number,
+	maxRows: number,
+	switchCost: string | null | undefined,
+	detail: PickerDetail,
+): string[] {
+	const theme = clioTheme();
+	const status = selectionStatusRows(row, width);
+	const withFacts = detail !== "status";
 	const residency = modelResidencySentence(row.residency ?? null, row.model, row.target);
 	// Residency reads as its own line in its own tone, above the facts that give way first.
 	const residencyLines =
-		residency && row.residency
+		withFacts && residency && row.residency
 			? wrapTextWithAnsi(
 					theme.fg(RESIDENCY_TONES[row.residency], `${residency}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}`),
 					width,
 				).slice(0, 2)
 			: [];
-	const costLines = switchCost ? wrapTextWithAnsi(theme.fg("annotation", switchCost), width).slice(0, 2) : [];
+	const costLines =
+		withFacts && switchCost ? wrapTextWithAnsi(theme.fg("annotation", switchCost), width).slice(0, 2) : [];
 	// Severity colors the way the targets hub colors it, through the shared mapping. The thinking
-	// fact already says what runs and why, and an unknown context window is the context fact's own
-	// value, so neither repeats as a diagnostic.
+	// fact already says what runs and why, and from standard up an unknown context window is the
+	// context fact's own value, so neither repeats as a diagnostic there; at compact, where there is
+	// no context fact, the warning stands on its own row.
 	const shown = (row.diagnostics ?? []).filter((entry) => entry.severity !== "info");
 	const contextNote = shown.find((entry) => entry.code === CONTEXT_UNVERIFIED_CODE);
 	const diagnostics = shown
-		.filter((entry) => entry !== contextNote && !entry.code.startsWith("thinking-"))
+		.filter((entry) => (withFacts ? entry !== contextNote : true) && !entry.code.startsWith("thinking-"))
 		.slice(0, 2)
 		.flatMap((entry) => {
 			const token = diagnosticSeverityToken(entry.severity);
@@ -795,38 +950,48 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number, switch
 	const known = (value: string): boolean => value !== "?" && value !== "-" && value.length > 0;
 	const context = row.context.replace(/ctx$/u, "");
 	// In the order a switch is decided on: how much the model holds, how it thinks, what it can do.
-	const facts: Fact[] = [
-		known(context)
-			? { label: "context", value: `${context} tokens` }
-			: {
-					label: "context",
-					// The diagnostic's own sentence took three rows at 60 columns and pushed thinking off the card.
-					value: contextNote
-						? "unknown, so CLIO Coder compacts at its token budget; clio-coder configure can set it"
-						: "unknown",
-					tone: contextNote ? "warning" : "muted",
+	const keyFacts: Fact[] = withFacts
+		? [
+				known(context)
+					? { label: "context", value: `${context} tokens` }
+					: {
+							label: "context",
+							// The diagnostic's own sentence took three rows at 60 columns and pushed thinking off the card.
+							value: contextNote
+								? "unknown, so CLIO Coder compacts at its token budget; clio-coder configure can set it"
+								: "unknown",
+							tone: contextNote ? "warning" : "muted",
+						},
+				{
+					label: "thinking",
+					value: `${row.thinking ?? "not reported"}${row.thinkingNote ? `; ${row.thinkingNote}, your setting is kept` : ""}`,
 				},
-		{
-			label: "thinking",
-			value: `${row.thinking ?? "not reported"}${row.thinkingNote ? `; ${row.thinkingNote}, your setting is kept` : ""}`,
-		},
-		{ label: "can use", value: capabilityNames(row.caps) },
-		{
-			label: "replies",
-			value: [
-				known(row.maxTokens) ? `up to ${row.maxTokens} tokens` : "no reported length limit",
-				row.streaming === false ? "whole, not streamed" : "streamed",
-				acceptsImageInput({ vision: row.caps.vision }) ? "takes images" : "text only",
-			].join(" · "),
-		},
-		...(residency === null && row.loadState
-			? [{ label: "state", value: `${row.loadState}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}` }]
-			: []),
-		{ label: "runtime", value: `${row.runtimeName} · ${row.sourceNote ?? modelListWords(row.source)}` },
-	];
+			]
+		: [];
+	const paneFacts: Fact[] =
+		detail === "pane"
+			? [
+					// Health history and sign-in lead the pane: they are what detailed adds, so a short body cuts runtime first.
+					{ label: "health", value: healthHistoryWords(row) },
+					{ label: "sign-in", value: signInWords(row.authText) },
+					{ label: "can use", value: capabilityNames(row.caps) },
+					{
+						label: "replies",
+						value: [
+							known(row.maxTokens) ? `up to ${row.maxTokens} tokens` : "no reported length limit",
+							row.streaming === false ? "whole, not streamed" : "streamed",
+							acceptsImageInput({ vision: row.caps.vision }) ? "takes images" : "text only",
+						].join(` ${GLYPH.sep} `),
+					},
+					...(residency === null && row.loadState
+						? [{ label: "state", value: `${row.loadState}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}` }]
+						: []),
+					{ label: "runtime", value: `${row.runtimeName} ${GLYPH.sep} ${row.sourceNote ?? modelListWords(row.source)}` },
+				]
+			: [];
 	const factLines = factRows(
 		theme,
-		facts.map((fact) => ({ ...fact, tone: fact.tone ?? "muted" })),
+		[...keyFacts, ...paneFacts].map((fact) => ({ ...fact, tone: fact.tone ?? "muted" })),
 		width,
 	);
 	// A route that cannot answer says what to do about it before any fact about the route.
@@ -841,27 +1006,16 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number, switch
 			)
 		: [];
 	const factBudget = Math.max(
-		1,
-		Math.min(factLines.length, maxRows - 1 - next.length - residencyLines.length - costLines.length - diagnostics.length),
-	);
-	const kept = capWrapped(factLines, factBudget);
-	return [
-		chipRow(
-			theme,
-			[
-				statusChip(theme, healthStatus(row), availability),
-				// The table row above names the model and its connection; this says what it is to you.
-				theme.fg("annotation", state),
-				chip(theme, authWords(row.authText), "muted"),
-			],
-			width,
+		factLines.length === 0 ? 0 : 1,
+		Math.min(
+			factLines.length,
+			maxRows - status.length - next.length - residencyLines.length - costLines.length - diagnostics.length,
 		),
-		...next,
-		...residencyLines,
-		...costLines,
-		...kept,
-		...diagnostics,
-	];
+	);
+	const body = [...next, ...residencyLines, ...costLines, ...capWrapped(factLines, factBudget), ...diagnostics];
+	// The status row carries the route whole and is never cut; what follows it gives way to the room and says so.
+	const room = maxRows - status.length;
+	return room <= 0 ? status : [...status, ...capWrapped(body, room)];
 }
 
 /** The diagnostic an unknown context window raises; the detail's context fact carries its sentence instead. */
@@ -879,7 +1033,7 @@ function capWrapped(rows: ReadonlyArray<string>, max: number): string[] {
 
 /** A connection and its model the way the composer names them: `mock · mock/judge-model`, never `mock/mock/judge-model`. */
 function modelRefWords(target: string, model: string): string {
-	return model.length > 0 ? `${target} · ${model}` : target;
+	return model.length > 0 ? `${target} ${GLYPH.sep} ${model}` : target;
 }
 
 /** Where the picker's list of this connection's models came from, in words. */
@@ -983,12 +1137,52 @@ function filterModelRows(rows: ReadonlyArray<ModelRow>, query: string): ModelRow
 	return contained.length > 0 ? contained : fuzzyFilter([...rows], query, modelSelectorSearchText);
 }
 
+const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`;
+
+/**
+ * The picker's summary row, fitted from whole units so it never ends on a cut chip: the mode leads in the accent
+ * because Tab changes it and never drops; the local and cloud split (shown only when both are present) goes first,
+ * then the target count, then the current route, and the match count last. The current route is printed whole or
+ * not at all; the selection's status row prints whichever route the cursor is on.
+ */
+function summaryLine(
+	summary: ModelOverlaySummary,
+	mode: string,
+	matches: number,
+	active: string,
+	width: number,
+): string {
+	const theme = clioTheme();
+	const muted = (text: string): string => chip(theme, text, "muted");
+	const split = summary.localModels > 0 && summary.cloudModels > 0;
+	const units: SideUnit[] = [
+		{ text: mode, paint: (text) => chip(theme, text, "accent") },
+		{
+			text: `${matches} of ${plural(summary.totalModels, "model", "models")}`,
+			drop: 5,
+			paint: muted,
+			shorter: [{ text: `${matches} of ${summary.totalModels}`, rank: 4.5 }],
+		},
+		{ text: plural(summary.targets, "target", "targets"), drop: 2, paint: muted },
+		...(split
+			? [
+					{ text: `${summary.localModels} local`, drop: 1, paint: muted },
+					{ text: `${summary.cloudModels} cloud`, drop: 1, paint: muted },
+				]
+			: []),
+		{ text: `${GLYPH.ok} current ${active}`, drop: 3, paint: muted },
+	];
+	return fitSides(theme, units, [], width).trimEnd();
+}
+
 function refreshStatusLine(
 	refreshing: ModelRefreshScope | null | undefined,
 	error: RuntimeResolutionDiagnostic | null | undefined,
 ): string | null {
 	if (refreshing)
-		return refreshing === "all" ? "refreshing all targets and model catalogs…" : "refreshing selected target models…";
+		return refreshing === "all"
+			? `refreshing all targets and model catalogs${GLYPH.ellipsis}`
+			: `refreshing selected target models${GLYPH.ellipsis}`;
 	return error ? formatRuntimeResolutionDiagnostic(error) : null;
 }
 
@@ -1023,23 +1217,8 @@ function renderModelOverlayLines(input: {
 	const selected = filtered[selectedIndex] ?? null;
 	const active = input.summary.activeRef || "not configured";
 	const mode = searching ? `search "${query}"` : input.showAll ? "all" : "focus";
-	// The mode leads in the accent because Tab changes it; the counts stay
-	// dim. One row, not two: the legend that explained focus now sits on the
-	// position row, where the count of hidden models is.
-	const lines = [
-		chipRow(
-			theme,
-			[
-				chip(theme, mode, "accent"),
-				chip(theme, `${selectableFiltered} of ${input.summary.totalModels} models`, "muted"),
-				chip(theme, `${input.summary.targets} targets`, "muted"),
-				chip(theme, `${input.summary.localModels} local`, "muted"),
-				chip(theme, `${input.summary.cloudModels} cloud`, "muted"),
-				chip(theme, `current ${active}`, "muted", GLYPH.ok),
-			],
-			width,
-		),
-	];
+	const detailDepth = tierPolicy().pickerDetail;
+	const lines = [summaryLine(input.summary, mode, selectableFiltered, active, width)];
 	if (input.summary.newerModelNotice) {
 		lines.push(...wrapTextWithAnsi(theme.fg("annotation", input.summary.newerModelNotice), width).slice(0, 1));
 	}
@@ -1050,16 +1229,18 @@ function renderModelOverlayLines(input: {
 		);
 	if (input.selectionError) lines.push(...wrapTextWithAnsi(clioError(input.selectionError), width));
 	const bodyRows = input.bodyRows !== undefined && input.bodyRows > 0 ? input.bodyRows : 0;
-	// Two detail rows are owed before the table is sized; whatever the table
-	// leaves goes back to the detail, so a short list explains its row in full.
+	// The detail is sized before the table: the tier decides how deep it goes (one status row, the key facts, or the
+	// full pane), and the table windows into what that leaves, so a deeper tier shows fewer rows rather than a cut pane.
 	const cost =
 		selected?.selectable && input.switchCost
 			? input.switchCost({ target: selected.target, model: selected.model })
 			: null;
-	let detail = selected ? formatModelDetail(selected, width, 3, cost) : [];
-	const extraChrome = lines.length - 1 + Math.max(0, detail.length - 2);
+	const naturalDetail = selected
+		? formatModelDetail(selected, width, Number.POSITIVE_INFINITY, cost, detailDepth).length
+		: 1;
+	// Header, divider, position row and the blank row above the detail.
 	const budget =
-		bodyRows > 0 ? Math.max(MODEL_MIN_VISIBLE_ROWS, bodyRows - MODEL_CHROME_ROWS - extraChrome - 1) : VISIBLE_ROWS;
+		bodyRows > 0 ? Math.max(MODEL_MIN_VISIBLE_ROWS, bodyRows - lines.length - 4 - naturalDetail) : VISIBLE_ROWS;
 	if (filtered.length === 0) {
 		lines.push(
 			...emptyState(
@@ -1070,8 +1251,15 @@ function renderModelOverlayLines(input: {
 			),
 		);
 	} else {
-		const { window, start, position } = windowRows(filtered, selectedIndex, budget);
-		lines.push(...modelTableLines(window, selectedIndex - start, width));
+		let { window, start, position } = windowRows(filtered, selectedIndex, budget);
+		let table = modelTableLines(window, selectedIndex - start, width);
+		// A selected row that carries its target or id onto continuation rows takes them from the table, not the detail.
+		const extra = table.length - window.length - 2;
+		if (bodyRows > 0 && extra > 0 && budget - extra >= MODEL_MIN_VISIBLE_ROWS) {
+			({ window, start, position } = windowRows(filtered, selectedIndex, budget - extra));
+			table = modelTableLines(window, selectedIndex - start, width);
+		}
+		lines.push(...table);
 		if (position !== null || hidden > 0) {
 			lines.push(
 				positionRow(
@@ -1098,8 +1286,7 @@ function renderModelOverlayLines(input: {
 	if (spare >= 3) lines.push("");
 	if (selected) {
 		const room = Math.max(1, spare >= 3 ? spare - 1 : spare);
-		detail = capWrapped(formatModelDetail(selected, width, room, cost), room);
-		lines.push(...detail);
+		lines.push(...formatModelDetail(selected, width, room, cost, detailDepth));
 	} else lines.push(theme.fg("menuDescription", "no selected model"));
 	return lines.map((line) => padAnsi(line, width, GLYPH.ellipsis));
 }
