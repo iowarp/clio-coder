@@ -2,6 +2,7 @@ import type { ClioSettings } from "../../core/config.js";
 import type { FleetNodeInspection } from "../../domains/dispatch/fleet-nodes.js";
 import type { Component, SettingItem } from "../../engine/tui.js";
 import { isRowBudgeted, type RowBudgetedBody } from "../overlay-frame.js";
+import { GLYPH } from "../theme/index.js";
 import { isSubmenuSurface, type SubmenuSurface } from "./settings-submenus.js";
 
 type Submenu = NonNullable<SettingItem["submenu"]>;
@@ -245,7 +246,7 @@ export function fleetNodeSettingsSubmenu(
 				const choices = peers.flatMap((peer) =>
 					[...(peer.magicDns ? [peer.magicDns] : []), ...peer.addresses].map((host) => ({
 						value: host,
-						label: `${[...peer.name].map((char) => (char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 ? " " : char)).join("")} · ${host} · ${peer.online === null ? "Tailscale state unknown" : peer.online ? "Tailscale online" : "Tailscale offline"}`,
+						label: `${[...peer.name].map((char) => (char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 ? " " : char)).join("")} ${GLYPH.sep} ${host} ${GLYPH.sep} ${peer.online === null ? "Tailscale state unknown" : peer.online ? "Tailscale online" : "Tailscale offline"}`,
 					})),
 				);
 				if (!choices.length)
