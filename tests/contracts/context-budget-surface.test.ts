@@ -291,7 +291,8 @@ describe("native budget inspection through the registered context tool", () => {
 		});
 		try {
 			const text = panel.view.render(120).map(stripTerminalSequences).join("\n");
-			match(text, /15\.1K\/32\.8K \(46\.0%\)/);
+			// Context fill is the bottom rail's (4.1); the status line repeats neither the published nor the older figure.
+			doesNotMatch(text, /\/32\.8K|46\.0%/);
 			ok(!text.includes("9.1K/"), text);
 			for (const width of [24, 40, 72, 120]) {
 				terminalWidth = width;
@@ -322,7 +323,8 @@ describe("native budget inspection through the registered context tool", () => {
 			resolveCurrentBranch: async () => null,
 		});
 		try {
-			match(panel.view.render(120).map(stripTerminalSequences).join("\n"), /9K\/32\.8K \(27\.5%\)/);
+			// The rail states the historical fill; the footer stays free of it.
+			doesNotMatch(panel.view.render(120).map(stripTerminalSequences).join("\n"), /32\.8K|27\.5%/);
 		} finally {
 			panel.dispose();
 		}
@@ -407,7 +409,7 @@ describe("native budget inspection through the registered context tool", () => {
 		});
 		try {
 			const text = panel.view.render(120).map(stripTerminalSequences).join("\n");
-			match(text, /32\.8K ctx/);
+			doesNotMatch(text, /32\.8K ctx/);
 			doesNotMatch(text, /free 32\.8k/);
 		} finally {
 			panel.dispose();

@@ -1017,8 +1017,11 @@ for (const width of [40, 44, 60, 92, 120]) {
 					ok(rail.includes(nickname), rail);
 					for (const label of [placement, "blade-gateway", "q6"]) ok(!rail.includes(label), rail);
 					const footer = footerRows(width).map(stripTerminalSequences).join("\n");
-					ok(footer.includes("clio-coder"), footer);
-					ok(!footer.includes("q6"), "compact footer should leave model identity to the rail");
+					// The status line ends in the model id: whole when it fits beside the mark, else without its placement.
+					const status = footer.split("\n")[0] ?? "";
+					ok(status.startsWith(">C_"), status);
+					ok(status.endsWith(`${family}-27b-q6`), status);
+					if (width >= 92) ok(status.includes(`blade-gateway · ${model}`), status);
 					const session = headerRows(built, 120)[0] ?? "";
 					ok(session.includes(`blade-gateway · ${model}`), session);
 					identities.push(session);
@@ -1058,7 +1061,7 @@ test("the composer rail uses a model nickname while the session header retains i
 		ok(rail.includes("Qwopus3.8"), rail);
 		built.footer.refresh();
 		const footer = built.footer.view.render(60).map(stripTerminalSequences).join("\n");
-		ok(footer.includes("clio-coder") && !footer.includes("@q4_k_m"), footer);
+		ok(footer.split("\n")[0]?.endsWith(model), footer);
 		const session = headerRows(built, 120)[0] ?? "";
 		ok(session.includes(`blade · ${model}`), session);
 	} finally {
