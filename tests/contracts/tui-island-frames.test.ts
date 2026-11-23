@@ -1,15 +1,11 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { terminalBackground } from "../../src/core/terminal-background.js";
 import type { PaletteColor } from "../../src/core/theme-token-hex.js";
 import { paletteProjection, TERMINAL_PALETTE } from "../../src/core/theme-token-hex.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { type CouncilGroupView, councilGroupBody, councilIslandLines } from "../../src/interactive/council-grid.js";
-import {
-	createDispatchBoardView,
-	type DispatchBoardRow,
-	formatTaskIslandLines,
-} from "../../src/interactive/dispatch-board.js";
+import { type CouncilGroupView, councilGroupBody } from "../../src/interactive/council-grid.js";
+import { createDispatchBoardView, type DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { clioTheme, frame, GLYPH } from "../../src/interactive/theme/index.js";
 import { WELCOME_WORDMARK, WELCOME_WORDMARK_ROW } from "../../src/interactive/welcome-art.js";
 import { buildWelcomeDashboardLines, type WelcomeDashboardStats } from "../../src/interactive/welcome-dashboard.js";
@@ -153,10 +149,6 @@ test("the council card frames its grid or stack inside the width at every width"
 			rightMeta: council.elapsed,
 		});
 		assertIsland(lines, width, "council c1");
-		// The council's head, its question, each member's state and where to read the answers.
-		const island = councilIslandLines(clioTheme(), council, 44);
-		ok(island.length >= 2 && island.length <= 4, `council dock card used ${island.length} rows`);
-		assertFits(island, 44);
 	}
 });
 
@@ -175,17 +167,6 @@ const run: DispatchBoardRow = {
 	usage: { kind: "pending" },
 	task: "map the render path of the fleet island",
 } as unknown as DispatchBoardRow;
-
-test("the fleet island is a fixed-width island and fits the narrowest terminal that shows it", () => {
-	const empty = formatTaskIslandLines([]);
-	assertIsland(empty, 48, "Fleet Runs");
-	const busy = formatTaskIslandLines([run]);
-	assertIsland(busy, 48, "Fleet Runs");
-	deepStrictEqual(
-		busy.map((line) => visibleWidth(line)),
-		busy.map(() => 48),
-	);
-});
 
 test("a dispatch card spends the hollow diamond on origin only, never on a trust verdict", () => {
 	for (const verdict of ["grounded", "unverified"] as const) {

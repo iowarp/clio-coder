@@ -19,14 +19,12 @@ import {
 	type TelemetryProjection,
 } from "../../src/domains/telemetry/projection.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { councilGroupBody, councilIslandLines } from "../../src/interactive/council-grid.js";
+import { councilGroupBody } from "../../src/interactive/council-grid.js";
 import {
 	createDispatchBoardStore,
 	createDispatchBoardView,
 	type DispatchBoardRow,
 	dispatchStatusPresentation,
-	formatFleetDockRows,
-	formatTaskIslandLines,
 } from "../../src/interactive/dispatch-board.js";
 import { dispatchSegment } from "../../src/interactive/footer-panel.js";
 import { renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
@@ -62,7 +60,7 @@ it("keeps the council status word neutral while a running glyph carries action",
 		droppedLines: 0,
 	};
 	const group = { group: "review", members: [member], synthesis: null, status, round: 1, elapsed: "3s" };
-	for (const rows of [councilIslandLines(theme, group, 80), councilGroupBody(theme, group, 80)]) {
+	for (const rows of [councilGroupBody(theme, group, 80)]) {
 		const rendered = rows.join("\n");
 		ok(rendered.includes(theme.fg("action", GLYPH.running)));
 		ok(rendered.includes(theme.fg("muted", "running")));
@@ -805,9 +803,6 @@ describe("dispatch quality presentation", () => {
 				const bucket = { pass: "3 ok", fail: "3 failed", unknown: "3 ok", ungrounded: "3 unverified" }[quality];
 				match(plain(collapsed), new RegExp(`delegated · ${bucket}$`, "u"));
 				doesNotMatch(plain(collapsed), /quality/u);
-				const island = formatTaskIslandLines([{ ...row, agentAudience: "base" }]);
-				ok(plain(island).replace(/\s+/gu, " ").includes(`quality ${wording}`), plain(island));
-				match(plain(island), /done/u);
 				const card = createDispatchBoardView(
 					() => [row],
 					() => undefined,
@@ -886,36 +881,10 @@ it("keeps shadow runs inspectable while presenting them only as compact helper a
 	const rows = board.activeRows();
 	strictEqual(rows.length, 4);
 	match(dispatchSegment(rows) ?? "", /helpers scout ×4 4 active/);
-	doesNotMatch(stripTerminalSequences(formatTaskIslandLines(rows).join("\n")), /scout/);
 	const first = rows[0];
 	ok(first);
 	const ordinary = { ...first, runId: "ordinary", agentId: "coder", agentAudience: "base" as const };
-	const mixed = stripTerminalSequences(formatTaskIslandLines([...rows, ordinary]).join("\n"));
-	match(mixed, /coder/);
-	doesNotMatch(mixed, /scout/);
 	match(dispatchSegment([...rows, ordinary]) ?? "", /helpers scout ×4 4 active · dispatch 1 active/);
-});
-
-it("keeps a council's settled member in its live card so the count is the whole council", () => {
-	const { bus, board } = setup();
-	const member = (runId: string, label: string): DispatchEnqueuedPayload => ({
-		...IDENTITY,
-		runId,
-		council: { group: "g-two", label, round: 1 },
-	});
-	for (const [runId, label] of [
-		["fast-run", "fast"],
-		["slow-run", "slow"],
-	] as const) {
-		bus.emit("run.enqueued", member(runId, label));
-		bus.emit("run.started", { ...member(runId, label), pid: null, assignmentId: runId, attempt: 0 });
-	}
-	bus.emit("run.completed", { ...COMPLETED, ...member("fast-run", "fast") });
-	board.reconcile();
-	const dock = formatFleetDockRows(board.liveRows(), 120).map(stripTerminalSequences).join("\n");
-	match(dock, /council of 2 · running/u);
-	doesNotMatch(dock, /council of 1/u);
-	board.unsubscribe();
 });
 
 it("Fleet Runs moves off a finished run when a live one appears, unless the operator moved the cursor", () => {

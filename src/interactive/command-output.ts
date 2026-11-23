@@ -1,4 +1,5 @@
 import type { OutputStyle } from "../core/defaults.js";
+import { tierPolicy } from "../core/presentation-tier.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactUrlCredentials } from "../domains/safety/redaction.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
@@ -197,7 +198,7 @@ function wrapCommandLine(line: string, width: number, shared: ValueColumn | null
  * each value wrapped inside its value column; Detailed and /view keep the producer's own layout, wrapped the same way.
  */
 function renderCommandReport(report: TranscriptReport, width: number, style: OutputStyle = "standard", whole = false) {
-	if (style === "compact" && !whole) return renderTranscriptReport(report, width, style, false);
+	if (!tierPolicy(style).evidence && !whole) return renderTranscriptReport(report, width, style, false);
 	const theme = clioTheme();
 	const safeWidth = Math.max(8, width);
 	const failure = report.level === "error";
@@ -211,7 +212,7 @@ function renderCommandReport(report: TranscriptReport, width: number, style: Out
 	const body = (report.text ?? "").split("\n").filter((line) => line.trim().length > 0);
 	const shared = sharedValueColumn(body);
 	const inner = safeWidth - 4;
-	if (style === "detailed" || whole) {
+	if (tierPolicy(style).provenance || whole) {
 		let cut = false;
 		for (const line of body) {
 			const wrapped = wrapCommandLine(line, inner, shared, whole);

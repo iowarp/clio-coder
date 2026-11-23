@@ -659,6 +659,154 @@ function checkThemeDiscipline(): void {
 }
 
 // ---------------------------------------------------------------------------
+// tier-discipline: one definition of the presentation tier (spec 3, invariant 5). Outside the policy module, the
+// transcript slice and the settings value list, no file under src/interactive/ or src/cli/fleet-*.ts compares the tier
+// to a literal. The check keys on the operand's type (presentationTier(), transcriptDetail(...).style, outputDetail, an
+// OutputStyle-typed binding), never on the bare literal, so an unrelated "compact" mode stays legal.
+// ---------------------------------------------------------------------------
+const TIER_NAMES = new Set(["compact", "standard", "detailed"]);
+const TIER_EXEMPT = new Set([
+	"src/core/presentation-tier.ts",
+	"src/interactive/transcript-detail.ts",
+	"src/interactive/overlays/settings-presentation.ts",
+]);
+const EQUALITY = new Set([
+	ts.SyntaxKind.EqualsEqualsEqualsToken,
+	ts.SyntaxKind.ExclamationEqualsEqualsToken,
+	ts.SyntaxKind.EqualsEqualsToken,
+	ts.SyntaxKind.ExclamationEqualsToken,
+]);
+
+function tierScanFiles(): string[] {
+	const walk = (dir: string): string[] =>
+		readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+			const full = join(dir, entry.name);
+			if (entry.isDirectory()) return walk(full);
+			return entry.isFile() && entry.name.endsWith(".ts") ? [full] : [];
+		});
+	const cli = join(root, "src/cli");
+	return [
+		...walk(join(root, "src/interactive")),
+		...readdirSync(cli)
+			.filter((name) => /^fleet-.*\.ts$/u.test(name))
+			.map((name) => join(cli, name)),
+	].filter((file) => !TIER_EXEMPT.has(relative(root, file)));
+}
+
+function checkTierDiscipline(): void {
+	const files = tierScanFiles();
+	const config = ts.getParsedCommandLineOfConfigFile(
+		join(root, "tsconfig.json"),
+		{},
+		{
+			...ts.sys,
+			onUnRecoverableConfigFileDiagnostic: () => {},
+		},
+	);
+	if (config === undefined) {
+		fail("tier-discipline", "could not read tsconfig.json");
+		return;
+	}
+	const program = ts.createProgram(files, { ...config.options, noEmit: true });
+	const checker = program.getTypeChecker();
+	const coversTiers = (type: ts.Type): boolean => {
+		if (type.aliasSymbol?.name === "OutputStyle") return true;
+		const names = new Set<string>();
+		for (const part of type.isUnion() ? type.types : [type]) {
+			if (part.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null)) continue;
+			if (!part.isStringLiteral() || !TIER_NAMES.has(part.value)) return false;
+			names.add(part.value);
+		}
+		return names.size === TIER_NAMES.size;
+	};
+	const isTierOperand = (node: ts.Expression): boolean => {
+		let expression = node;
+		while (ts.isParenthesizedExpression(expression)) expression = expression.expression;
+		if (ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)) {
+			const named = checker.getSymbolAtLocation(ts.isPropertyAccessExpression(expression) ? expression.name : expression);
+			if (named !== undefined) {
+				const symbol = named.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(named) : named;
+				if (symbol.name === "outputDetail" || coversTiers(checker.getTypeOfSymbol(symbol))) return true;
+			}
+		}
+		return coversTiers(checker.getTypeAtLocation(expression));
+	};
+	const tierLiteral = (node: ts.Node): boolean => ts.isStringLiteralLike(node) && TIER_NAMES.has(node.text);
+	const offenders: string[] = [];
+	for (const file of files) {
+		const source = program.getSourceFile(file);
+		if (source === undefined) continue;
+		const at = (node: ts.Node) =>
+			`${relative(root, file)}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`;
+		const visit = (node: ts.Node): void => {
+			if (ts.isBinaryExpression(node) && EQUALITY.has(node.operatorToken.kind)) {
+				if ((tierLiteral(node.right) && isTierOperand(node.left)) || (tierLiteral(node.left) && isTierOperand(node.right)))
+					offenders.push(at(node));
+			} else if (ts.isCaseClause(node) && tierLiteral(node.expression) && isTierOperand(node.parent.parent.expression)) {
+				offenders.push(at(node));
+			}
+			ts.forEachChild(node, visit);
+		};
+		visit(source);
+	}
+	if (offenders.length > 0)
+		fail(
+			"tier-discipline",
+			`the presentation tier is compared to a literal; read a budget from tierPolicy() instead:\n  ${offenders.join("\n  ")}`,
+		);
+}
+
+// ---------------------------------------------------------------------------
+// glyph-discipline: ASCII mode is a promise about chrome (spec 2.6). Every ASCII_GLYPHS value is ASCII bytes, and the
+// non-ASCII string literals left outside theme/ and src/core/glyphs.ts are counted so the sweep can see them shrink.
+// ---------------------------------------------------------------------------
+function checkGlyphDiscipline(): void {
+	const glyphPath = join(root, "src/core/glyphs.ts");
+	const source = ts.createSourceFile(glyphPath, readFileSync(glyphPath, "utf8"), ts.ScriptTarget.Latest, true);
+	let table: ts.ObjectLiteralExpression | undefined;
+	const find = (node: ts.Node): void => {
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isIdentifier(node.name) &&
+			node.name.text === "ASCII_GLYPHS" &&
+			node.initializer !== undefined &&
+			ts.isObjectLiteralExpression(node.initializer)
+		)
+			table = node.initializer;
+		ts.forEachChild(node, find);
+	};
+	find(source);
+	if (table === undefined) {
+		fail("glyph-discipline", "ASCII_GLYPHS object literal not found in src/core/glyphs.ts");
+		return;
+	}
+	const nonAscii = /[\u0080-\u{10ffff}]/u;
+	for (const property of table.properties) {
+		if (!ts.isPropertyAssignment(property)) {
+			fail("glyph-discipline", `ASCII_GLYPHS entry ${property.getText(source)} is not written out as a literal`);
+			continue;
+		}
+		const value = property.initializer;
+		if (!ts.isStringLiteralLike(value)) {
+			fail("glyph-discipline", `ASCII_GLYPHS.${property.name.getText(source)} is not a string literal`);
+		} else if (nonAscii.test(value.text)) {
+			fail("glyph-discipline", `ASCII_GLYPHS.${property.name.getText(source)} is not ASCII: ${value.text}`);
+		}
+	}
+	let literals = 0;
+	for (const file of tierScanFiles()) {
+		if (relative(root, file).startsWith("src/interactive/theme/")) continue;
+		const scanned = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, false);
+		const count = (node: ts.Node): void => {
+			if ((ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) && nonAscii.test(node.text)) literals += 1;
+			ts.forEachChild(node, count);
+		};
+		count(scanned);
+	}
+	process.stdout.write(`check-hygiene: glyph-discipline: ${literals} non-ASCII chrome literals outside theme/\n`);
+}
+
+// ---------------------------------------------------------------------------
 // readme-install-block: the README's documented install steps stay in step
 // with what scripts/install-local.sh actually prints and does. Was
 // tests/contracts/readme-install-block.test.ts.
@@ -1461,6 +1609,8 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["environment-variable-inventory", checkEnvironmentVariableInventory],
 	["state-root-inventory", checkStateRootInventory],
 	["theme-discipline", checkThemeDiscipline],
+	["tier-discipline", checkTierDiscipline],
+	["glyph-discipline", checkGlyphDiscipline],
 	["packaging", checkPackaging],
 	["gitignored-reference", checkGitignoredReference],
 	["tracked-ignored", checkTrackedIgnored],

@@ -108,11 +108,6 @@ export interface EditorChrome {
 		namesRoute?: boolean;
 	} | null;
 	/**
-	 * What kept running behind a dock that hid the rail. The overlay rule now carries the run's state (`getBesideCard`), so
-	 * the editor no longer draws this strip; the field stays until the sweep removes the strip.
-	 */
-	getLiveWorkStrip?: (width: number, escVerb: string | null) => string | null;
-	/**
 	 * The live run's short state for a focused surface's top rule: cue, state and elapsed, then the actor (units 3 and 4
 	 * of the overlay rule). `room` bounds the quoted object of the fullest form. Null when nothing runs.
 	 */

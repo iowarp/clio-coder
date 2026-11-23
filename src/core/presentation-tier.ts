@@ -19,6 +19,14 @@ export type UsageSections = "totals" | "breakdown" | "provenance";
 
 export interface TierPolicy {
 	tier: OutputStyle;
+	/**
+	 * Whether a surface adds the bounded evidence a reader needs to trust an outcome without opening anything: the facts
+	 * beside each state and short previews of what changed (section 3, standard and up). Without it a surface shows
+	 * outcomes only.
+	 */
+	evidence: boolean;
+	/** Whether a surface adds provenance and telemetry: routes, ids, accounting, trust records (section 3, detailed). */
+	provenance: boolean;
 	/** Rows of reasoning shown before CLIO Coder's words and while reasoning streams; 0 folds it to a marker. */
 	reasoningRows: number;
 	/** Rows of reasoning shown before an action; 0 folds it to a marker, 1 keeps one line of its last paragraph. */
@@ -81,6 +89,8 @@ const TOKEN_COLUMNS: readonly BoardColumn[] = [...BASE_COLUMNS, "in", "out"];
 const POLICIES: Readonly<Record<OutputStyle, TierPolicy>> = {
 	compact: {
 		tier: "compact",
+		evidence: false,
+		provenance: false,
 		reasoningRows: 0,
 		reasoningBeforeActionRows: 0,
 		invocationRows: 4,
@@ -120,6 +130,8 @@ const POLICIES: Readonly<Record<OutputStyle, TierPolicy>> = {
 	},
 	standard: {
 		tier: "standard",
+		evidence: true,
+		provenance: false,
 		reasoningRows: 3,
 		reasoningBeforeActionRows: 1,
 		invocationRows: 8,
@@ -159,6 +171,8 @@ const POLICIES: Readonly<Record<OutputStyle, TierPolicy>> = {
 	},
 	detailed: {
 		tier: "detailed",
+		evidence: true,
+		provenance: true,
 		reasoningRows: 12,
 		reasoningBeforeActionRows: 12,
 		invocationRows: 18,

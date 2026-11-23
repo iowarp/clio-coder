@@ -119,7 +119,6 @@ test("a run waiting for the verification slot says so on its worker card and Fle
 	const board = createDispatchBoardView(
 		() => [row],
 		() => undefined,
-		() => "standard",
 	);
 	board.setBodyRows(30);
 	const card = () =>
@@ -209,7 +208,6 @@ test("settled plans fold routine steps but keep the failed step and a route to d
 	const board = createDispatchBoardView(
 		() => [{ ...fixture, plan }],
 		() => undefined,
-		() => "compact",
 	);
 	board.setBodyRows(12);
 	board.toggleDetail();

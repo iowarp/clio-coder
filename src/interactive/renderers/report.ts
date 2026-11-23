@@ -1,4 +1,5 @@
 import type { OutputStyle } from "../../core/defaults.js";
+import { tierPolicy } from "../../core/presentation-tier.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
@@ -6,7 +7,6 @@ import type { NoticeLevel } from "../../session-control/notice-source.js";
 import { cardHead, cardRows } from "../card.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 import type { SemanticRole } from "../theme/tokens.js";
-import { transcriptDetail } from "../transcript-detail.js";
 
 export interface TranscriptReportRow {
 	label: string;
@@ -60,7 +60,7 @@ export function transcriptReportFromText(text: string, title?: string, level?: N
 	};
 }
 
-/** Minimal counters, a Default fact table, or every captured detail. */
+/** Compact counters, a standard fact table, or every captured detail. */
 export function renderTranscriptReport(
 	report: TranscriptReport,
 	width: number,
@@ -68,6 +68,7 @@ export function renderTranscriptReport(
 	unbounded = false,
 ): string[] {
 	const theme = clioTheme();
+	const policy = tierPolicy(style);
 	const safeWidth = Math.max(8, width);
 	const failure = report.level === "error";
 	const token = failure
@@ -85,11 +86,11 @@ export function renderTranscriptReport(
 				? GLYPH.ok
 				: GLYPH.info;
 	const clean = (text: string) => sanitizeCallTargetText(redactUrlCredentials(text));
-	const summary = style === "compact" && !unbounded ? (report.compactSummary ?? report.summary) : report.summary;
+	const summary = !policy.evidence && !unbounded ? (report.compactSummary ?? report.summary) : report.summary;
 	const label = theme.fg(token, `${mark} ${clean(report.title)}`);
 	const facts = theme.fg("annotation", `${GLYPH.dot} ${clean(summary)}`);
 	const head = `${label} ${facts}`;
-	if (style === "compact" && !unbounded) {
+	if (!policy.evidence && !unbounded) {
 		const hint = visibleWidth(head) > safeWidth ? " /view" : "";
 		const titleWidth = safeWidth - visibleWidth(facts) - 1 - hint.length;
 		const compactHead =
@@ -99,7 +100,7 @@ export function renderTranscriptReport(
 		return cardHead(truncateToWidth(compactHead, safeWidth - hint.length, GLYPH.ellipsis, false) + hint, "", safeWidth);
 	}
 	const lines = cardHead(head, "", safeWidth);
-	if (style === "detailed" || unbounded) {
+	if (policy.provenance || unbounded) {
 		if (report.text !== undefined) {
 			for (const row of report.text.split("\n")) lines.push(...cardRows(row, safeWidth, failure, "body"));
 		} else {
@@ -112,7 +113,7 @@ export function renderTranscriptReport(
 		}
 		return lines;
 	}
-	const budget = transcriptDetail("standard").invocationRows;
+	const budget = policy.invocationRows;
 	const shown = report.rows.slice(0, budget);
 	const inner = safeWidth - 4;
 	const labelWidth = Math.min(

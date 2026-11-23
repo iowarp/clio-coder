@@ -8,7 +8,7 @@ import type { UsageSnapshot } from "../../src/domains/quota/types.js";
 import { foldEconomy } from "../../src/domains/telemetry/economy-fold.js";
 import { quotaAccountDetails } from "../../src/domains/telemetry/read-model.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { type DispatchBoardRow, formatTaskIslandLines } from "../../src/interactive/dispatch-board.js";
+import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import {
 	bindingQuotaWindow,
 	bindingWindowPart,
@@ -204,27 +204,6 @@ test("weekly badges select the model's own group and never infer another account
 			`weekly ${usedPct}% used`,
 		);
 	}
-	const row: DispatchBoardRow = {
-		...route,
-		agentAudience: "base",
-		runId: "run",
-		agentId: "worker",
-		runtimeKind: "subprocess",
-		targetId: "agy",
-		status: "running",
-		elapsedMs: 1000,
-		usage: { kind: "pending" },
-		lastContextTokens: null,
-		ttft: null,
-	};
-	const island = formatTaskIslandLines([row], 1, quotaRows([account]));
-	match(plain(island), /Shared account.*weekly 73% used/);
-	doesNotMatch(plain(island), /96%|5h/);
-	ok(island.every((line) => visibleWidth(line) <= 76));
-	doesNotMatch(
-		plain(formatTaskIslandLines([{ ...row, node: "remote" }], 1, quotaRows([account]))),
-		/Shared account|weekly/,
-	);
 });
 
 test("the receipt leads with the binding window, keeps sub-cent digits and leaves the period fee to the evidence", () => {

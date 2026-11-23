@@ -2483,7 +2483,7 @@ function renderToolSegmentLines(
 		return renderToolAwaitingApproval(
 			call,
 			width,
-			detail.style === "compact" || seg.approvalDocked === true ? undefined : seg.approvalView,
+			!detail.evidence || seg.approvalDocked === true ? undefined : seg.approvalView,
 		);
 	if (!seg.finished && seg.judging === true) return renderToolAwaitingJudge(call, width);
 	const finished = {
@@ -2633,7 +2633,7 @@ function toolBlockGap(
 	failed: boolean,
 	detail: TranscriptDetailPolicy,
 ): boolean {
-	if (!body || detail.style === "compact") return false;
+	if (!body || !detail.evidence) return false;
 	if (!failed) return true;
 	const rail = cardRail();
 	return lines.some((line) => line.startsWith(rail));
@@ -2833,11 +2833,11 @@ function stacksUnder(
 	// A dispatch's worker rows nest under the call that spawned them: the header and its rows are one card.
 	if (previous?.role === "assistant") return spawnedAtTail(entry, previous);
 	if (previous?.role !== "worker") return false;
-	if (detail.style === "compact") return true;
+	if (!detail.evidence) return true;
 	if (workerGroupPosition(entry, previous) === "continues") return true;
 	const parent = entry.state.parentToolCallId;
 	if (parent !== undefined && parent === previous.state.parentToolCallId) return true;
-	return detail.style !== "detailed" && entry.state.helper === true && previous.state.helper === true;
+	return !detail.provenance && entry.state.helper === true && previous.state.helper === true;
 }
 
 /**
@@ -3079,7 +3079,7 @@ function renderEntryLines(
 			// thinking model reasons before nearly every call, so the fold spans
 			// that reasoning, and the reasoning inside the fold joins the marker
 			// ahead of it rather than splitting the run into one-call folds.
-			const family = detail.style === "compact" && !unboundedToolBodies ? foldFamily(seg) : null;
+			const family = !detail.evidence && !unboundedToolBodies ? foldFamily(seg) : null;
 			const grouped: ToolSegment[] = [seg];
 			let end = segIndex;
 			let absorbed = "";
@@ -3390,12 +3390,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 */
 	const queuedRows: QueuedRows = {
 		call: (seg, width, detail) =>
-			detail.style === "compact" || (dispatchGroups.get(seg.id)?.length ?? 0) > 0
+			!detail.evidence || (dispatchGroups.get(seg.id)?.length ?? 0) > 0
 				? []
 				: queuedRunRows(unplacedTasks(seg, []), width),
 		card: (entry, width, detail) => {
 			const parent = entry.state.parentToolCallId;
-			if (detail.style === "compact" || parent === undefined) return [];
+			if (!detail.evidence || parent === undefined) return [];
 			const group = dispatchGroups.get(parent);
 			if (group === undefined || group[group.length - 1] !== entry) return [];
 			const call = findSpawningCall(parent)?.segment;
