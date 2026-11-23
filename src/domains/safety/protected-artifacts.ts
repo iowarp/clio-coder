@@ -195,13 +195,19 @@ function classifyDestructiveCommand(
 	const text = heredocDataText(command) ?? command;
 	const scanned = scanShellLike(text);
 	const segments = splitSegments(scanned).flatMap((tokens) => [tokens, ...substitutionSegments(tokens, 0)]);
+	// FX-1: a `>` in a here-document body is input text, not a redirect, unless a shell may still read that body.
+	const inert = heredocInertRedirectTokens(text);
+	const redirectSegments =
+		inert === null ? null : splitSegments(inert).flatMap((tokens) => [tokens, ...substitutionSegments(tokens, 0)]);
 	// M-27: a hard reset is judged by what it rewrites only while every step before it leaves git's state alone.
 	let priorReads = resetShapeHolds(text, scanned);
 	let moved = runsElsewhere;
 	for (const tokens of segments) {
 		const segment = shellCommandArguments(tokens);
-		const redirect = classifyRedirect(tokens, artifacts);
-		if (redirect.kind === "destructive") return redirect;
+		if (redirectSegments === null) {
+			const redirect = classifyRedirect(tokens, artifacts);
+			if (redirect.kind === "destructive") return redirect;
+		}
 
 		const commandIndex = commandTokenIndex(segment);
 		const reading = { precise: priorReads && !pipedOnward(scanned, tokens), moved };
@@ -264,8 +270,36 @@ function classifyDestructiveCommand(
 			if (result.kind === "destructive") return result;
 		}
 	}
+	for (const tokens of redirectSegments ?? []) {
+		const redirect = classifyRedirect(tokens, artifacts);
+		if (redirect.kind === "destructive") return redirect;
+	}
 
 	return { kind: "benign", matches: [] };
+}
+
+/**
+ * FX-1: the command's tokens with its quoted here-document bodies skipped, for the redirect reading, or null when every
+ * body stays commands: none was skipped, one is unquoted, a shell may read one ({@link scanSkippingHeredocBodies} keeps
+ * those, and every body when a function, alias or PATH change may redefine the reader), or `cat` or `tee` copies one into
+ * a file a later step may run ({@link mayRunHeredocOutputs}). A redirect on the command line itself stays in the tokens.
+ */
+function heredocInertRedirectTokens(text: string): ReadonlyArray<ShellToken> | null {
+	if (!text.includes("<<")) return null;
+	const scan = cachedShellScan(text, true);
+	if (scan.bodies.length === 0) return null;
+	const heads = scanShellText(text, scan.bodies);
+	const withoutBodies = withoutHeredocBodies(text);
+	for (let index = 0; index < heads.length; index += 1) {
+		const token = heads[index];
+		if (token?.operator !== true || token.value !== "<<") continue;
+		const next = heads[index + 1];
+		const word = next?.value === "-" && next.start === token.end ? heads[index + 2] : next;
+		if (word?.quoted !== true || word.operator) return null;
+		const outputs = heredocDataOutputs(heads, index);
+		if (outputs !== null && outputs.length > 0 && mayRunHeredocOutputs(withoutBodies, outputs)) return null;
+	}
+	return scan.tokens;
 }
 
 export function detectValidationCommand(

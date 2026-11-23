@@ -1369,6 +1369,8 @@ describe("safety gate boundary", () => {
 			`cat >> tests/probe.test.ts <<'EOF'\n${body}EOF\nnode --version`,
 			`tee src/probe.ts > /dev/null <<'EOF'\n${body}EOF`,
 			"git add -A && git commit -q -F - <<'EOF'\nfix: map a > [5]) to b\nEOF",
+			// FX-1: a quoted body an interpreter reads is its program, not shell text, so `>` in it redirects nothing.
+			"python3 - <<'EOF'\nprint([1] > [5])\nEOF",
 		])
 			strictEqual(reason(command), null, command);
 		// Row 287: a body some step may run, an unquoted body, a copy git may run as a hook or config, and a recipient the
@@ -1388,7 +1390,6 @@ describe("safety gate boundary", () => {
 			`cat <<E\\\nOF > /dev/null\n$(${gone})\nEOF`,
 			`cat <<$'EOF' > /dev/null\nhello\n$EOF\n${gone}\nEOF`,
 			`cat 3>.git/config 1>&3 <<'EOF'\n${gone}\nEOF\ngit status`,
-			"python3 - <<'EOF'\nprint([1] > [5])\nEOF",
 			// Neon round: a locale-quoted command name bash may translate to any program.
 			`$"cat" <<'EOF'\n${gone}; cat .env\nEOF`,
 			// Neon round: a later plain copy into a name the call runs.
