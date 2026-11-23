@@ -157,22 +157,6 @@ export function contextRailUnit(context: ContextOccupancyFacts, theme: ClioTheme
 	return body ? `${theme.fg("annotation", "ctx")} ${body}` : "";
 }
 
-/**
- * The occupancy after the rail's own `ctx ` word, fitted to `room`: the bar with the percent and fill word, then the
- * percent alone. The pair is the group fitter's to add, since it keys on the terminal's width class.
- */
-export function contextRailHint(context: ContextOccupancyFacts, cells: number, room: number, theme: ClioTheme): string {
-	const bar = Math.max(0, Math.floor(cells));
-	for (const form of [
-		{ bar, pair: false },
-		{ bar: 0, pair: false },
-	]) {
-		const body = contextRailBody(context, theme, form);
-		if (visibleWidth(body) <= room) return body;
-	}
-	return "";
-}
-
 /** What the thinking unit is drawn from; the shape of the editor chrome's `getThinking`. */
 export interface ThinkingRailFacts {
 	label: string;

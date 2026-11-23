@@ -10,6 +10,7 @@ import { mainShellContained } from "../core/sandbox/main-session.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { CompactionPayload } from "../core/telemetry/live-events.js";
 import { motionEnabled } from "../core/terminal-preferences.js";
+import { ToolNames } from "../core/tool-names.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { listPlaybooks } from "../domains/agents/playbook.js";
 import { isUserVisibleAgent } from "../domains/agents/spec.js";
@@ -890,7 +891,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getThinkingLabel: () => editorChrome.getThinking?.().label ?? "off",
 		getHarnessStatus: (width, reserved = 0) => {
 			const status = footerDeps.getAgentStatus?.() ?? statusController.current();
-			const detail = [railDetail(currentLiveWork(), width), foldedContextWords()].filter(Boolean).join(" · ") || null;
+			const live = currentLiveWork();
+			// While the turn waits on its workers the phase names their count; their phases are the dock's to list.
+			const waiting = status.phase === "dispatching" || status.tool?.toolName === ToolNames.Dispatch;
+			const detail =
+				[railDetail(waiting ? { ...live, workers: [] } : live, width), foldedContextWords()].filter(Boolean).join(" · ") ||
+				null;
 			const route = deps.getSettings?.().chat;
 			if (status.phase !== "idle") {
 				const name = phaseModelName(status);
@@ -907,6 +913,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					reserved + beside,
 					runningCompaction(),
 					route?.target ?? undefined,
+					waiting ? live.workers.length : null,
 				);
 				return {
 					...(name !== modelNickname(route?.model) ? { subject: name } : {}),
