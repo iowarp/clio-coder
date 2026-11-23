@@ -1,3 +1,4 @@
+import { onPresentationTierChange, tierPolicy } from "../../core/presentation-tier.js";
 import type { ExtensionCommandRow } from "../../domains/extensions/operator-commands.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { Keybinding, OverlayHandle, TUI } from "../../engine/tui.js";
@@ -23,6 +24,19 @@ function formatKey(raw: string): string {
 	return raw === "(unbound)" ? raw : keyName(raw);
 }
 
+/**
+ * Whether rows carry their description column. Compact lists the names alone and the pane keeps each description;
+ * standard and detailed add the column. Read when the rows are built, which a tier change repeats.
+ */
+function described(): boolean {
+	return tierPolicy().listDescriptions === "all";
+}
+
+/** A topic row's name and, from standard up, what it covers. */
+function topicCells(lead: string, text: string): { lead: string; text: string } {
+	return { lead, text: described() ? text : "" };
+}
+
 export function openHelpOverlay(
 	tui: TUI,
 	manager: ClioKeybindingManager,
@@ -35,59 +49,61 @@ export function openHelpOverlay(
 	// What Enter puts in the composer for a row, by row id; rows without one open their detail.
 	const picks = new Map<string, string>();
 	// Commands keep commandReference() order; the group rides as the row's meta.
-	const commands: ListOverlayItem[] = commandReference()
-		.filter((ref) => !hidden(ref.name))
-		.map((ref) => {
-			const needsArgument = ref.args?.positionals?.some((positional) => positional.required) === true;
-			picks.set(ref.name, `/${ref.name}${needsArgument ? " " : ""}`);
-			// Below 80 columns the flags are dropped before the description is cut:
-			// `/run [--agent-profile <profile>] …` left nothing of what /run does.
-			const { flags, ...withoutFlags } = ref.args ?? {};
-			const positionals = ref.args ? compactArgumentHint(withoutFlags) : undefined;
-			// The flags fold into one word so the row still says that it takes them.
-			const options = flags !== undefined && Object.keys(flags).length > 0 ? " [options]" : "";
-			const narrowUsage = `${positionals ? `/${ref.name} ${positionals}` : `/${ref.name}`}${options}`;
-			const item: ListOverlayItem = {
-				id: ref.name,
-				label: `${ref.usage}  ${ref.description}  ${ref.group}`,
-				cells: { lead: ref.usage, narrowLead: narrowUsage, text: ref.description },
-				group: "Commands",
-				meta: ref.group,
-				// Overlay key actions are deliberately not duplicated here: each
-				// overlay's footer hint is the live source of its keys, and a static
-				// copy would rot exactly like the old SLASH_HOTKEYS table did.
-				...detailWithHead((width) => {
-					const theme = clioTheme();
-					const facts: Fact[] = [
-						{ label: "Usage", value: theme.fg("inlineCode", ref.usage) },
-						{ label: "Does", value: ref.description },
-						// The same copy the composer's detail panel shows for each subcommand.
-						...Object.entries(ref.subcommandDescriptions ?? {}).map(
-							([name, purpose]): Fact => ({ label: `/${ref.name} ${name}`, value: purpose }),
-						),
-					];
-					return {
-						head: [titleRow(theme, `/${ref.name}`, width, { meta: ref.group })],
-						rest: factRows(theme, facts, width, FACT_OPTIONS),
-					};
-				}),
-			};
-			return item;
-		});
+	const commandItems = (): ListOverlayItem[] => [...builtinCommands(), ...extensionItems()];
+	const builtinCommands = (): ListOverlayItem[] =>
+		commandReference()
+			.filter((ref) => !hidden(ref.name))
+			.map((ref) => {
+				const needsArgument = ref.args?.positionals?.some((positional) => positional.required) === true;
+				picks.set(ref.name, `/${ref.name}${needsArgument ? " " : ""}`);
+				// Below 80 columns the flags are dropped before the description is cut:
+				// `/run [--agent-profile <profile>] …` left nothing of what /run does.
+				const { flags, ...withoutFlags } = ref.args ?? {};
+				const positionals = ref.args ? compactArgumentHint(withoutFlags) : undefined;
+				// The flags fold into one word so the row still says that it takes them.
+				const options = flags !== undefined && Object.keys(flags).length > 0 ? " [options]" : "";
+				const narrowUsage = `${positionals ? `/${ref.name} ${positionals}` : `/${ref.name}`}${options}`;
+				const item: ListOverlayItem = {
+					id: ref.name,
+					label: `${ref.usage}  ${ref.description}  ${ref.group}`,
+					cells: { lead: ref.usage, narrowLead: narrowUsage, text: described() ? ref.description : "" },
+					group: "Commands",
+					...(described() ? { meta: ref.group } : {}),
+					// Overlay key actions are deliberately not duplicated here: each
+					// overlay's footer hint is the live source of its keys, and a static
+					// copy would rot exactly like the old SLASH_HOTKEYS table did.
+					...detailWithHead((width) => {
+						const theme = clioTheme();
+						const facts: Fact[] = [
+							{ label: "Usage", value: theme.fg("inlineCode", ref.usage) },
+							{ label: "Does", value: ref.description },
+							// The same copy the composer's detail panel shows for each subcommand.
+							...Object.entries(ref.subcommandDescriptions ?? {}).map(
+								([name, purpose]): Fact => ({ label: `/${ref.name} ${name}`, value: purpose }),
+							),
+						];
+						return {
+							head: [titleRow(theme, `/${ref.name}`, width, { meta: ref.group })],
+							rest: factRows(theme, facts, width, FACT_OPTIONS),
+						};
+					}),
+				};
+				return item;
+			});
 
 	// Operator commands carry text an extension author wrote; it is neutralized
 	// once here before any row or pane picks it up. The metas are getters so a
 	// skin change repaints the chip instead of showing the colors of the skin
 	// the help was built under.
-	commands.push(
-		...displaySafe(extensionCommands).map((row): ListOverlayItem => {
+	const extensionItems = (): ListOverlayItem[] =>
+		displaySafe(extensionCommands).map((row): ListOverlayItem => {
 			// The row is one line; the pane's Does fact keeps the description's lines.
 			const summary = sanitizeCallTargetText(row.description);
 			picks.set(`extension:${row.invocation}`, `/${row.invocation}`);
 			return {
 				id: `extension:${row.invocation}`,
 				label: `/${row.invocation}  ${summary}`,
-				cells: { lead: `/${row.invocation}`, text: summary },
+				cells: { lead: `/${row.invocation}`, text: described() ? summary : "" },
 				group: "Operator extensions",
 				get meta() {
 					return row.available ? statusChip(clioTheme(), "ok", "ready") : statusChip(clioTheme(), "warning", "unavailable");
@@ -110,8 +126,7 @@ export function openHelpOverlay(
 					};
 				}),
 			};
-		}),
-	);
+		});
 
 	// Editor, selection and viewport primitives are tables inside two topics, and
 	// an action with no key and no menu letter is named in the keyboard topic.
@@ -196,7 +211,7 @@ export function openHelpOverlay(
 			label: `${lead}  ${text}  ${rows()
 				.map((row) => manager.getDescription(row.id))
 				.join(" ")}`,
-			cells: { lead, text },
+			cells: { lead, text: described() ? text : "" },
 			group: "Topics",
 			...detailWithHead((width) => {
 				const theme = clioTheme();
@@ -215,14 +230,14 @@ export function openHelpOverlay(
 	// Static concept topics. Unlike commands and keys these are not generated
 	// from a registry; keep each detail consistent with the enforced behavior
 	// and with the live footer hints on the surface it documents.
-	const topics: ListOverlayItem[] = [
+	const topicItems = (): ListOverlayItem[] => [
 		{
 			id: "topic-learning-clio",
 			label: "learning CLIO Coder & tips  Demo guidance: what it teaches, how tips retire, how to turn it off",
-			cells: {
-				lead: "learning CLIO Coder & tips",
-				text: "Demo guidance: what it teaches, how tips retire, how to turn it off",
-			},
+			cells: topicCells(
+				"learning CLIO Coder & tips",
+				"Demo guidance: what it teaches, how tips retire, how to turn it off",
+			),
 			group: "Topics",
 			detail: () => [
 				"# Learning CLIO Coder",
@@ -230,13 +245,13 @@ export function openHelpOverlay(
 				"**Demo guidance** (on by default) teaches as you work: the launchpad, one footer tip at a time, and after some turns a `[tip]` naming a feature that would have helped that turn. A newcomer gets two post-turn tips a session, later one.",
 				"**Tips retire**: a tip stops once you use its feature or key, or after a few showings. What you have learned is kept in `harness-profile.json` in CLIO Coder's state directory; delete it to start the lessons over.",
 				`**Worth knowing**: /model or ${manager.actionLabel("clio-coder.model.select")} picks a model; /run coder <task> hands work to a background worker, and /run coder --read-only <task> one that cannot change files; /library skills browses skills, /skill <name> runs one, and /library installs more; /usage shows quota and spend; /doctor checks the install; ${manager.actionLabel("clio-coder.leader")} y switches this session to YOLO.`,
-				"**Turning it off**: Demo guidance in /settings (`interface.demo: false`) for good, or `--no-demo` for one session. The Minimal output style also stays quiet.",
+				"**Turning it off**: Demo guidance in /settings (`interface.demo: false`) for good, or `--no-demo` for one session. Compact output detail also stays quiet.",
 			],
 		},
 		{
 			id: "topic-keyboard-model",
 			label: "keyboard model  Alt for actions, Ctrl+G for any terminal, Ctrl for editing",
-			cells: { lead: "keyboard model", text: "Alt for actions, Ctrl+G for any terminal, Ctrl for editing" },
+			cells: topicCells("keyboard model", "Alt for actions, Ctrl+G for any terminal, Ctrl for editing"),
 			group: "Topics",
 			detail: () => [
 				"# Keyboard model",
@@ -277,7 +292,7 @@ export function openHelpOverlay(
 		{
 			id: "topic-fleet-runs",
 			label: "fleet runs & steering  Inspect, guide, and cancel delegated workers",
-			cells: { lead: "fleet runs & steering", text: "Inspect, guide, and cancel delegated workers" },
+			cells: topicCells("fleet runs & steering", "Inspect, guide, and cancel delegated workers"),
 			group: "Topics",
 			detail: () => [
 				"# Fleet runs & steering",
@@ -295,7 +310,7 @@ export function openHelpOverlay(
 		{
 			id: "topic-files-pane",
 			label: "panes & files  The files pane, the logs and shell panes, and what closes them",
-			cells: { lead: "panes & files", text: "The files pane, the logs and shell panes, and what closes them" },
+			cells: topicCells("panes & files", "The files pane, the logs and shell panes, and what closes them"),
 			group: "Topics",
 			detail: () => [
 				"# Panes & files",
@@ -311,7 +326,7 @@ export function openHelpOverlay(
 		{
 			id: "topic-steering-modes",
 			label: "steering modes  Interrupt, next slot, or end of turn: when a message lands mid-run",
-			cells: { lead: "steering modes", text: "Interrupt, next slot, or end of turn: when a message lands mid-run" },
+			cells: topicCells("steering modes", "Interrupt, next slot, or end of turn: when a message lands mid-run"),
 			group: "Topics",
 			detail: () => [
 				"# Steering modes",
@@ -327,7 +342,7 @@ export function openHelpOverlay(
 		{
 			id: "topic-autonomy",
 			label: "autonomy & safety net  How the autonomy level and the always-on guardrails interact",
-			cells: { lead: "autonomy & safety net", text: "How the autonomy level and the always-on guardrails interact" },
+			cells: topicCells("autonomy & safety net", "How the autonomy level and the always-on guardrails interact"),
 			group: "Topics",
 			detail: () => [
 				"# Autonomy & safety net",
@@ -365,7 +380,7 @@ export function openHelpOverlay(
 		return { id: row.id, label: `${row.task}  ${shown}`, cells: { lead: row.task, text: shown }, group: "Start here" };
 	});
 
-	const allItems = (): ListOverlayItem[] => [...startItems, ...commands, ...keyItems(), ...topics];
+	const allItems = (): ListOverlayItem[] => [...startItems, ...commandItems(), ...keyItems(), ...topicItems()];
 
 	const handle = openListOverlay(tui, {
 		markerId: "help",
@@ -394,10 +409,13 @@ export function openHelpOverlay(
 		onClose,
 	});
 	const unsubscribe = manager.onReload(() => handle.setItems(allItems()));
+	// The description column follows the tier, so a tier change rebuilds the rows in place.
+	const unsubscribeTier = onPresentationTierChange(() => handle.setItems(allItems()));
 	return {
 		...handle,
 		hide() {
 			unsubscribe();
+			unsubscribeTier();
 			handle.hide();
 		},
 	};

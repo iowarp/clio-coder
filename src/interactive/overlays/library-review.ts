@@ -14,6 +14,7 @@
  */
 
 import { homedir } from "node:os";
+import { tierPolicy, tierRevision } from "../../core/presentation-tier.js";
 import { ENVELOPE_SEAT_BELT, envelopeLines } from "../../domains/extensions/envelope-review.js";
 import type { LibraryImportApplyResult, LibraryImportPlan } from "../../domains/interop/index.js";
 import {
@@ -52,6 +53,7 @@ import {
 	clioTheme,
 	type Fact,
 	factRows,
+	GLYPH,
 	positionRow,
 	sectionRule,
 	statusChip,
@@ -152,7 +154,7 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 	const facts: Fact[] = [{ label: "Package", value: refWords(step.identity.ref) }];
 	const versions = step.versions;
 	if (versions?.from && versions.to && versions.from !== versions.to)
-		facts.push({ label: "Version", value: `${versions.from} installed → ${versions.to}` });
+		facts.push({ label: "Version", value: `${versions.from} installed ${GLYPH.next} ${versions.to}` });
 	else if (versions?.to && !versions.from) facts.push({ label: "Version", value: versions.to });
 	else if (versions?.from && step.operation === "update")
 		facts.push({ label: "Version", value: `${versions.from}, same version with changed content` });
@@ -165,9 +167,10 @@ function stepFacts(step: LibraryPlanStep, review: LibraryStepReview | undefined,
 	if (step.content?.resources.length)
 		facts.push({
 			label: "Adds",
+			// Detailed names every component a step adds, as the Library pane does; the paths key names them at any tier.
 			value: resourceSummary(
 				step.content.resources.map((item) => ({ kind: item.kind, name: `${item.name}${item.valid ? "" : " (invalid)"}` })),
-				detail,
+				detail || tierPolicy().pickerDetail === "pane",
 			),
 		});
 	if (step.dependencies.missing.length)
@@ -353,7 +356,7 @@ export function libraryOutcomeHeadline(
 		if (only.status === "failed") return `Could not ${only.operation} the ${refWords(only.identity.ref)} ${place}`;
 		return `Did not start the ${only.operation} of the ${refWords(only.identity.ref)}`;
 	}
-	return `${result.committed} committed · ${result.failed} failed · ${result.unattempted} unattempted`;
+	return `${result.committed} committed ${GLYPH.sep} ${result.failed} failed ${GLYPH.sep} ${result.unattempted} unattempted`;
 }
 
 function refreshChip(refresh: LibraryRefreshResult): string {
@@ -439,7 +442,7 @@ function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult
 		facts.push({
 			label: "On disk",
 			value: outcome.destination
-				? `${diskText(verification)} · ${shortenHomePath(outcome.destination)}`
+				? `${diskText(verification)} ${GLYPH.sep} ${shortenHomePath(outcome.destination)}`
 				: diskText(verification),
 			tone: "muted",
 		});
@@ -662,6 +665,8 @@ class LibraryReviewBody implements Component, RowBudgetedBody {
 	);
 	private bodyRows = 0;
 	private page = 1;
+	/** The tier the rows were laid out under; a change rebuilds them, since the tier bounds the component lists. */
+	private tier = tierRevision();
 	/** The last window, kept while nothing moved, so the dock's own cache sees the same lines again. */
 	private memo: { all: string[]; width: number; start: number; height: number; lines: string[] } | null = null;
 
@@ -708,6 +713,10 @@ class LibraryReviewBody implements Component, RowBudgetedBody {
 	}
 
 	render(width: number): string[] {
+		if (this.tier !== tierRevision()) {
+			this.tier = tierRevision();
+			this.touch();
+		}
 		const all = this.rows.render(width);
 		const budget = this.bodyRows > 0 ? this.bodyRows : REVIEW_DEFAULT_ROWS;
 		const height = all.length > budget ? Math.max(1, budget - 1) : budget;
@@ -720,7 +729,10 @@ class LibraryReviewBody implements Component, RowBudgetedBody {
 		const lines =
 			position === null
 				? window
-				: [...window, positionRow(clioTheme(), { ...position, keys: ["↑↓ scroll", "PgUp/PgDn page"] }, width)];
+				: [
+						...window,
+						positionRow(clioTheme(), { ...position, keys: [`${GLYPH.up}${GLYPH.down} scroll`, "PgUp/PgDn page"] }, width),
+					];
 		this.memo = { all, width, start, height, lines };
 		return lines;
 	}

@@ -1,8 +1,9 @@
+import { tierPolicy, tierRevision } from "../core/presentation-tier.js";
 import { CLIO_APP_KEYBINDING_IDS, type ClioKeybinding } from "../domains/config/keybindings.js";
 import type { Component, Keybinding, OverlayHandle, TUI } from "../engine/tui.js";
 import { formatKeyLabel } from "./keybinding-manager.js";
 import { fitRow, showClioOverlayFrame } from "./overlay-frame.js";
-import { clioTheme, fitUnits, GLYPH, padAnsi } from "./theme/index.js";
+import { clioTheme, fitUnits, GLYPH, keyName, padAnsi } from "./theme/index.js";
 
 /**
  * `?` on an empty composer: the keys an operator reaches for, on one card.
@@ -14,7 +15,8 @@ import { clioTheme, fitUnits, GLYPH, padAnsi } from "./theme/index.js";
  * it (`Alt+M`, or `Ctrl+G Y` for an action with no direct key), read live from
  * the keybinding manager. The header states the rule that makes the right
  * column memorable: every letter there also works after the action menu key.
- * The card is not modal: the next key closes it, the way a glance ends.
+ * The card is not modal: the next key closes it, the way a glance ends. At
+ * compact the card is the two lists alone; standard and detailed add the rule.
  */
 
 export interface QuickHelpKeys {
@@ -48,11 +50,11 @@ function composerRows(menuKey: string | null): QuickHelpRow[] {
 		{ key: "!", verb: "run a shell command" },
 		{ key: "!!", verb: "shell, output kept from CLIO Coder" },
 		{ key: "@", verb: "mention a file" },
-		{ key: "←", verb: "workers" },
-		{ key: GLYPH.down, verb: "tasks" },
+		{ key: keyName("left"), verb: "workers" },
+		{ key: keyName("down"), verb: "tasks" },
 		...(menuKey ? [{ key: menuKey, verb: "actions menu, by letter" }] : []),
 		{ key: "Esc", verb: "stops a run" },
-		{ key: "Ctrl+C ×2", verb: "exit" },
+		{ key: `${keyName("ctrl+c")} ${GLYPH.times}2`, verb: "exit" },
 	];
 }
 
@@ -73,9 +75,14 @@ function quickHelpRows(width: number, bindings: QuickHelpKeys, omit: (id: ClioKe
 	const theme = clioTheme();
 	const leader = bindings.getKeys?.("clio-coder.leader")[0];
 	const menuKey = leader ? formatKeyLabel(leader) : null;
-	const header = menuKey
-		? fitRow(theme.fg("annotation", `Alt+letter runs an action · ${menuKey} then the same letter works anywhere`), width)
-		: null;
+	// The rule that makes the right column memorable is the card's one description row.
+	const header =
+		menuKey && tierPolicy().listDescriptions === "all"
+			? fitRow(
+					theme.fg("annotation", `Alt+letter runs an action ${GLYPH.sep} ${menuKey} then the same letter works anywhere`),
+					width,
+				)
+			: null;
 	const left = composerRows(menuKey);
 	const right = actionRows(bindings, omit);
 	const column = (rows: ReadonlyArray<QuickHelpRow>, cells: number): string[] => {
@@ -111,15 +118,20 @@ export function createQuickHelp(
 	omit: (id: ClioKeybinding) => boolean = () => false,
 ): QuickHelp {
 	let handle: OverlayHandle | null = null;
-	let cached: { width: number; generation: number | undefined; lines: string[] } | null = null;
+	let cached: { width: number; generation: number | undefined; tier: number; lines: string[] } | null = null;
 	let bodyRows = 0;
 	const component: Component & { setBodyRows(rows: number): void } = {
 		setBodyRows(rows: number) {
 			bodyRows = Math.max(0, Math.floor(rows));
 		},
 		render(width) {
-			if (cached?.width !== width || cached.generation !== bindings.generation)
-				cached = { width, generation: bindings.generation, lines: quickHelpRows(width, bindings, omit) };
+			if (cached?.width !== width || cached.generation !== bindings.generation || cached.tier !== tierRevision())
+				cached = {
+					width,
+					generation: bindings.generation,
+					tier: tierRevision(),
+					lines: quickHelpRows(width, bindings, omit),
+				};
 			const lines = cached.lines;
 			if (bodyRows <= 1 || lines.length <= bodyRows) return lines;
 			// Any key closes this card, so rows it cannot show are named with where they live, not offered as a scroll.
