@@ -14,7 +14,7 @@ import {
 } from "../../domains/safety/redaction.js";
 import { type Component, type OverlayHandle, type TUI, truncateToWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "../overlay-frame.js";
-import { animationStep, clioTheme, formatWaitClock, GLYPH, rule, spinnerFrame } from "../theme/index.js";
+import { activityCue, clioTheme, formatWaitClock, GLYPH, rule } from "../theme/index.js";
 
 export const SIDE_QUESTION_OVERLAY_TITLE = "Side question";
 
@@ -40,6 +40,8 @@ export interface OpenSideQuestionOverlayOptions {
 	columns: number;
 	/** Esc: abort a streaming round, then close. */
 	onClose: () => void;
+	/** A turn or a worker is live, so the overlay rule carries the one animated cue and this round's lead stays still. */
+	isRunLive?: () => boolean;
 }
 
 const SIDE_QUESTION_OVERLAY_MIN_WIDTH = 44;
@@ -91,7 +93,7 @@ function formatSideQuestionBody(
 			truncateToWidth(
 				theme.fg(
 					"activity",
-					`${spinner} ${body.length > 0 ? "answering" : "asking"} · ${clock}${route === null ? "" : ` · ${route}`}`,
+					`${spinner} ${body.length > 0 ? "answering" : "asking"} ${GLYPH.sep} ${clock}${route === null ? "" : ` ${GLYPH.sep} ${route}`}`,
 				),
 				contentWidth,
 				GLYPH.ellipsis,
@@ -115,9 +117,11 @@ function routeLine(word: string, route: string, width: number): string {
 }
 
 /**
- * The spinner steps on the shared animation clock. It used to advance once per
- * render, so it sped up with the frame rate and spent the running glyph `●` as
- * a spinner frame.
+ * One cue animates per screen, and it belongs to the focused live work. While a
+ * turn or a worker is live that is the run's cue on the overlay rule, so this
+ * round leads with the static `●` and only its clock moves. With nothing else
+ * live the round is the focused work, and its lead steps on the activity clock.
+ * Reduced motion, a screen reader, ASCII mode and `NO_COLOR` keep it still.
  */
 export class SideQuestionOverlayBody implements Component {
 	private phase: SideQuestionOverlayPhase = { kind: "streaming", text: "" };
@@ -128,6 +132,7 @@ export class SideQuestionOverlayBody implements Component {
 	constructor(
 		private readonly question: string,
 		private readonly now: () => number = Date.now,
+		private readonly runLive: () => boolean = () => false,
 	) {
 		this.startedAt = now();
 	}
@@ -152,7 +157,7 @@ export class SideQuestionOverlayBody implements Component {
 			this.question,
 			this.phase,
 			width,
-			spinnerFrame(animationStep(now)),
+			this.runLive() ? GLYPH.running : activityCue(now),
 			this.route,
 			now - this.startedAt,
 		);
@@ -167,7 +172,7 @@ export class SideQuestionOverlayBody implements Component {
  * answer and leaves with Esc.
  */
 export function openSideQuestionOverlay(tui: TUI, options: OpenSideQuestionOverlayOptions): SideQuestionOverlaySession {
-	const body = new SideQuestionOverlayBody(options.question);
+	const body = new SideQuestionOverlayBody(options.question, Date.now, options.isRunLive);
 	let settled = false;
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",

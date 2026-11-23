@@ -7,7 +7,7 @@ import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { MemoryOverlayView } from "../../src/interactive/memory-overlay.js";
 import { ListOverlayView } from "../../src/interactive/overlays/list-overlay.js";
 import { SideQuestionOverlayBody } from "../../src/interactive/overlays/side-question.js";
-import { ANIMATION_STEP_MS, GLYPH } from "../../src/interactive/theme/index.js";
+import { ACTIVITY_STEP_MS, activityCue, GLYPH } from "../../src/interactive/theme/index.js";
 
 /**
  * A list row without metadata was padded to the full width and then given one
@@ -39,18 +39,33 @@ test("a list row that fits closes without an ellipsis and a row that does not cl
 	}
 });
 
-test("routine side-question progress remains static across renders and clock steps", () => {
+test("side-question progress is static while a run is live and carries the cue when none is", () => {
 	let now = 0;
-	const body = new SideQuestionOverlayBody("why is the sky blue", () => now);
+	// A run is live: the overlay rule owns the one animated cue, so the round's lead is the static mark.
+	const beside = new SideQuestionOverlayBody(
+		"why is the sky blue",
+		() => now,
+		() => true,
+	);
 	for (const width of [60, 80, 120, 200]) {
-		const first = body.render(width);
-		// Two frames inside one animation step draw the same spinner.
-		deepStrictEqual(body.render(width), first);
+		const first = beside.render(width);
+		deepStrictEqual(beside.render(width), first);
 		for (const row of first) ok(visibleWidth(row) <= width);
-		const text = first.map(stripTerminalSequences).join("\n");
-		ok(text.includes(GLYPH.running), "routine progress uses the static running mark");
-		now += ANIMATION_STEP_MS;
-		deepStrictEqual(body.render(width), first);
+		ok(stripTerminalSequences(first.at(-1) ?? "").startsWith(`${GLYPH.running} `), "a live run keeps the lead static");
+		now += ACTIVITY_STEP_MS;
+		ok(stripTerminalSequences(beside.render(width).at(-1) ?? "").startsWith(`${GLYPH.running} `));
+	}
+	// Nothing else is live: the round is the focused work and steps on the activity clock (or stays still without motion).
+	now = 0;
+	const alone = new SideQuestionOverlayBody(
+		"why is the sky blue",
+		() => now,
+		() => false,
+	);
+	for (const step of [0, 1, 2]) {
+		now = step * ACTIVITY_STEP_MS;
+		const lead = stripTerminalSequences(alone.render(80).at(-1) ?? "");
+		ok(lead.startsWith(`${activityCue(now)} `), lead);
 	}
 });
 
