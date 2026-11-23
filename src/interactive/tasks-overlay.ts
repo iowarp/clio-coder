@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { tierPolicy } from "../core/presentation-tier.js";
 import type { SessionArtifact } from "../domains/session/session-artifacts.js";
 import type { SessionTaskHistoryBoard, TaskBoardSnapshot, TaskBoardTask } from "../domains/session/task-board.js";
 import {
@@ -22,7 +23,7 @@ import {
 } from "./overlay-frame.js";
 import { confirmOnceRail } from "./overlays/confirm-once.js";
 import type { ClioToken } from "./theme/index.js";
-import { clioTheme, fitUnits, GLYPH } from "./theme/index.js";
+import { clioTheme, fitUnits, GLYPH, positionRow } from "./theme/index.js";
 
 /**
  * The `/tasks` overlay: one reopenable board for current agent work, prior
@@ -95,7 +96,7 @@ function taskStateClause(task: TaskBoardTask): string {
 		taskOriginLabel(task),
 	]
 		.filter((part): part is string => part !== null)
-		.join(" · ");
+		.join(` ${GLYPH.sep} `);
 }
 
 /**
@@ -120,7 +121,7 @@ function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string
 	const glyph = theme.fg(presentation.token, presentation.glyph);
 	const cursor = selected === undefined ? "" : `${selectionMark(selected)} `;
 	const lead = `${cursor}${glyph} ${dim(task.id.padEnd(4))} `;
-	const clause = ` · ${taskStateClause(task)}`;
+	const clause = ` ${GLYPH.sep} ${taskStateClause(task)}`;
 	const room = Math.max(TASK_TITLE_FLOOR, width - visibleWidth(lead) - visibleWidth(clause));
 	const shown = truncateToWidth(task.title, room, GLYPH.ellipsis, false);
 	const title = selected
@@ -139,27 +140,35 @@ function wrapTaskProse(prefix: string, prose: string, width: number): string[] {
 	);
 }
 
-/** What a tool recorded, before what the agent said: an outcome and when Clio saw it. */
-function observedCheckRows(task: TaskBoardTask, width: number): string[] {
+/** What a tool recorded, before what the agent said: an outcome and when Clio saw it. `passed` false keeps the failures. */
+function observedCheckRows(task: TaskBoardTask, width: number, passed = true): string[] {
 	const theme = clioTheme();
-	const { passed, failed } = observedTaskChecks(task);
+	const observed = observedTaskChecks(task);
 	const facts = [
-		...failed.map((check) => theme.fg("warning", `${check.name} failed at ${stampLocal(check.observedAt)}`)),
-		...passed.map((check) => theme.fg("success", `${check.name} passed at ${stampLocal(check.observedAt)}`)),
+		...observed.failed.map((check) => theme.fg("warning", `${check.name} failed at ${stampLocal(check.observedAt)}`)),
+		...(passed ? observed.passed : []).map((check) =>
+			theme.fg("success", `${check.name} passed at ${stampLocal(check.observedAt)}`),
+		),
 	];
 	return facts.flatMap((fact) => wrapTaskProse(`       ${dim("check")} `, fact, width));
 }
 
-function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
+/**
+ * The rows under a task. `full` is the evidence a reader trusts the row by: passed checks, the agent's own words, why
+ * it was dropped. Without it only what stands in the way stays, because state is never tier-gated: a failed check, a
+ * claim no check backs, and the reason a task is blocked.
+ */
+function taskReceiptRows(task: TaskBoardTask, width: number, full = true): string[] {
 	const theme = clioTheme();
 	if (task.status === "completed") {
-		const rows = observedCheckRows(task, width);
+		const rows = observedCheckRows(task, width, full);
 		const unverified = unverifiedTaskChecks(task);
 		// A failed check already reads on its own observed row with its time.
 		if (unverified && unverified.noRecordedPass.length > 0) {
 			const owed = unverified.noRecordedPass.map((check) => `${check} has no recorded pass`).join("; ");
 			rows.push(...wrapTaskProse(`       ${theme.fg("warning", "unverified")} `, theme.fg("warning", owed), width));
 		}
+		if (!full) return rows;
 		if (!unverified && rows.length === 0)
 			rows.push(...wrapTaskProse(`       ${dim("check")} `, dim("none on record"), width));
 		// The completion claim already carries any run id it mentions, so no derived
@@ -170,10 +179,10 @@ function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
 	if (task.status === "blocked" && task.reason) {
 		return [
 			...wrapTaskProse(`       ${dim("blocked")} `, theme.fg("warning", task.reason), width),
-			...observedCheckRows(task, width),
+			...observedCheckRows(task, width, full),
 		];
 	}
-	if (task.status === "cancelled" && task.reason) {
+	if (task.status === "cancelled" && task.reason && full) {
 		return wrapTaskProse(`       ${dim("dropped")} `, muted(task.reason), width);
 	}
 	return [];
@@ -222,7 +231,7 @@ function formatTasksOverlayBodyLines(
 	if (!board || board.tasks.length === 0) {
 		// The empty state is one statement with its remedy on one row, so an empty board never sits above real content.
 		return {
-			lines: [collapsedSection("Agent board", "none yet, the model lists its steps here before multi-step work", width)],
+			lines: [collapsedSection("Agent board", "none yet", "the agent plans multi-step work here", width)],
 			spans: [],
 		};
 	}
@@ -262,10 +271,15 @@ function formatTasksOverlayBodyLines(
 		lines.push(fitUnits(theme, `${dim("in flight")} `, activeRuns.map(muted), width));
 	}
 	const spans: TasksRowSpan[] = [];
+	const scope = receiptScope();
 	for (const task of tasksInReadingOrder(board.tasks)) {
 		const line = lines.length;
-		lines.push(taskRow(task, width, selectedTaskId === undefined ? undefined : selectedTaskId === task.id));
-		lines.push(...overrideRows(task, userTasks, width), ...taskReceiptRows(task, width));
+		const isSelected = selectedTaskId === undefined ? undefined : selectedTaskId === task.id;
+		lines.push(taskRow(task, width, isSelected));
+		lines.push(
+			...overrideRows(task, userTasks, width),
+			...taskReceiptRows(task, width, scope === "all" || (scope === "selected" && isSelected !== false)),
+		);
 		// The first task carries the board's title, counts and proof above it.
 		spans.push({ line, start: spans.length === 0 ? 0 : line, end: lines.length });
 	}
@@ -330,9 +344,54 @@ function sectionHeading(label: string, width: number): string {
 	return fitRow(clioTheme().style("menuDescription", label, { bold: true }), width);
 }
 
-/** A section with nothing in it: its name and what would fill it, on one row. */
-function collapsedSection(label: string, note: string, width: number): string {
-	return fitRow(`${clioTheme().style("menuDescription", label, { bold: true })}${dim(` · ${note}`)}`, width);
+/** A section with nothing in it: its name, what is missing, then what fills it; a narrow row keeps the remedy. */
+function collapsedSection(label: string, missing: string, remedy: string, width: number): string {
+	const head = clioTheme().style("menuDescription", label, { bold: true });
+	const full = `${head}${dim(` ${GLYPH.sep} ${missing} ${GLYPH.sep} ${remedy}`)}`;
+	return fitRow(visibleWidth(full) <= width ? full : `${head}${dim(` ${GLYPH.sep} ${remedy}`)}`, width);
+}
+
+/**
+ * Which tasks show their evidence rows, by the tier's picker detail: at compact none beyond what stands in the way
+ * (the status row states the selection), at standard the selected row's, at detailed every row's.
+ */
+function receiptScope(): "adverse" | "selected" | "all" {
+	const detail = tierPolicy().pickerDetail;
+	return detail === "status" ? "adverse" : detail === "facts" ? "selected" : "all";
+}
+
+/** The compact tier's one row for the selection: its title whole where it fits, its state and its first evidence. */
+function selectionStatusRow(selection: TasksOverlaySelection, width: number, workspace: string): string {
+	const theme = clioTheme();
+	const taskUnits = (task: TaskBoardTask): string[] => {
+		const { passed, failed } = observedTaskChecks(task);
+		const check = failed[0] ?? passed[0];
+		const evidence = check
+			? `${check.name} ${failed[0] ? "failed" : "passed"} at ${stampLocal(check.observedAt)}`
+			: (task.reason ?? task.evidence);
+		return [
+			muted(task.title),
+			dim(taskStateClause(task)),
+			...(evidence ? [theme.fg(failed[0] ? "warning" : "annotation", evidence)] : []),
+		];
+	};
+	const units =
+		selection.kind === "artifact"
+			? [
+					muted(displayArtifactPath(selection.artifact.path, workspace)),
+					dim(`${selection.artifact.tool}${selection.artifact.artifactKind ? `:${selection.artifact.artifactKind}` : ""}`),
+					dim(stampLocal(selection.artifact.timestamp)),
+				]
+			: selection.kind === "user"
+				? [
+						muted(selection.task.title),
+						dim(selection.task.status),
+						...(selection.task.note ? [dim(selection.task.note)] : []),
+					]
+				: selection.kind === "history"
+					? [...taskUnits(selection.task), dim(selection.board.title)]
+					: taskUnits(selection.task);
+	return fitUnits(theme, `${theme.fg("selectedOption", GLYPH.cursor)} `, units, width);
 }
 
 function isSameSelection(left: TasksOverlaySelection | undefined, right: TasksOverlaySelection): boolean {
@@ -399,42 +458,49 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 	};
 
 	if (state.userTasks.length === 0)
-		empties.push(collapsedSection("Operator tasks", "none in this project, [a] adds one", width));
+		empties.push(collapsedSection("Operator tasks", "none in this project", "[a] adds one", width));
 	else openSection("Operator tasks");
+	const scope = receiptScope();
 	for (const task of state.userTasks) {
 		const rowSelection: TasksOverlaySelection = { kind: "user", task };
 		const presentation = USER_TASK_PRESENTATION[task.status];
+		const isSelected = isSameSelection(selected, rowSelection);
 		pushRow([
 			fitRow(
-				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(task.id.padEnd(4))} ${muted(task.title)} ${dim(`· ${task.status}`)}`,
+				`${selectionMark(isSelected)} ${theme.fg(presentation.token, presentation.glyph)} ${dim(task.id.padEnd(4))} ${muted(task.title)} ${dim(`${GLYPH.sep} ${task.status}`)}`,
 				width,
 			),
-			...(task.note ? wrapTaskProse(`       ${dim("note")} `, muted(task.note), width) : []),
+			...(task.note && (scope === "all" || (scope === "selected" && isSelected))
+				? wrapTaskProse(`       ${dim("note")} `, muted(task.note), width)
+				: []),
 		]);
 	}
 
 	const historyRows = terminalHistoryRows(state.board, state.history);
-	if (historyRows.length === 0) empties.push(collapsedSection("Task history", "nothing from earlier boards", width));
+	if (historyRows.length === 0)
+		empties.push(collapsedSection("Task history", "none yet", "earlier boards settle here", width));
 	else openSection("Task history");
 	// Each earlier board's tasks sit under that board's title once, rather than repeating it on every row.
 	let lastBoard: SessionTaskHistoryBoard | null = null;
 	for (const row of historyRows) {
 		const rowSelection: TasksOverlaySelection = { kind: "history", board: row.board, task: row.task };
 		const presentation = taskPresentation(row.task);
+		const isSelected = isSameSelection(selected, rowSelection);
 		const boardTitle =
 			row.board === lastBoard ? [] : [fitRow(`${SECTION_GUTTER}${theme.fg("menuDescription", row.board.title)}`, width)];
 		lastBoard = row.board;
 		pushRow([
 			...boardTitle,
 			fitRow(
-				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(row.task.id.padEnd(4))} ${muted(row.task.title)} ${dim(`· ${taskStateClause(row.task)}`)}`,
+				`${selectionMark(isSelected)} ${theme.fg(presentation.token, presentation.glyph)} ${dim(row.task.id.padEnd(4))} ${muted(row.task.title)} ${dim(`${GLYPH.sep} ${taskStateClause(row.task)}`)}`,
 				width,
 			),
-			...taskReceiptRows(row.task, width),
+			...taskReceiptRows(row.task, width, scope === "all" || (scope === "selected" && isSelected)),
 		]);
 	}
 
-	if (state.artifacts.length === 0) empties.push(collapsedSection("Artifacts", "no workspace outputs recorded", width));
+	if (state.artifacts.length === 0)
+		empties.push(collapsedSection("Artifacts", "none recorded", "files the agent writes land here", width));
 	else openSection("Artifacts");
 	const workspace = state.workspace ?? process.cwd();
 	for (const artifact of state.artifacts) {
@@ -442,7 +508,7 @@ function layoutCompositeTasksOverlay(state: CompositeTasksOverlayState, contentW
 		const kind = artifact.artifactKind ? `:${artifact.artifactKind}` : "";
 		pushRow([
 			fitRow(
-				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("menuDescription", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`· ${artifact.tool}${kind} · ${stampLocal(artifact.timestamp)}`)}`,
+				`${selectionMark(isSameSelection(selected, rowSelection))} ${theme.fg("menuDescription", GLYPH.toolHeader)} ${muted(displayArtifactPath(artifact.path, workspace))} ${dim(`${GLYPH.sep} ${artifact.tool}${kind} ${GLYPH.sep} ${stampLocal(artifact.timestamp)}`)}`,
 				width,
 			),
 		]);
@@ -553,9 +619,14 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, Math.floor(width));
-		const layout = layoutCompositeTasksOverlay(this.state(), safeWidth);
+		const state = this.state();
+		const layout = layoutCompositeTasksOverlay(state, safeWidth);
 		this.layout = layout;
 		const pinned: string[] = [];
+		// Compact states the selection in one row under the board, where standard and detailed show its evidence rows.
+		const selection = selectableRows(state)[this.selectedIndex];
+		if (selection && tierPolicy().pickerDetail === "status")
+			pinned.push(selectionStatusRow(selection, safeWidth, this.options.workspace ?? process.cwd()));
 		if (this.addInput) {
 			pinned.push("", fitRow(clioTheme().fg("sectionHeading", "New operator task"), safeWidth));
 			pinned.push(...this.addInput.render(safeWidth).map((line) => fitRow(line, safeWidth)));
@@ -579,18 +650,17 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 				? followTasksWindow(this.offset, span, room, total)
 				: Math.max(0, Math.min(this.offset, total - room));
 		const end = this.offset + room;
-		// The position counts tasks, which a reader can check against the board, not the wrapped lines they fill.
+		// The position counts tasks, which a reader can check against the board, not the wrapped lines they fill. The
+		// rail names PgUp/PgDn while the board windows, so the row does not repeat it.
 		const shown = layout.spans.flatMap((taskSpan, index) =>
 			taskSpan.line < end && taskSpan.end > this.offset ? [index + 1] : [],
 		);
 		const first = shown[0];
 		const last = shown.at(-1);
-		const range = first === undefined || last === undefined ? null : first === last ? `${first}` : `${first}–${last}`;
-		const position = dim(
-			range === null
-				? `lines ${this.offset + 1}–${end} of ${total} · PgUp/PgDn page`
-				: `tasks ${range} of ${layout.spans.length} · PgUp/PgDn page`,
-		);
+		const position =
+			first === undefined || last === undefined
+				? positionRow(clioTheme(), { start: this.offset + 1, end, total, unit: "lines" }, safeWidth)
+				: positionRow(clioTheme(), { start: first, end: last, total: layout.spans.length, unit: "tasks" }, safeWidth);
 		const window = layout.lines.slice(this.offset, end);
 		// A task the window ends inside reads as cut, not as finished mid-sentence.
 		const cut = layout.spans.some((taskSpan) => taskSpan.line < end && taskSpan.end > end);

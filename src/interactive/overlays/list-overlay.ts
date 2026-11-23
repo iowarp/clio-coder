@@ -1,3 +1,4 @@
+import { tierPolicy, tierRevision } from "../../core/presentation-tier.js";
 import {
 	type Component,
 	fuzzyFilter,
@@ -63,6 +64,8 @@ const FOCUS_LINE_MIN_TEXT = 24;
 /** Fewest list rows a stacked detail pane may leave, and fewest rows it needs to be drawn at all. */
 const STACKED_LIST_MIN_ROWS = 3;
 const STACKED_DETAIL_MIN_ROWS = 2;
+/** Most rows the standard tier's key facts of the selection take under a list with no pane. */
+const SELECTION_FACT_ROWS = 4;
 
 /** The one key the body never repeats: a pane that overflows names it on its own position row. */
 const PANE_REMINDERS = new Set(["PgUp/PgDn"]);
@@ -112,6 +115,16 @@ export interface ListOverlayItem {
 	 */
 	detail?: (width: number) => string[];
 	detailFormat?: "markdown" | "rows";
+	/**
+	 * The selection in one row, drawn under the list at the compact tier. Absent, it is the first of `facts`, or the
+	 * first detail row after the title.
+	 */
+	summary?: (width: number) => string;
+	/**
+	 * The selection's key facts, two to four rows, drawn under a list that has no pane at the standard and detailed
+	 * tiers. Absent, they are the first detail rows after the title.
+	 */
+	facts?: (width: number) => string[];
 	/**
 	 * Rows-mode only: how many leading rows of `detail` stay pinned while the
 	 * rest scrolls, so a pane's title, status and keys are on screen at every
@@ -247,6 +260,13 @@ export class ListOverlayView implements Component {
 	private filterText = "";
 	private isFilterFocused = false;
 	private showDetail = false;
+	/** The operator put away the pane the detailed tier draws by default; the detail key brings it back. */
+	private paneDismissed = false;
+	/**
+	 * Rows the selection block holds at this width and tier: the most any selection asked for, so moving the cursor
+	 * never resizes the list window. Reset when the width, the tier or the rows change.
+	 */
+	private selectionReserve = { key: "", rows: 0 };
 	/**
 	 * Whether the pane may take the whole body over. An opener that shows the
 	 * pane by default gets it only when it stacks under the list; the takeover,
@@ -301,7 +321,8 @@ export class ListOverlayView implements Component {
 	 */
 	private filterMemo: { query: string; items: ReadonlyArray<ListOverlayItem> } | null = null;
 	/** Detail pane memo: one Markdown render per (item, width), not per frame. */
-	private detailMemo: { item: ListOverlayItem; width: number; epoch: number; lines: string[] } | null = null;
+	private detailMemo: { item: ListOverlayItem; width: number; epoch: number; tier: number; lines: string[] } | null =
+		null;
 	/** Rendered-frame memo keyed on every render input, for frame-cache identity. */
 	private renderMemo: { key: string; lines: string[] } | null = null;
 	/** Bumped on every keystroke routed into the filter input; part of the memo key. */
@@ -318,7 +339,7 @@ export class ListOverlayView implements Component {
 		this.isFilterFocused = !!options.filterable && !options.explicitSearch;
 		this.filterText = options.initialFilter ?? "";
 		this.items = options.items;
-		this.detailPaneDrawn = options.layout === "split";
+		this.detailPaneDrawn = options.layout === "split" && tierPolicy().pickerDetail !== "status";
 		this.input = new Input();
 		if (options.initialFilter) {
 			this.input.setValue(options.initialFilter);
@@ -408,12 +429,14 @@ export class ListOverlayView implements Component {
 		// Before the first frame nothing has been drawn yet, and after a press the
 		// frame has not caught up with, the request is what the key inverts.
 		this.showDetail = this.renderMemo && !this.detailKeyPending ? !this.detailPaneDrawn : !this.showDetail;
+		this.paneDismissed = !this.showDetail;
 		this.detailKeyPending = true;
 		this.onChange();
 	}
 
 	toggleDetail(): void {
 		this.showDetail = !this.showDetail;
+		this.paneDismissed = !this.showDetail;
 		this.renderMemo = null;
 	}
 
@@ -426,6 +449,7 @@ export class ListOverlayView implements Component {
 	openDetail(): void {
 		this.takeoverAllowed = true;
 		this.showDetail = true;
+		this.paneDismissed = false;
 		this.detailKeyPending = true;
 		this.renderMemo = null;
 	}
@@ -605,6 +629,7 @@ export class ListOverlayView implements Component {
 					short: "back",
 					back: () => {
 						this.showDetail = false;
+						this.paneDismissed = true;
 						this.detailKeyPending = true;
 						this.onChange();
 					},
@@ -871,6 +896,40 @@ export class ListOverlayView implements Component {
 		return rows;
 	}
 
+	/**
+	 * The selection as the tier states it under a list with no pane: one status row at compact, its key facts at
+	 * standard and detailed. A row with nothing to say about itself has no block.
+	 */
+	private selectionBlock(width: number, item: ListOverlayItem | undefined): string[] {
+		if (item === undefined) return [];
+		const room = Math.max(1, width - 2);
+		let rows: string[];
+		if (tierPolicy().pickerDetail === "status") {
+			const row = item.summary?.(room) ?? item.facts?.(room)[0] ?? this.derivedFacts(room, item)[0];
+			rows = row === undefined ? [] : [row];
+		} else {
+			rows = (item.facts?.(room) ?? this.derivedFacts(room, item)).slice(0, SELECTION_FACT_ROWS);
+		}
+		return rows.map((row) => this.padLine(`  ${row}`, width));
+	}
+
+	/** The first detail rows after the title, which the list row already states. */
+	private derivedFacts(width: number, item: ListOverlayItem): string[] {
+		if (!item.detail) return [];
+		const rows = this.detailLines(width, item).filter((line) => stripTerminalSequences(line).trim().length > 0);
+		return (rows.length > 1 ? rows.slice(1) : rows).slice(0, SELECTION_FACT_ROWS);
+	}
+
+	/** The selection block padded to the rows this width and tier reserve, so the list window holds still. */
+	private reservedSelectionBlock(width: number, items: ReadonlyArray<ListOverlayItem>): string[] {
+		const rows = this.selectionBlock(width, items[this.selectedIndex]);
+		const key = `${width}|${tierRevision()}|${this.itemsEpoch}|${this.filterText}`;
+		if (this.selectionReserve.key !== key) this.selectionReserve = { key, rows: 0 };
+		this.selectionReserve.rows = Math.max(this.selectionReserve.rows, rows.length);
+		while (rows.length < this.selectionReserve.rows) rows.push(" ".repeat(width));
+		return rows;
+	}
+
 	/** The list's rows in draw order: each group header, then its items. */
 	private renderedRowsFor(filteredItems: ReadonlyArray<ListOverlayItem>): RenderedRow[] {
 		const uniqueGroups: string[] = [];
@@ -958,8 +1017,19 @@ export class ListOverlayView implements Component {
 				focusLine && listMaxLines >= FOCUS_LINE_MIN_LIST_ROWS && this.anyRowCut(width - 2, filteredItems, leadWidth)
 					? this.focusLineRows(width, filteredItems[this.selectedIndex])
 					: [];
-			const scrollRows = renderedRows.length > listMaxLines - focus.length && listMaxLines > 1 ? 1 : 0;
-			const itemRows = Math.max(1, listMaxLines - scrollRows - focus.length);
+			// With no pane the tier states the selection under the list; the focus line already states it whole.
+			const block = focus.length === 0 && focusLine ? this.reservedSelectionBlock(width, filteredItems) : [];
+			const windowFor = (blockRows: number): { scrollRows: number; itemRows: number } => {
+				const room = listMaxLines - focus.length - blockRows;
+				const scroll = renderedRows.length > room && listMaxLines > 1 ? 1 : 0;
+				return { scrollRows: scroll, itemRows: room - scroll };
+			};
+			// The block gives way, last row first, before the list falls under the rows a cursor needs.
+			const listFloor = Math.min(STACKED_LIST_MIN_ROWS, renderedRows.length);
+			let blockRows = block.length;
+			while (blockRows > 0 && windowFor(blockRows).itemRows < listFloor) blockRows -= 1;
+			const scrollRows = windowFor(blockRows).scrollRows;
+			const itemRows = Math.max(1, windowFor(blockRows).itemRows);
 			const selectedRowIndex = renderedRows.findIndex(
 				(row) => row.type === "item" && row.itemIndex === this.selectedIndex,
 			);
@@ -1027,6 +1097,7 @@ export class ListOverlayView implements Component {
 					),
 				);
 			}
+			lines.push(...block.slice(0, blockRows));
 		}
 
 		return lines;
@@ -1038,7 +1109,8 @@ export class ListOverlayView implements Component {
 			this.detailMemo &&
 			this.detailMemo.item === selectedItem &&
 			this.detailMemo.width === width &&
-			this.detailMemo.epoch === skinEpoch()
+			this.detailMemo.epoch === skinEpoch() &&
+			this.detailMemo.tier === tierRevision()
 		) {
 			return this.detailMemo.lines;
 		}
@@ -1052,7 +1124,7 @@ export class ListOverlayView implements Component {
 			const md = new Markdown(detailLines.join("\n"), 0, 0, markdownTheme(clioTheme()));
 			lines = md.render(width);
 		}
-		this.detailMemo = { item: selectedItem, width, epoch: skinEpoch(), lines };
+		this.detailMemo = { item: selectedItem, width, epoch: skinEpoch(), tier: tierRevision(), lines };
 		return lines;
 	}
 
@@ -1180,11 +1252,16 @@ export class ListOverlayView implements Component {
 
 		const selectedItem = filteredItems[this.selectedIndex];
 		const hasDetail = !!selectedItem?.detail;
-		const isSplit = this.options.layout === "split" && width >= 90;
+		// The tier decides how much of the selection shows beside the list: compact keeps the list and its status row,
+		// standard draws the side pane where it fits, and detailed also stacks the pane when the side one does not fit.
+		const pickerDetail = tierPolicy().pickerDetail;
+		const isSplit = this.options.layout === "split" && width >= 90 && pickerDetail !== "status";
+		const paneByTier = pickerDetail === "pane" && !this.paneDismissed;
 		// Frame memo: identical inputs return the identical array, which lets the
 		// overlay frame's childLines identity cache short-circuit the whole frame.
 		const memoKey = [
 			skinEpoch(),
+			tierRevision(),
 			width,
 			this.viewportRows,
 			this.railRoom,
@@ -1192,6 +1269,7 @@ export class ListOverlayView implements Component {
 			this.selectedIndex,
 			this.isFilterFocused,
 			this.showDetail,
+			this.paneDismissed,
 			this.takeoverAllowed,
 			this.listScrollOffset,
 			this.detailScrollOffset,
@@ -1230,7 +1308,7 @@ export class ListOverlayView implements Component {
 		// Every list is docked now and the dock's rows are the budget, so a list
 		// fills them rather than stopping at the twelve rows a floating box kept.
 		const renderedRows = this.renderedRowsFor(filteredItems);
-		const paneWanted = hasDetail && (isSplit || this.showDetail);
+		const paneWanted = hasDetail && (isSplit || this.showDetail || paneByTier);
 
 		interface Layout {
 			lines: string[];
@@ -1270,7 +1348,7 @@ export class ListOverlayView implements Component {
 					const listLines = this.renderList(listWidth, avail, filteredItems, renderedRows);
 					const detailLines = this.renderDetail(detailWidth, avail, selectedItem);
 					const rows = Math.min(avail, Math.max(listLines.length, detailLines.length));
-					const separator = theme.fg("border", "│");
+					const separator = theme.fg("border", GLYPH.rail);
 					for (let i = 0; i < rows; i++) {
 						lines.push(`${listLines[i] ?? " ".repeat(listWidth)} ${separator} ${detailLines[i] ?? " ".repeat(detailWidth)}`);
 					}
@@ -1679,10 +1757,10 @@ export interface DetailParts {
 export function detailWithHead(
 	build: (width: number) => DetailParts,
 ): Pick<ListOverlayItem, "detail" | "detailHead" | "detailFormat"> {
-	let memo: { width: number; epoch: number; parts: DetailParts } | null = null;
+	let memo: { width: number; epoch: number; tier: number; parts: DetailParts } | null = null;
 	const parts = (width: number): DetailParts => {
-		if (memo && memo.width === width && memo.epoch === skinEpoch()) return memo.parts;
-		memo = { width, epoch: skinEpoch(), parts: build(width) };
+		if (memo && memo.width === width && memo.epoch === skinEpoch() && memo.tier === tierRevision()) return memo.parts;
+		memo = { width, epoch: skinEpoch(), tier: tierRevision(), parts: build(width) };
 		return memo.parts;
 	};
 	return {

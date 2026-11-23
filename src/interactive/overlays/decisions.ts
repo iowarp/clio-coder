@@ -1,3 +1,4 @@
+import { tierPolicy } from "../../core/presentation-tier.js";
 import { classifyDecisionPresentation, decisionFactsForAnswer } from "../../domains/safety/decision-presentation.js";
 import type { DecisionLedgerEntry, DecisionRecord } from "../../domains/session/entries.js";
 import { type Component, Input, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -19,6 +20,7 @@ import {
 	clioTheme,
 	emptyState,
 	factRows,
+	fitUnits,
 	GLYPH,
 	keyCap,
 	positionRow,
@@ -87,11 +89,25 @@ function selectableRows(interviews: ReadonlyArray<DecisionLedgerEntry>): Selecta
 }
 
 /**
+ * How much of a decision shows under its row, by the tier's picker detail: `status` the row alone (the board's status
+ * row states the selection), `facts` the selected decision's question and who chose it, `pane` its full record.
+ */
+type DecisionDetail = "status" | "facts" | "pane";
+
+/** Who chose a decision, in the words a person reads. */
+function decisionSource(decision: DecisionRecord): string {
+	if (decision.operator_choice === true) return "you, as your own choice";
+	if (decision.source === "agent") return "CLIO Coder";
+	if (decision.source === "operator-message") return "you, in your message";
+	return "you";
+}
+
+/**
  * One interview's header: its tier in the tier's tone, when it ended, how
  * many rounds it took and how it ended, as chips on one row; its summary,
- * when it has one, dim beneath.
+ * when it has one and the tier shows more than rows, dim beneath.
  */
-function interviewHeader(interview: DecisionLedgerEntry, width: number, now: number): string[] {
+function interviewHeader(interview: DecisionLedgerEntry, width: number, now: number, detail: DecisionDetail): string[] {
 	const theme = clioTheme();
 	const presentation = classifyDecisionPresentation(decisionFactsForAnswer(interview.exposure ?? "local"));
 	const rounds = `${interview.roundCount} round${interview.roundCount === 1 ? "" : "s"}`;
@@ -109,7 +125,7 @@ function interviewHeader(interview: DecisionLedgerEntry, width: number, now: num
 			width,
 		),
 	];
-	if (interview.summary) {
+	if (interview.summary && detail !== "status") {
 		lines.push(...wrapTextWithAnsi(theme.fg("annotation", interview.summary), width).map((line) => fitRow(line, width)));
 	}
 	return lines;
@@ -117,15 +133,17 @@ function interviewHeader(interview: DecisionLedgerEntry, width: number, now: num
 
 /**
  * One decision: the cursor, its standing as a glyph, its label and value on
- * one row; a superseded decision's correction beneath it; and, when expanded,
- * the question it answered, the answer, and why Clio chose it when it did.
+ * one row; a superseded decision's correction beneath it; and, for the
+ * selection, what the tier shows of its record: the question and who chose it
+ * at standard, everything at detailed or when expanded.
  */
 function decisionLines(
 	decision: DecisionRecord,
 	selected: boolean,
 	expanded: boolean,
 	width: number,
-	draft?: string,
+	draft: string | undefined,
+	detail: DecisionDetail,
 ): string[] {
 	const theme = clioTheme();
 	const cursor = selectionMark(selected);
@@ -146,7 +164,7 @@ function decisionLines(
 		facts.push({ label: "correction", value: decision.correction });
 	}
 	if (draft !== undefined) facts.push({ label: "draft kept", value: draft });
-	if (selected && expanded) {
+	if (selected && (expanded || detail === "pane")) {
 		if (decision.source_question) facts.push({ label: "question", value: decision.source_question });
 		facts.push({ label: "answer", value: decision.value });
 		// Clio's own choices, an absent operator's question included (#421), say why.
@@ -155,6 +173,9 @@ function decisionLines(
 		if (decision.operator_choice === true) facts.push({ label: "chosen by", value: "you, as your own choice" });
 		if (decision.source === "operator-message" && decision.quote)
 			facts.push({ label: "from your message", value: decision.quote });
+	} else if (selected && detail === "facts") {
+		if (decision.source_question) facts.push({ label: "question", value: decision.source_question });
+		facts.push({ label: "chosen by", value: decisionSource(decision) });
 	}
 	if (facts.length > 0) {
 		lines.push(
@@ -180,6 +201,7 @@ function formatDecisionsOverlayBodyLines(
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 	now = Date.now(),
 	editingKey: string | null = null,
+	detail: DecisionDetail = tierPolicy().pickerDetail,
 ): DecisionsBoardLines {
 	const width = Math.max(1, Math.floor(contentWidth));
 	const theme = clioTheme();
@@ -198,7 +220,7 @@ function formatDecisionsOverlayBodyLines(
 		if (!interview) continue;
 		if (interviewIndex > 0) lines.push(rule(theme, width));
 		const headerStart = lines.length;
-		lines.push(...interviewHeader(interview, width, now));
+		lines.push(...interviewHeader(interview, width, now, detail));
 		if (interview.decisions.length === 0) {
 			const words =
 				interview.interviewStatus === "complete"
@@ -234,6 +256,7 @@ function formatDecisionsOverlayBodyLines(
 					isSelected && expandedKey === rowKey,
 					width,
 					rowKey === editingKey ? undefined : keptCorrections.get(rowKey),
+					detail,
 				),
 			);
 			if (isSelected) {
@@ -286,8 +309,24 @@ class DecisionsOverlayBody implements Component {
 			this.correctionKey,
 		);
 		const theme = clioTheme();
-		// What stays under the board whatever it scrolls to: the open field, the last outcome, and the keys the rail drops.
+		// What stays under the board whatever it scrolls to: the selection's status row at compact, the open field,
+		// the last outcome, and the keys the rail drops.
 		const tail: string[] = [];
+		const selected = rows[this.selectedIndex];
+		if (selected && tierPolicy().pickerDetail === "status" && this.correctionInput === null) {
+			const { decision } = selected;
+			tail.push(
+				fitUnits(
+					theme,
+					`${theme.fg("selectedOption", GLYPH.cursor)} `,
+					[
+						theme.fg("annotation", `chosen by ${decisionSource(decision)}`),
+						...(decision.source_question ? [theme.fg("menuDescription", decision.source_question)] : []),
+					],
+					width,
+				),
+			);
+		}
 		if (this.correctionInput) {
 			tail.push(sectionRule(theme, width, "New direction"));
 			tail.push(
@@ -434,9 +473,11 @@ class DecisionsOverlayBody implements Component {
 		const rowKey = decisionRowKey(selected.interview.interviewId, selected.decision.key);
 		if (this.armedSupersede === rowKey) return confirmOnceRail("x", "supersede", selected.decision.key);
 		const drafted = keptCorrections.has(rowKey);
+		// At detailed the selection's record is already whole, so Enter, which still toggles, is not advertised.
+		const whole = tierPolicy().pickerDetail === "pane";
 		return [
 			...(rows.length > 1 ? [{ key: "↑↓", verb: "select" }] : []),
-			{ key: "Enter", verb: this.expandedKey === rowKey ? "fold" : "expand" },
+			...(whole ? [] : [{ key: "Enter", verb: this.expandedKey === rowKey ? "fold" : "expand" }]),
 			...(selected.decision.status === "active" ? [{ key: "x", verb: "supersede" }] : []),
 			{ key: "c", verb: drafted ? "resume draft" : "correct" },
 			esc,
