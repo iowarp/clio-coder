@@ -1,5 +1,6 @@
 import { doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { FleetRunPreview } from "../../src/domains/dispatch/fleet-run-preview.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createDispatchBoardView } from "../../src/interactive/dispatch-board.js";
@@ -42,7 +43,10 @@ test("board and fleet approval share target labels without the observe glyph", (
 			match(rows.map(stripTerminalSequences).join("\n"), /target +blade · dynamo\/qwopus/);
 			for (const line of rows) ok(visibleWidth(line) <= width);
 		}
+		// A step's route is provenance the plan review shows at detailed.
+		setPresentationTier("detailed");
 		const rows = formatFleetRunApprovalBody({ ok: true, preview }, width, 0);
+		setPresentationTier("standard");
 		match(rows.map(stripTerminalSequences).join(" "), /blade · dynamo\/qwopus/);
 		for (const line of [...rows, ...board.render(width)]) {
 			ok(visibleWidth(line) <= width);
