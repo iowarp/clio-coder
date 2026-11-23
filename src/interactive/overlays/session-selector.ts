@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { tierPolicy } from "../../core/presentation-tier.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/index.js";
 import { liveSessionOwner } from "../../domains/session/live-owner.js";
@@ -24,24 +25,50 @@ import {
 	FocusBox,
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
-import { clioTheme, emptyState, GLYPH, positionRow, selectionRow } from "../theme/index.js";
+import { clioTheme, emptyState, type Fact, factRows, GLYPH, positionRow, selectionRow } from "../theme/index.js";
 import { filterSessions } from "./session-selector-search.js";
 
 export const SESSION_OVERLAY_WIDTH = 110;
+/** Sessions a page shows while each takes two rows (standard, detailed) or one (compact). */
 const VISIBLE_ROWS = 6;
+const COMPACT_VISIBLE_ROWS = 12;
+/** The selection's fact rows at detailed: id, folder, open state. */
+const DETAIL_FACT_ROWS = 3;
 export const SESSION_ESCAPE_GRACE_MS = 75;
 const ESC = String.fromCharCode(27);
 
-/** A session row: the label the list selects by, when it last moved, and the strip under it. */
+/**
+ * A session row: the label the list selects by, when it last moved, the strip under it, the one-row status the
+ * compact tier shows for the selection, and the facts the detailed tier adds for it.
+ */
 interface SessionItem extends SelectItem {
 	when: string;
+	status: string;
+	facts: Fact[];
+}
+
+/** Rows one session takes in the list: the strip under each session shows from standard up. */
+function rowsPerSession(): number {
+	return tierPolicy().pickerDetail === "status" ? 1 : 2;
+}
+
+/** Sessions a page holds at the current tier before the frame says how many rows it has. */
+function sessionPageCap(): number {
+	return rowsPerSession() === 1 ? COMPACT_VISIBLE_ROWS : VISIBLE_ROWS;
+}
+
+/** Rows under the list: the status or legend row, and the selection's facts at detailed. */
+function sessionTrailRows(): number {
+	return 1 + (tierPolicy().pickerDetail === "pane" ? DETAIL_FACT_ROWS : 0);
 }
 
 /**
  * Session metadata gets its own row so a narrow picker never drops it
  * (flywheel r4/5). Each session is a selection row: the name or first message
- * with its age at the right, and the turn count, folder and route beneath,
- * clipped to one row so every session costs the same two.
+ * with its age at the right. From standard up the turn count, folder and route
+ * sit beneath, clipped to one row so every session costs the same two; at
+ * compact each session is one row and the selection's strip is the status row
+ * under the list. Detailed adds the selection's id, folder and open state.
  */
 class SessionSelectList extends SelectList {
 	constructor(
@@ -54,6 +81,7 @@ class SessionSelectList extends SelectList {
 	override render(width: number): string[] {
 		if (width <= 0) return [];
 		const theme = clioTheme();
+		const detail = tierPolicy().pickerDetail;
 		const selected = Math.max(
 			0,
 			this.sessionItems.findIndex((item) => item.value === this.getSelectedItem()?.value),
@@ -68,7 +96,11 @@ class SessionSelectList extends SelectList {
 					focused: index === selected,
 					label: item.label,
 					meta: item.when,
-					description: truncateToWidth(item.description ?? "", Math.max(1, width - 4), GLYPH.ellipsis, false),
+					...(detail === "status"
+						? {}
+						: {
+								description: truncateToWidth(item.description ?? "", Math.max(1, width - 4), GLYPH.ellipsis, false),
+							}),
 					width,
 				}),
 			);
@@ -81,13 +113,19 @@ class SessionSelectList extends SelectList {
 					width,
 				),
 			);
-		if (this.sessionItems.length > 0)
-			rows.push(truncateToWidth(theme.fg("annotation", SESSION_STATUS_LEGEND), width, GLYPH.ellipsis, false));
+		const focused = this.sessionItems[selected];
+		if (!focused) return rows;
+		// Compact names the selection's state in words, so it needs no legend; the strips from standard up lead with
+		// the bare marker, which the legend row spells out.
+		const trail = detail === "status" ? focused.status : SESSION_STATUS_LEGEND;
+		rows.push(truncateToWidth(theme.fg("annotation", trail), width, GLYPH.ellipsis, false));
+		if (detail === "pane")
+			rows.push(...factRows(theme, focused.facts, width, { labelRole: "fieldName", stack: "never" }));
 		return rows;
 	}
 
 	override handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-		return super.handleMouse({ ...event, y: Math.floor(event.y / 2) });
+		return super.handleMouse({ ...event, y: Math.floor(event.y / rowsPerSession()) });
 	}
 }
 
@@ -106,19 +144,19 @@ function shortTarget(meta: SessionMeta): string {
 	const target = sanitizeCallTargetText(meta.target ?? "");
 	const model = sanitizeCallTargetText(meta.model ?? "");
 	if (!target && !model) return "no target";
-	if (target && model) return `${target} · ${model}`;
+	if (target && model) return `${target} ${GLYPH.sep} ${model}`;
 	return target || model || "no target";
 }
 
 function previewLine(meta: SessionMeta): string {
-	const fork = meta.parentSessionId ? `Fork ${sanitizeCallTargetText(meta.id).slice(0, 6)} · ` : "";
+	const fork = meta.parentSessionId ? `Fork ${sanitizeCallTargetText(meta.id).slice(0, 6)} ${GLYPH.sep} ` : "";
 	const name = sanitizeCallTargetText(meta.name ?? "");
 	if (name) return `${fork}${name}`;
 	const explicit = sanitizeCallTargetText(meta.firstMessagePreview ?? "");
 	if (explicit) return `${fork}${explicit}`;
 	const cwdLeaf = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "");
 	const id = sanitizeCallTargetText(meta.id) || "Unnamed session";
-	return `${id} · ${cwdLeaf || "no preview"}`;
+	return `${id} ${GLYPH.sep} ${cwdLeaf || "no preview"}`;
 }
 
 /**
@@ -128,21 +166,39 @@ function previewLine(meta: SessionMeta): string {
  * row is spelled from this same table.
  */
 const SESSION_STATUS = {
-	open: { glyph: GLYPH.running, meaning: "open in a running CLIO Coder" },
-	closed: { glyph: GLYPH.queued, meaning: "not open" },
+	open: { glyph: GLYPH.running, word: "open", meaning: "open in a running CLIO Coder" },
+	closed: { glyph: GLYPH.queued, word: "not open", meaning: "not open" },
 } as const;
 
 const SESSION_STATUS_LEGEND = Object.values(SESSION_STATUS)
 	.map((status) => `${status.glyph} ${status.meaning}`)
-	.join(" · ");
+	.join(` ${GLYPH.sep} `);
 
-function metaStrip(meta: SessionMeta): string {
-	const status = (liveSessionOwner(meta) ? SESSION_STATUS.open : SESSION_STATUS.closed).glyph;
+/** The turn count, folder and route; `status` leads with the marker alone or with its meaning in words. */
+function metaStrip(meta: SessionMeta, status: "glyph" | "words"): string {
+	const open = liveSessionOwner(meta) ? SESSION_STATUS.open : SESSION_STATUS.closed;
 	const count = typeof meta.messageCount === "number" ? meta.messageCount : 0;
 	const countLabel = count === 1 ? "1 turn" : `${count} turns`;
+	const lead = status === "glyph" ? [`${open.glyph} ${countLabel}`] : [`${open.glyph} ${open.word}`, countLabel];
 	const folder = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "") || "no folder";
 	// meta.json describes the session, not its spend; the picker shows no spend (#434).
-	return `${status} ${countLabel} · ${folder} · ${shortTarget(meta)}`;
+	return [...lead, folder, shortTarget(meta)].join(` ${GLYPH.sep} `);
+}
+
+/** What the detailed tier adds for the selection: the id `--resume` takes, the whole folder, and the open state. */
+function sessionFacts(meta: SessionMeta): Fact[] {
+	const owner = liveSessionOwner(meta);
+	return [
+		{ label: "id", value: sanitizeCallTargetText(meta.id) || "unknown", fit: "clip" },
+		{ label: "folder", value: sanitizeCallTargetText(meta.cwd ?? "") || "no folder", fit: "clip" },
+		{
+			label: "state",
+			value: owner
+				? `${SESSION_STATUS.open.glyph} ${SESSION_STATUS.open.meaning} ${GLYPH.sep} pid ${owner.pid}`
+				: `${SESSION_STATUS.closed.glyph} ${SESSION_STATUS.closed.meaning}`,
+			fit: "clip",
+		},
+	];
 }
 
 /**
@@ -152,11 +208,14 @@ function metaStrip(meta: SessionMeta): string {
 function buildSessionItems(sessions: ReadonlyArray<SessionMeta>, now: number = Date.now()): SessionItem[] {
 	return sessions.map((meta) => {
 		const labels = meta.labels?.map(sanitizeCallTargetText).filter(Boolean).join(", ");
-		const details = [metaStrip(meta), labels ? `labels: ${labels}` : ""].filter(Boolean);
+		const labelText = labels ? `labels: ${labels}` : "";
+		const join = (strip: string): string => [strip, labelText].filter(Boolean).join(` ${GLYPH.sep} `);
 		return {
 			value: meta.id,
 			label: previewLine(meta),
-			description: details.join(" · "),
+			description: join(metaStrip(meta, "glyph")),
+			status: join(metaStrip(meta, "words")),
+			facts: sessionFacts(meta),
 			when: formatRelativeTime(meta.lastActivityAt ?? meta.endedAt ?? meta.createdAt, now),
 		};
 	});
@@ -208,10 +267,11 @@ function createSessionOverlayBox(
 	let filtered = [...sessions];
 	let lastQuery = "";
 	let selectedSessionId: string | undefined;
-	// Sessions the dock has room for: two rows each under the filter row, a
-	// position row and the marker legend, never more than the six a page moves
-	// by. Zero means the frame has not said yet, so the six stand.
-	let visibleBudget = VISIBLE_ROWS;
+	// Sessions the dock has room for: one or two rows each (by tier) under the
+	// filter row, a position row, the legend or status row and, at detailed,
+	// the selection's facts; never more than a page of the tier. Zero means the
+	// frame has not said yet, so the page cap stands.
+	let visibleBudget = sessionPageCap();
 	let list = buildList(filtered);
 	let pendingEscape = "";
 	let pendingEscapeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -239,7 +299,9 @@ function createSessionOverlayBox(
 		backOutOneLayer(box.escapeLayers());
 	};
 	box.setBodyRows = (rows: number): void => {
-		const next = rows > 0 ? Math.max(1, Math.min(VISIBLE_ROWS, Math.floor((rows - 3) / 2))) : VISIBLE_ROWS;
+		const cap = sessionPageCap();
+		const next =
+			rows > 0 ? Math.max(1, Math.min(cap, Math.floor((rows - 2 - sessionTrailRows()) / rowsPerSession()))) : cap;
 		if (next === visibleBudget) return;
 		visibleBudget = next;
 		applyFilter();
