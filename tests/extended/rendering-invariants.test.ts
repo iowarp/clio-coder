@@ -3231,20 +3231,20 @@ describe("transcript block grammar", () => {
 			match(render(style), /^◇ scout ● +—/u);
 		}
 		strictEqual(render("compact").split("\n").length, 1);
-		match(render("standard"), /\n {2}│ ⚙ searching retry\(/u);
+		match(render("standard"), /\n {2}│ ▹ searching retry\(/u);
 		strictEqual(render("detailed").split("\n").length, 2);
-		match(render("detailed"), /\n {2}│ blade · m · ⚙ searching retry\(/u);
+		match(render("detailed"), /\n {2}│ blade · m · ▹ searching retry\(/u);
 		doesNotMatch(render("standard"), /last: read/u);
 		doesNotMatch(render("detailed"), /state |last:|\?|read a\.ts/u);
 		doesNotMatch(render("compact"), /last:/u);
 		ok(entry.progress);
 		entry.toolCallLimit = 150;
 		entry.progress = { ...entry.progress, toolCalls: 12, processedTokens: 1200 };
-		match(render("detailed"), /blade · m · ⚙ searching retry\(/u);
+		match(render("detailed"), /blade · m · ▹ searching retry\(/u);
 		const unknownRoute = { ...entry, runtime: { kind: "acp" as const } };
 		delete unknownRoute.toolCallLimit;
 		const partial = renderWorkerEntryLines(unknownRoute, 80, { detail: transcriptDetail("detailed") });
-		match(stripTerminalSequences(partial[1] ?? ""), /^ {2}│ ⚙ searching retry\(/u);
+		match(stripTerminalSequences(partial[1] ?? ""), /^ {2}│ ▹ searching retry\(/u);
 		doesNotMatch(partial.map(stripTerminalSequences).join("\n"), /unknown|\?|\/150/u);
 	});
 
@@ -3293,7 +3293,7 @@ describe("transcript block grammar", () => {
 		deepStrictEqual(trail(true), []);
 		match(
 			stripTerminalSequences(renderWorkerEntryLines(entry(true), 80, { detail: transcriptDetail("detailed") }).join("\n")),
-			/\n {2}│ blade · m · ⚙ running npm test/u,
+			/\n {2}│ blade · m · ▹ running npm test/u,
 		);
 	});
 
@@ -3365,7 +3365,7 @@ describe("transcript block grammar", () => {
 		strictEqual(inspected[0], "◇ verifier · blade/m · run run-4 ✓ done");
 		strictEqual(inspected[1], "  │ contract pass");
 		match(detailed[1] ?? "", /verdict/u);
-		for (const row of detailed.filter((line) => /│ (⚙|quality )/u.test(line))) ok(inspected.includes(row), row);
+		for (const row of detailed.filter((line) => /│ (▹|quality )/u.test(line))) ok(inspected.includes(row), row);
 		doesNotMatch(inspected.join("\n"), /└|\btok\b|… \d+ rows/u);
 		// The answer is whole and as the run returned it.
 		const body = inspected
