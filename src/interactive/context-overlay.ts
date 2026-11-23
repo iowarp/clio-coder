@@ -23,7 +23,6 @@ import { buildResponsiveHint, ScrollingBody, showClioOverlayFrame } from "./over
 import {
 	abbreviateModelId,
 	type ClioToken,
-	chipRow,
 	chipRows,
 	clioTheme,
 	dotSep,
@@ -338,7 +337,8 @@ function nextRequestLines(inspection: BudgetInspection | undefined, width: numbe
 	const count = (value: number | null) => (value === null ? "unknown" : figure(value));
 	const lines = [
 		sectionRule(theme, width, "Next request", { meta: view.phase }),
-		chipRow(
+		// Whole facts, wrapped between them when the body is narrow: every figure stays and no row ends in `· …` (2.9).
+		...chipRows(
 			theme,
 			[
 				`${theme.fg("fieldName", "input")} ${theme.fg("fieldValue", count(view.inputTokens))}`,
@@ -386,23 +386,30 @@ function renderContextLedgerLines(
 	}
 
 	lines.push(...legendRows(ledger.meter, contentWidth, count));
+	// Each fact is a label and a value: the words take the supporting role and the figure the counter, so `NO_COLOR`
+	// dims `autocompact at` and not `80%`, as the compact total line paints it.
+	const label = (text: string): string => theme.fg("annotation", text);
+	const value = (text: string): string => theme.fg("counter", text);
+	const mode = ledger.compactionAuto ? "auto" : "manual";
 	const compaction =
 		ledger.contextWindow <= 0 && ledger.compactionCeilingTokens
-			? `autocompact at ceiling (${ledger.compactionAuto ? "auto" : "manual"}; serving window unknown)`
+			? label(`autocompact at ceiling (${mode}; serving window unknown)`)
 			: ledger.compactionThreshold !== null
-				? `autocompact at ${Math.round(ledger.compactionThreshold * 100)}% (${ledger.compactionAuto ? "auto" : "manual"})`
-				: "autocompact off";
-	const toolsLabel = ledger.toolCount > 0 ? `${ledger.toolCount} active tool${ledger.toolCount === 1 ? "" : "s"}` : null;
+				? `${label("autocompact at")} ${value(`${Math.round(ledger.compactionThreshold * 100)}%`)} ${label(`(${mode})`)}`
+				: label("autocompact off");
+	const toolsLabel =
+		ledger.toolCount > 0
+			? `${value(String(ledger.toolCount))} ${label(`active tool${ledger.toolCount === 1 ? "" : "s"}`)}`
+			: null;
 	// The cleanup ceiling (context.compaction.maxTokens or a price tier) only fires cleanup sooner than the window does;
 	// at or above a known window it bounds nothing, and `ceiling 400,000 tokens` beside a 200K window read as a limit.
 	const ceilingTokens = ledger.compactionCeilingTokens ?? 0;
 	const ceiling =
 		ceilingTokens > 0 && (ledger.contextWindow <= 0 || ceilingTokens < ledger.contextWindow)
-			? `cleanup ceiling ${count(ceilingTokens)} tokens`
+			? `${label("cleanup ceiling")} ${value(count(ceilingTokens))} ${label("tokens")}`
 			: null;
 	// Wrapped between its facts, never inside one, so a narrow body never leaves a row ending in a bare `·`.
-	const facts = [compaction, ceiling, toolsLabel].map((fact) => (fact === null ? null : theme.fg("annotation", fact)));
-	for (const row of chipRows(theme, facts, contentWidth)) lines.push(row);
+	for (const row of chipRows(theme, [compaction, ceiling, toolsLabel], contentWidth)) lines.push(row);
 	if (sections !== "provenance") return lines;
 
 	if (workingSet && workingSet.evicted.size > 0) lines.push(renderEvictedTokensLine(evictedTokens(workingSet), theme));

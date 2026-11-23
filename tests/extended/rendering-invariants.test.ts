@@ -69,7 +69,7 @@ import {
 } from "../../src/interactive/renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { createStreamPacer, type StreamPacerSlice } from "../../src/interactive/stream-pacer.js";
-import { clioTheme, formatContextPercent, GLYPH } from "../../src/interactive/theme/index.js";
+import { clioTheme, createClioTheme, formatContextPercent, GLYPH } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import {
 	workerEntriesFromRunEntries,
@@ -1175,6 +1175,69 @@ describe("Pi TUI compatibility", () => {
 		};
 		doesNotMatch(footer(400_000), /ceiling/u);
 		match(footer(100_000), /autocompact at 80% \(auto\) · cleanup ceiling 100k tokens/u);
+	});
+
+	it("paints the autocompact facts' figures as values and fits the next request at 48 columns (W2-6)", () => {
+		const ledger = () =>
+			buildContextLedger({
+				provider: "fixture",
+				model: "fixture",
+				contextWindow: 272_000,
+				messageTokens: 1000,
+				toolCount: 12,
+				compactionThreshold: 0.8,
+				compactionCeilingTokens: 267_000,
+				compactionAuto: true,
+			});
+		const inspectLiveBudget = () =>
+			({
+				status: "available",
+				capability: "native",
+				view: {
+					phase: "idle",
+					inputTokens: 11_532,
+					outputReserveTokens: 32_768,
+					headroomTokens: 227_700,
+					pendingHandoff: null,
+					lastOutcome: null,
+				},
+			}) as never;
+		const tui = { showOverlay: () => ({ hide() {} }), requestRender() {} } as unknown as TUI;
+		const handle = openContextOverlay(tui, ledger, {
+			chat: { isStreaming: () => false, onEvent: () => () => {}, inspectLiveBudget },
+		});
+		const theme = clioTheme();
+		// The counter role is a value role: without color it paints no SGR 2, while the label role still dims.
+		const noColor = createClioTheme({ color: false });
+		ok(!noColor.fg("counter", "80%").includes("\u001b[2m"));
+		ok(noColor.fg("annotation", "autocompact at").includes("\u001b[2m"));
+		try {
+			for (const [tier, ceiling] of [
+				["standard", "267k"],
+				["detailed", "267,000"],
+			] as const) {
+				setPresentationTier(tier);
+				const raw = (dockTop(tui)?.frame.renderDockBody(116, 60) ?? []).join("\n");
+				for (const figure of ["80%", ceiling, "12"])
+					ok(raw.includes(theme.fg("counter", figure)), `${tier}: ${figure} paints as a value\n${JSON.stringify(raw)}`);
+				doesNotMatch(raw, /autocompact at 80%/u, `${tier}: the threshold is not painted inside its label`);
+				// 48 columns: the dock body is 44 wide. Every fact stays whole and no row ends on `·` or `…`.
+				const narrow = (dockTop(tui)?.frame.renderDockBody(44, 60) ?? []).map((row) =>
+					stripTerminalSequences(row).trimEnd(),
+				);
+				ok(
+					narrow.every((row) => visibleWidth(row) <= 44 && !/[·…]$/u.test(row)),
+					`${tier}\n${narrow.join("\n")}`,
+				);
+				const [input, reserve, headroom] =
+					tier === "standard" ? ["11.5k", "32.8k", "228k"] : ["11,532", "32,768", "227,700"];
+				ok(narrow.includes(`input ${input} · output reserve ${reserve}`), `${tier}\n${narrow.join("\n")}`);
+				ok(narrow.includes(`headroom ${headroom}`), `${tier}\n${narrow.join("\n")}`);
+			}
+		} finally {
+			handle.hide();
+			setPresentationTier("standard");
+		}
 	});
 
 	it("words a partial cache reuse with the re-prefilled count the call's journal records", () => {
