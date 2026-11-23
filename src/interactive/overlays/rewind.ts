@@ -5,6 +5,7 @@
  * this module only renders what it reports.
  */
 
+import { tierPolicy } from "../../core/presentation-tier.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type {
 	RewindOutcome,
@@ -83,8 +84,10 @@ const REF_STATE_LABEL: Readonly<Record<RewindRef["state"], string>> = {
 };
 
 const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const };
-/** Paths or refs a detail lists before counting the rest. */
+/** Paths or refs a detailed pane lists before counting the rest. */
 const DETAIL_LIST_SHOWN = 12;
+/** Paths a standard pane lists before counting the rest; compact states the count alone. */
+const KEY_LIST_SHOWN = 3;
 
 /** What a snapshot was taken before, in words; reasons the service does not name pass through. */
 const SNAPSHOT_REASON_WORDS: Readonly<Record<string, string>> = {
@@ -99,7 +102,7 @@ export function snapshotWhat(record: Pick<WorkspaceSnapshotRecord, "reason" | "t
 		? (SNAPSHOT_REASON_WORDS[record.reason] ?? record.reason)
 		: record.reason;
 	if (record.tool === undefined || INTERNAL_SNAPSHOT_TOOLS.has(record.tool)) return reason;
-	return `${reason} · ${record.tool}`;
+	return `${reason} ${GLYPH.sep} ${record.tool}`;
 }
 
 /**
@@ -129,25 +132,43 @@ function rewindListItems(
 			},
 			...detailWithHead((width) => {
 				const theme = clioTheme();
-				const facts: Fact[] = [
-					{ label: "Taken", value: `${dateLocal(record.at)} ${clockLocal(record.at)}` },
-					{ label: "Reason", value: record.reason },
-				];
-				if (record.tool !== undefined)
-					facts.push({ label: "Before", value: `${record.tool}${record.toolCallId ? ` (${record.toolCallId})` : ""}` });
+				// Compact keeps the outcome and anything adverse; standard adds the key
+				// facts; detailed adds the raw reason, the call id, the ref and every list.
+				const detail = tierPolicy().pickerDetail;
+				const listShown = detail === "pane" ? DETAIL_LIST_SHOWN : detail === "facts" ? KEY_LIST_SHOWN : 0;
+				const facts: Fact[] = [];
+				if (detail !== "status") facts.push({ label: "Taken", value: `${dateLocal(record.at)} ${clockLocal(record.at)}` });
+				if (detail === "pane") facts.push({ label: "Reason", value: record.reason });
+				if (record.tool !== undefined && detail !== "status")
+					facts.push({
+						label: "Before",
+						value: `${record.tool}${record.toolCallId && detail === "pane" ? ` (${record.toolCallId})` : ""}`,
+					});
 				if (counts !== "pending" && counts.kind === "unavailable")
 					facts.push({ label: "Not counted", value: sanitizeCallTargetText(counts.reason), tone: "warning" });
-				facts.push({ label: "Commit", value: `${record.commit.slice(0, 12)} (${record.ref})` });
+				if (detail !== "status")
+					facts.push({
+						label: "Commit",
+						value: `${record.commit.slice(0, 12)}${detail === "pane" && record.ref !== undefined ? ` (${record.ref})` : ""}`,
+					});
 				const skipped = record.skipped
-					.slice(0, DETAIL_LIST_SHOWN)
+					.slice(0, listShown)
 					.map((skip) => `${skip.path} (${skip.why === "too-large" ? "untracked, over 16 MiB" : "nested repository"})`);
-				if (record.skipped.length > DETAIL_LIST_SHOWN)
-					skipped.push(`and ${record.skipped.length - DETAIL_LIST_SHOWN} more`);
+				if (record.skipped.length > listShown)
+					skipped.push(
+						listShown === 0
+							? `${record.skipped.length} path${record.skipped.length === 1 ? "" : "s"}`
+							: `and ${record.skipped.length - listShown} more`,
+					);
 				if (skipped.length > 0) facts.push({ label: "Not in it", value: skipped.join("\n"), tone: "warning" });
-				const pins = (record.pins ?? []).slice(0, DETAIL_LIST_SHOWN).map(pinLabel);
-				if ((record.pins?.length ?? 0) > DETAIL_LIST_SHOWN)
-					pins.push(`and ${(record.pins?.length ?? 0) - DETAIL_LIST_SHOWN} more`);
-				if (pins.length > 0) facts.push({ label: "Pinned refs", value: pins.join("\n") });
+				const pinCount = record.pins?.length ?? 0;
+				if (detail === "pane") {
+					const pins = (record.pins ?? []).slice(0, DETAIL_LIST_SHOWN).map(pinLabel);
+					if (pinCount > DETAIL_LIST_SHOWN) pins.push(`and ${pinCount - DETAIL_LIST_SHOWN} more`);
+					if (pins.length > 0) facts.push({ label: "Pinned refs", value: pins.join("\n") });
+				} else if (detail === "facts" && pinCount > 0) {
+					facts.push({ label: "Pinned refs", value: String(pinCount) });
+				}
 				// The title, the difference and the Enter choice stay pinned while the
 				// facts scroll, so the key that previews is never scrolled away.
 				return {
@@ -169,7 +190,7 @@ function rewindListItems(
 									width,
 								)),
 					],
-					rest: ["", ...factRows(theme, facts, width, FACT_OPTIONS)],
+					rest: facts.length > 0 ? ["", ...factRows(theme, facts, width, FACT_OPTIONS)] : [],
 				};
 			}),
 		};
@@ -215,18 +236,20 @@ export function openRewindListOverlay(tui: TUI, options: OpenRewindListOptions):
 	});
 }
 
-/** Paths listed per group before the rest are counted. */
-const REWIND_PATHS_SHOWN = 12;
 /** Rows the confirmation shows while the frame has not said how many it has. */
 const REWIND_DEFAULT_ROWS = 22;
 
 /**
  * The confirmation body: what is restored, what is removed, what is left
  * alone, each under a labelled rule that carries its count, and the exact
- * recovery commands in a command block so nothing in them is ever cut.
+ * recovery commands in a command block so nothing in them is ever cut. The
+ * path lists are the preview of the subject, so the tier bounds them
+ * (`decisionPreviewRows`); every count, ref, recovery command and the choice
+ * stay whole at every tier.
  */
 function formatRewindConfirmRows(rawRecord: WorkspaceSnapshotRecord, rawPlan: RewindPlan, width: number): string[] {
 	const theme = clioTheme();
+	const pathsShown = tierPolicy().decisionPreviewRows;
 	const record = displaySafe(rawRecord);
 	const plan = displaySafe(rawPlan);
 	const contentWidth = Math.max(1, Math.floor(width));
@@ -257,8 +280,8 @@ function formatRewindConfirmRows(rawRecord: WorkspaceSnapshotRecord, rawPlan: Re
 	const group = (heading: string, paths: ReadonlyArray<string>): void => {
 		if (paths.length === 0) return;
 		rows.push(sectionRule(theme, contentWidth, heading, { meta: String(paths.length) }));
-		for (const rel of paths.slice(0, REWIND_PATHS_SHOWN)) wrap("menuDescription", `  ${rel}`);
-		if (paths.length > REWIND_PATHS_SHOWN) wrap("annotation", `  and ${paths.length - REWIND_PATHS_SHOWN} more`);
+		for (const rel of paths.slice(0, pathsShown)) wrap("menuDescription", `  ${rel}`);
+		if (paths.length > pathsShown) wrap("annotation", `  and ${paths.length - pathsShown} more`);
 	};
 	group("Restore", plan.restore);
 	group("Remove", plan.remove);
@@ -269,7 +292,7 @@ function formatRewindConfirmRows(rawRecord: WorkspaceSnapshotRecord, rawPlan: Re
 	if (plan.refs.length > 0) {
 		rows.push(sectionRule(theme, contentWidth, "Pinned refs", { meta: String(plan.refs.length) }));
 		for (const ref of plan.refs) {
-			wrap("menuDescription", `  ${pinLabel(ref.pin)} · ${REF_STATE_LABEL[ref.state]}`);
+			wrap("menuDescription", `  ${pinLabel(ref.pin)} ${GLYPH.sep} ${REF_STATE_LABEL[ref.state]}`);
 			if (ref.recover !== null)
 				rows.push(...commandBlock(theme, ref.recover, contentWidth - 2).map((line) => `  ${line}`));
 		}
