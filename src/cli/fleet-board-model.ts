@@ -680,19 +680,6 @@ export function ledgerRuns(source: BoardSource): ReadonlyArray<RunEnvelope> {
 	return source.ledger.runs;
 }
 
-/**
- * A later attempt of the same work replaces an earlier one on the board: the
- * failed attempt is history the replacement's card already counts.
- */
-function supersededIds(runs: ReadonlyArray<RunEnvelope>): Set<string> {
-	const superseded = new Set<string>();
-	for (const run of runs) {
-		const lineage = run.lineage;
-		if (lineage !== undefined && lineage.attempt > 0 && lineage.parentRunId !== null) superseded.add(lineage.parentRunId);
-	}
-	return superseded;
-}
-
 /** A finished record is re-read at most this often until its seal is checked, and not past the wait after it ended. */
 const UNSEALED_REREAD_MS = 1_000;
 const UNSEALED_WAIT_MS = 60_000;
@@ -830,11 +817,12 @@ export function loadBoard(
 	nowMs: number,
 ): BoardModel {
 	const runs = ledgerRuns(source);
-	const superseded = supersededIds(runs);
 	const sessionId = request?.sessionId ?? null;
 	const sinceMs = request?.sinceMs ?? null;
+	// Every attempt of a failover is its own card, as on the Fleet Runs board: an earlier failed attempt is a run with
+	// its own route and reason, and the counts of the two surfaces agree.
 	const mine = runs.filter((run) => {
-		if (superseded.has(run.id) || !scope.seesRun(run)) return false;
+		if (!scope.seesRun(run)) return false;
 		if (sessionId !== null && run.sessionId === sessionId) return true;
 		const started = Date.parse(run.startedAt);
 		if (sinceMs !== null) return run.sessionId === null || sessionId === null ? started >= sinceMs : false;

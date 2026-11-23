@@ -67,7 +67,7 @@ import { fleetInspectionScope, resolveFleetRootId } from "./fleet-project-scope.
 const HELP = `clio-coder fleet view <runId|fleetRootId> [--follow] [--all]
 clio-coder fleet view <runId> --follow --pane [--all]
 clio-coder fleet view <runId> --json [--all]
-clio-coder fleet view --watch <selection-file> [--dock-taps <file>] [--all]
+clio-coder fleet view --watch <selection-file> [--dock-taps <file>] [--color-depth <depth>] [--all]
 
 Follow one dispatched run from its durable state: the run ledger entry, the
 run's display feed, and the run's sealed record once it settles.
@@ -86,6 +86,9 @@ provenance, and the label the route settled with.
                process the workers dock (Alt+W) runs.
   --dock-taps  where the dashboard reports q (hide the dock) and Alt+W to CLIO Coder;
                without it q quits
+  --color-depth  with --watch: truecolor, 256, 16 or none, the depth CLIO Coder paints at;
+               the workers dock passes it because a pane inherits the multiplexer's
+               environment (without it the dashboard reads NO_COLOR, TERM and COLORTERM)
   --all        allow inspection across every project (default: this project)
 
 Without --follow the current snapshot is printed and the command exits.
@@ -628,6 +631,8 @@ function renderFleetRunView(model: FleetRunViewModel, width: number = DEFAULT_WI
 
 /** The watch selection file under the state root; mirrors watchSelectionPath in src/interactive/watch-pane.ts. */
 const WATCH_SELECTION_FILE = "watch-selection";
+/** What `--color-depth` accepts: the depths `colorDepth()` detects. */
+const COLOR_DEPTHS: ReadonlyArray<ColorDepth> = ["truecolor", "256", "16", "none"];
 const PANE_DEFAULT_WIDTH = 40;
 /** Header, rule, rule and status around the event rows. */
 const PANE_CHROME_ROWS = 4;
@@ -1039,6 +1044,7 @@ interface ParsedViewArgs {
 	runId?: string;
 	watchPath?: string;
 	tapPath?: string;
+	colorDepth?: ColorDepth;
 	dirs?: {
 		config?: string;
 		data?: string;
@@ -1087,6 +1093,14 @@ function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
 			i += 1;
 			continue;
 		}
+		if (arg === "--color-depth") {
+			const value = args[i + 1];
+			const depth = COLOR_DEPTHS.find((entry) => entry === value);
+			if (depth === undefined) return `--color-depth takes one of ${COLOR_DEPTHS.join(", ")}`;
+			parsed.colorDepth = depth;
+			i += 1;
+			continue;
+		}
 		const dirRole =
 			arg === "--config-dir"
 				? "config"
@@ -1121,6 +1135,9 @@ function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
 	}
 	if (parsed.tapPath !== undefined && parsed.watchPath === undefined) {
 		return "--dock-taps belongs to --watch";
+	}
+	if (parsed.colorDepth !== undefined && parsed.watchPath === undefined) {
+		return "--color-depth belongs to --watch";
 	}
 	if (parsed.json && (parsed.follow || parsed.watchPath !== undefined)) {
 		return "--json prints one snapshot; drop --follow and --watch";
@@ -1191,7 +1208,12 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 			return 0;
 		}
 		const { runWorkersDashboard } = await import("./fleet-board.js");
-		return runWorkersDashboard({ selectionPath: parsed.watchPath, tapPath: parsed.tapPath ?? null, scope });
+		return runWorkersDashboard({
+			selectionPath: parsed.watchPath,
+			tapPath: parsed.tapPath ?? null,
+			scope,
+			...(parsed.colorDepth !== undefined ? { colorDepth: parsed.colorDepth } : {}),
+		});
 	}
 	if (parsed.runId === undefined) {
 		process.stderr.write(HELP);
