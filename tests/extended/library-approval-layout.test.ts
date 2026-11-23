@@ -1,5 +1,6 @@
 import { ok } from "node:assert/strict";
 import { test } from "node:test";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { FleetRunPreview } from "../../src/domains/dispatch/fleet-run-preview.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { formatFleetRunApprovalBody } from "../../src/interactive/overlays/fleet-run-approval.js";
@@ -28,8 +29,11 @@ for (const columns of [80, 120, 160])
 			budget: { playbookUsd: null, ceilingUsd: 2, currentUsd: 0 },
 		} as unknown as FleetRunPreview;
 		const seen: string[] = [];
+		// The plan review shows a step's exact argv at detailed; the other tiers fit it to one row.
+		setPresentationTier("detailed");
 		for (let scroll = 0; scroll < 250; scroll += 10)
 			seen.push(...formatFleetRunApprovalBody({ ok: true, preview }, columns - 12, scroll).map(stripTerminalSequences));
+		setPresentationTier("standard");
 		for (const row of seen) ok(visibleWidth(row) <= columns - 12);
 		ok(seen.join("").includes("DESTINATION_SUFFIX"));
 		ok(seen.join("").includes("ARGUMENT_SUFFIX"));
