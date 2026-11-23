@@ -2,7 +2,7 @@ import type { Component, ScrollViewScrollbar, TUI, TuiMode } from "../engine/tui
 import { ScrollView, TuiAltScreen, truncateToWidth, VStack, visibleWidth } from "../engine/tui.js";
 import type { ChatPanelRegions } from "./chat-panel.js";
 import { keptRows } from "./kept-rows.js";
-import { fitRails, railsFolded, railsRoom } from "./rails-budget.js";
+import { fitRails, railsFolded, railsRoom, type VariantRail } from "./rails-budget.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
 import type { TranscriptViewport } from "./transcript-runs.js";
@@ -32,28 +32,43 @@ export interface LayoutOptions {
 	getTerminalRows?: () => number;
 }
 
-/** The rails between the transcript and the composer, in screen order; the operator's own queued words keep rows first. */
+/**
+ * The rails between the transcript and the composer, in screen order; the operator's own queued words keep rows first.
+ * The fleet dock sizes itself by the terminal's rows and offers whole variants, so it never folds.
+ */
 function railEntries(parts: LayoutParts): Array<{ component: Component; priority: number; foldable: boolean }> {
 	return [
 		...(parts.workspace ? [{ component: parts.workspace, priority: 1, foldable: false }] : []),
 		...(parts.pending ? [{ component: parts.pending, priority: 0, foldable: false }] : []),
-		...(parts.fleet ? [{ component: parts.fleet, priority: 2, foldable: true }] : []),
+		...(parts.fleet ? [{ component: parts.fleet, priority: 2, foldable: false }] : []),
 		...(parts.contextProgress ? [{ component: parts.contextProgress, priority: 3, foldable: true }] : []),
 	];
+}
+
+/** One rail's rows this frame: its largest variant as its lines, and every variant when it offers them. */
+interface RenderedRail {
+	lines: readonly string[];
+	variants?: ReadonlyArray<readonly string[]>;
+}
+
+function renderRail(component: Component, width: number): RenderedRail {
+	const variants = (component as Partial<VariantRail>).renderVariants?.(width);
+	return variants === undefined ? { lines: component.render(width) } : { lines: variants[0] ?? [], variants };
 }
 
 /** Each rail's rows this frame, cut to the budget a composer and footer of these heights leave. */
 function budgetRails(
 	rails: ReadonlyArray<{ priority: number; foldable: boolean }>,
-	rendered: ReadonlyArray<readonly string[]>,
+	rendered: ReadonlyArray<RenderedRail>,
 	width: number,
 	terminalRows: number | undefined,
 	fixedRows: () => number,
 ): ReadonlyArray<readonly string[]> {
-	if (terminalRows === undefined || rendered.every((lines) => lines.length === 0)) return rendered;
+	if (terminalRows === undefined || rendered.every((rail) => rail.lines.length === 0))
+		return rendered.map((rail) => rail.lines);
 	const fixed = fixedRows();
 	return fitRails(
-		rails.map((rail, index) => ({ ...rail, lines: rendered[index] ?? [] })),
+		rails.map((rail, index) => ({ ...rail, ...(rendered[index] ?? { lines: [] }) })),
 		railsRoom(terminalRows, fixed, 0),
 		railsFolded(terminalRows),
 		width,
@@ -77,7 +92,7 @@ class RailsAllocator {
 
 	take(index: number, width: number): string[] {
 		if (this.granted[index] == null || this.grantedWidth !== width) {
-			const rendered = this.rails.map((rail) => rail.component.render(width));
+			const rendered = this.rails.map((rail) => renderRail(rail.component, width));
 			this.granted = [...budgetRails(this.rails, rendered, width, this.getTerminalRows(), () => this.fixedRows(width))];
 			this.grantedWidth = width;
 		}
@@ -464,7 +479,7 @@ class RegularRoot implements Component {
 			}
 		}
 		if (!this.dockReleased) {
-			const rendered = this.rails.map((rail) => rail.component.render(width));
+			const rendered = this.rails.map((rail) => renderRail(rail.component, width));
 			const editor = this.parts.editor.render(width);
 			const footer = this.parts.footer.render(width);
 			const rows = this.getTerminalRows?.();

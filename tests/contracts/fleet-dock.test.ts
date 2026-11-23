@@ -1,10 +1,12 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { Component, OverlayOptions, Terminal } from "../../src/engine/tui.js";
 import { stripTerminalSequences, TuiAltScreen, visibleWidth } from "../../src/engine/tui.js";
 import { createFleetDock } from "../../src/interactive/fleet-dock.js";
 import { createInteractiveTickers } from "../../src/interactive/interactive-tickers.js";
 import { buildLayout } from "../../src/interactive/layout.js";
+import { fitRails } from "../../src/interactive/rails-budget.js";
 import { footerState } from "../harness/footer-fixture.js";
 
 class CapturedFullscreen extends TuiAltScreen {
@@ -49,44 +51,49 @@ test("live Fleet runs reserve normal-flow rows and leave transcript words intact
 	ok(fixture);
 	let live = true;
 	const getRows = () => (live ? [{ ...fixture, agentAudience: "base" as const }] : []);
-	const fleet = createFleetDock({ getRows, getOutputStyle: () => "detailed" });
+	const fleet = createFleetDock({ getRows });
 	const text = (line: string): Component => ({ render: () => [line], invalidate() {} });
-	for (const mode of ["regular", "fullscreen"] as const) {
-		for (const width of [40, 60, 80, 120, 144, 200]) {
-			const transcript = "A transcript sentence whose words must stay intact".slice(0, width - 1).trimEnd();
-			const root = buildLayout(
-				{
-					banner: text("header"),
-					chat: text(transcript),
-					fleet,
-					editor: text("composer"),
-					footer: text("footer"),
-				},
-				{ mode },
-			);
-			const rows = (mode === "fullscreen" ? fullscreenFrame(root, width) : root.render(width)).map((line) =>
-				stripTerminalSequences(line).trimEnd(),
-			);
-			ok(rows.includes(transcript), `${mode} preserves the transcript sentence: ${JSON.stringify(rows)}`);
-			const start = rows.findIndex((row) => row.includes("Fleet Runs"));
-			ok(start > rows.indexOf(transcript));
-			ok(start < rows.indexOf("composer"));
-			for (const row of rows) ok(visibleWidth(row) <= width, row);
-			live = false;
-			deepStrictEqual(fleet.render(width), []);
-			strictEqual(
-				(mode === "fullscreen" ? fullscreenFrame(root, width) : root.render(width))
-					.map((line) => stripTerminalSequences(line).trimEnd())
-					.includes(transcript),
-				true,
-			);
-			live = true;
+	setPresentationTier("detailed");
+	try {
+		for (const mode of ["regular", "fullscreen"] as const) {
+			for (const width of [40, 60, 80, 120, 144, 200]) {
+				const transcript = "A transcript sentence whose words must stay intact".slice(0, width - 1).trimEnd();
+				const root = buildLayout(
+					{
+						banner: text("header"),
+						chat: text(transcript),
+						fleet,
+						editor: text("composer"),
+						footer: text("footer"),
+					},
+					{ mode },
+				);
+				const rows = (mode === "fullscreen" ? fullscreenFrame(root, width) : root.render(width)).map((line) =>
+					stripTerminalSequences(line).trimEnd(),
+				);
+				ok(rows.includes(transcript), `${mode} preserves the transcript sentence: ${JSON.stringify(rows)}`);
+				const start = rows.findIndex((row) => row.startsWith("Fleet "));
+				ok(start > rows.indexOf(transcript));
+				ok(start < rows.indexOf("composer"));
+				for (const row of rows) ok(visibleWidth(row) <= width, row);
+				live = false;
+				deepStrictEqual(fleet.render(width), []);
+				strictEqual(
+					(mode === "fullscreen" ? fullscreenFrame(root, width) : root.render(width))
+						.map((line) => stripTerminalSequences(line).trimEnd())
+						.includes(transcript),
+					true,
+				);
+				live = true;
+			}
 		}
+		match(fleet.render(80).map(stripTerminalSequences).join("\n"), /^Fleet /);
+	} finally {
+		setPresentationTier("standard");
 	}
-	match(fleet.render(80).map(stripTerminalSequences).join("\n"), /Fleet Runs/);
 });
 
-test("the rails keep the transcript's budget and fold the fleet dock and context rail under 30 rows (TUI-13)", () => {
+test("the rails keep the transcript's budget and fold the context rail under 30 rows (TUI-13)", () => {
 	const block = (name: string, count: number): Component => ({
 		render: () => Array.from({ length: count }, (_, index) => `${name} ${index + 1}`),
 		invalidate() {},
@@ -119,6 +126,10 @@ test("the rails keep the transcript's budget and fold the fleet dock and context
 			else ok(frame.includes("queued 15"), label);
 		}
 	}
+	// A rail of whole variants is granted the first that fits, never a cut one (6.4).
+	const variants = [["dock 1", "dock 2", "dock 3"], ["dock summary"], []];
+	deepStrictEqual(fitRails([{ lines: variants[0] ?? [], variants, priority: 2 }], 2, true, 80), [["dock summary"]]);
+	deepStrictEqual(fitRails([{ lines: variants[0] ?? [], variants, priority: 2 }], 0, true, 80), [[]]);
 });
 
 test("a live run is never drawn by a transcript-covering ticker overlay (BT-007)", () => {
