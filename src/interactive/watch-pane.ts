@@ -27,6 +27,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { OutputStyle } from "../core/defaults.js";
+import { onPresentationTierChange, presentationTier } from "../core/presentation-tier.js";
 import { type ClioDirs, clioCacheDir, clioConfigDir, clioDataDir, clioStateDir } from "../core/xdg.js";
 import type { MuxContract, MuxPaneOpenFailure, MuxPaneRecord, MuxPaneRef } from "../domains/mux/index.js";
 import type { PanesWatchController, PanesWatchResult, PanesWorkersResult } from "../domains/mux/operations.js";
@@ -89,6 +90,16 @@ function currentSeq(path: string): number {
 	}
 }
 
+/** The session the selection file names; null when there is no file or it names none. */
+function fileSession(path: string): string | null {
+	try {
+		const session = /^session=(.*)$/mu.exec(readFileSync(path, "utf8"))?.[1]?.trim() ?? "";
+		return session.length > 0 ? session : null;
+	} catch {
+		return null;
+	}
+}
+
 /**
  * What a hidden workers dock leaves behind, as the music pane names what keeps playing. "Still running" meant the
  * dashboard, and read as a worker still running after the only one had finished (bt-48-14), so the notice names the
@@ -123,6 +134,8 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 	let adoptionInFlight: Promise<boolean> | null = null;
 	let seq = currentSeq(selectionPath);
 	let requested = "";
+	/** The session this controller last wrote into the file, so `/new` and `/resume` keep owning it. */
+	let wroteSession: string | null = null;
 	const keyHandlers = new Set<(key: "hide" | "key") => void>();
 
 	let taps: TapFileWatcher | null = null;
@@ -157,12 +170,22 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 		try {
 			write(
 				selectionPath,
-				`${requested}\nseq=${seq}\nsession=${session}\nsince=${since}\noutputDetail=${deps.getOutputStyle?.() ?? "standard"}\n`,
+				`${requested}\nseq=${seq}\nsession=${session}\nsince=${since}\noutputDetail=${deps.getOutputStyle?.() ?? presentationTier()}\n`,
 			);
+			wroteSession = session;
 			return true;
 		} catch {
 			return false;
 		}
+	};
+
+	/**
+	 * A refresh carries no request, so only the session the file names writes it: another session over the same state
+	 * root leaves the line, and the pane, alone.
+	 */
+	const ownsSelection = (): boolean => {
+		const named = fileSession(selectionPath);
+		return named === null || named === (deps.getSessionId?.() ?? "") || named === wroteSession;
 	};
 
 	const adoptExistingPane = (): Promise<boolean> => {
@@ -244,6 +267,13 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 	// scan remains best effort and never opens a replacement pane on its own.
 	void adoptExistingPane();
 
+	/** The one writer of the `outputDetail=` line outside a request; it never bumps `seq`, so the pane keeps its place. */
+	const refreshPresentation = (): boolean => record() === null || !ownsSelection() || writeRequest(requested, false);
+	// Alt+O, `/settings` and every other tier commit reach the pane through the change signal.
+	const stopTierWatch = onPresentationTierChange(() => {
+		if (!disposed) refreshPresentation();
+	});
+
 	return {
 		ensureOpen(): Promise<boolean> {
 			// Boot composition: the dock exists and shows the board. Adoption first,
@@ -289,9 +319,7 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 			if (runId === requested) return true;
 			return writeRequest(runId, true);
 		},
-		refreshPresentation(): boolean {
-			return record() === null || writeRequest(requested, false);
-		},
+		refreshPresentation,
 
 		toggle(): Promise<PanesWorkersResult> {
 			return serial(async (): Promise<PanesWorkersResult> => {
@@ -348,6 +376,7 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 		dispose(): void {
 			// The pane parks; only the tap watch goes.
 			disposed = true;
+			stopTierWatch();
 			taps?.stop();
 			keyHandlers.clear();
 		},

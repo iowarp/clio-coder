@@ -1,46 +1,53 @@
 /**
- * The workers dashboard: the process the workers dock (Alt+W) runs.
+ * The workers dock pane: the process the workers dock (Alt+W) runs, `clio-coder fleet view --watch`.
  *
- * It opens on a board of worker cards, one per worker of this Clio session,
- * running ones first. Each card says who the worker is, what it was asked,
- * its state and clock, its route, its tool budget, what it spent, and what it
- * is doing now, or for a finished one, how the sealed record judged it.
- * Enter takes the whole dock over for the selected worker: a pinned header and
- * the worker's live stream underneath (calls with their targets and results,
- * prose as it is written, approvals, refusals, errors), then the record
- * summary once it seals. Esc returns to the board at the same card.
+ * It opens on one list of this session's runs, worst first (`runSortRank`). Each card is the shared run row
+ * (src/core/run-row.ts) and, where the tier grants them, a second row with the reason, the live phase or the task,
+ * and a third with telemetry. Every card has the tier's `paneCardRows` physical rows, selected or not, so the list
+ * never changes shape under the cursor. Enter opens run detail: a pinned identity row, then one scroll region with
+ * the fact block and the answer, or the live stream while the run works. `[t]` unfolds the whole task without moving
+ * the answer. Esc returns to the list at the same card.
  *
- * Everything comes from durable state (src/cli/fleet-board-model.ts), so the
- * dashboard is a read-only viewer that also works over SSH and never runs a
- * second Clio on top of a worker. Clio talks to it through two small files:
- * the watch selection file asks for a takeover (`/panes show`, the panes tool,
- * Enter in the Fleet Runs board), and the dock tap file carries keys pressed
- * here back to Clio: `q` hides the dock and hands the keyboard back, and
- * Alt+W is the same tap Clio's own workers key makes.
+ * Everything comes from durable state (src/cli/fleet-board-model.ts), so the pane is a read-only viewer that also
+ * works over SSH and never runs a second Clio on top of a worker. Clio talks to it through two small files: the watch
+ * selection file asks for a detail (`/panes show`, the panes tool, Enter in the Fleet Runs board) and carries the
+ * presentation tier on its `outputDetail=` line, and the dock tap file carries keys pressed here back to Clio: `q`
+ * hides the dock and hands the keyboard back, and Alt+W is the same tap Clio's own workers key makes.
  *
- * Rows are width-aware and byte-stable: a card's three rows change only when
- * its facts do, so the differential renderer repaints the moving clock and
- * the live line rather than the screen. Narrow docks shed text in a fixed
- * order: the task first, then the model, then cost and route; the state glyph
- * and the clock always stay.
+ * The tier is made current here with `setPresentationTier` and every budget is read from `tierPolicy()`. Glyphs come
+ * from the shared table and color from `sgrFor`, so ASCII mode, NO_COLOR and 16-color terminals read as the TUI does;
+ * only task, answer and call text is printed as the worker wrote it.
  */
 
 import { appendFileSync } from "node:fs";
-import type { OutputStyle } from "../core/defaults.js";
+import { formatElapsed } from "../core/format-time.js";
+import { GLYPH } from "../core/glyphs.js";
+import { setPresentationTier, type TierPolicy, tierPolicy } from "../core/presentation-tier.js";
+import {
+	compareRuns,
+	type RunCell,
+	type RunFacts,
+	type RunOutcome,
+	type RunRowLayout,
+	type RunRowOptions,
+	type RunState,
+	runCountBuckets,
+	runCountRow,
+	runIdentityWidth,
+	runRow,
+} from "../core/run-row.js";
 import { renderCalls } from "../core/telemetry/render.js";
 import { terminalBackground } from "../core/terminal-background.js";
-import { colorDisabled } from "../core/terminal-preferences.js";
-import { resolveRole, type SemanticRole } from "../core/theme-roles.js";
-import { paletteProjection } from "../core/theme-token-hex.js";
+import { type ColorDepth, colorDepth } from "../core/terminal-preferences.js";
+import { isChromeRole, resolveRole, roleIntensity, type SemanticRole } from "../core/theme-roles.js";
+import { sgrFor } from "../core/theme-sgr.js";
 import { plainOutcomeLabel } from "../domains/dispatch/failure-headline.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui-primitives.js";
 import {
-	ANSWER_PREVIEW_LINES,
 	type BoardModel,
 	type BoardSource,
-	type CardState,
 	createBoardSource,
 	isLive,
 	loadBoard,
@@ -51,60 +58,81 @@ import {
 	type TakeoverModel,
 	type WatchRequest,
 	type WorkerCard,
-	type WorkerPhase,
 } from "./fleet-board-model.js";
 import type { fleetInspectionScope } from "./fleet-project-scope.js";
 
 /** Poll cadence, matching the monitor tool and the feed's coalescing window. */
 const POLL_MS = 250;
-const TIMER_WIDTH = 7;
-/** The most rows a selected card gives a task the header could not hold. */
-const TASK_ROWS = 3;
-const NAME_MAX = 16;
-const SEPARATOR = " · ";
-const RULE = "─";
+/** The cursor column: `❯ ` on the selected card, two blank cells on the others. */
+const CURSOR_CELLS = 2;
+/** Under this many pane columns a card's elapsed cell drops; state, identity and the state word stay. */
+const ELAPSED_FLOOR = 32;
+/** The widest identity column: origin, helper mark and 16 cells of agent name. */
+const IDENTITY_MAX = 20;
+/** Where a card's second and third rows hang. */
+const SUB_INDENT = "    ";
+/** Under this many cells the detail stacks each label above its value (width class W1). */
+const SIDE_BY_SIDE_CELLS = 44;
 
 // ---------------------------------------------------------------------------
 // Paint
 // ---------------------------------------------------------------------------
 
-function detectTruecolor(env: NodeJS.ProcessEnv = process.env): boolean {
-	const value = `${env.COLORTERM ?? ""} ${env.TERM ?? ""}`.toLowerCase();
-	return value.includes("truecolor") || value.includes("24bit");
-}
-
 /**
- * Semantic roles painted from the same palette the TUI uses, through core
- * rather than the interactive theme, which this process must not load. Color
- * off (NO_COLOR and friends) paints nothing, and every glyph still says what
- * its color would.
+ * Semantic roles painted from the same palette the TUI uses, through core rather than the interactive theme, which
+ * this process must not load. Every span closes exactly what it opened.
  */
 export interface BoardPaint {
 	fg(role: SemanticRole, text: string, bold?: boolean): string;
 	dim(text: string): string;
 }
 
-function createBoardPaint(enabled: boolean = !colorDisabled()): BoardPaint {
+/** Things the operator must act on or read as a state keep their intensity without color. */
+const NEVER_DIM = new Set<SemanticRole>([
+	"keyboardHint",
+	"decisionConsequence",
+	"commandHint",
+	"success",
+	"warning",
+	"error",
+	"validationError",
+]);
+
+function dimsWithoutColor(role: SemanticRole): boolean {
+	if (NEVER_DIM.has(role)) return false;
+	if (isChromeRole(role)) return true;
+	const intensity = roleIntensity(role);
+	return intensity === "subdued" || intensity === "supporting";
+}
+
+function createBoardPaint(depth: ColorDepth = colorDepth()): BoardPaint {
 	const background = terminalBackground();
-	const truecolor = detectTruecolor();
-	const codes = new Map<SemanticRole, string>();
-	const code = (role: SemanticRole): string => {
-		let sequence = codes.get(role);
-		if (sequence === undefined) {
-			const [hex, xterm] = paletteProjection(resolveRole(role).color, background);
-			const rgb = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
-			sequence = truecolor ? `\u001b[38;2;${rgb[0]};${rgb[1]};${rgb[2]}m` : `\u001b[38;5;${xterm}m`;
-			codes.set(role, sequence);
+	const spans = new Map<string, { open: string; close: string }>();
+	const span = (role: SemanticRole, bold: boolean): { open: string; close: string } => {
+		const key = `${role}:${bold}`;
+		let found = spans.get(key);
+		if (found === undefined) {
+			const resolved = resolveRole(role);
+			const strong = bold || resolved.bold === true;
+			const dim = depth === "none" && !strong && dimsWithoutColor(role);
+			const color = sgrFor({ fg: resolved.color }, depth, background);
+			const intensityClose = (strong || dim) && !color.close.split(";").includes("22") ? "22" : "";
+			found = {
+				open: [strong ? "1" : "", dim ? "2" : "", color.open].filter((part) => part.length > 0).join(";"),
+				close: [color.close, intensityClose].filter((part) => part.length > 0).join(";"),
+			};
+			spans.set(key, found);
 		}
-		return sequence;
+		return found;
 	};
 	return {
 		fg(role, text, bold = false): string {
-			if (!enabled || text.length === 0) return text;
-			return `${code(role)}${bold ? "\u001b[1m" : ""}${text}${bold ? "\u001b[22m" : ""}\u001b[39m`;
+			if (text.length === 0) return text;
+			const { open, close } = span(role, bold);
+			return open.length === 0 ? text : `\u001b[${open}m${text}\u001b[${close}m`;
 		},
 		dim(text): string {
-			return enabled && text.length > 0 ? `\u001b[2m${text}\u001b[22m` : text;
+			return text.length > 0 ? `\u001b[2m${text}\u001b[22m` : text;
 		},
 	};
 }
@@ -114,36 +142,49 @@ function clean(text: string): string {
 	return sanitizeCallTargetText(redactSecretString(text));
 }
 
+/** Fit `text` to `width` cells, ending a cut with `…`. Text that carried no escape comes back without one. */
 function cut(text: string, width: number): string {
 	if (width <= 0) return "";
-	return truncateToWidth(text, width, "…", false);
+	const fitted = truncateToWidth(text, width, GLYPH.ellipsis, false);
+	return text.includes("\u001b") ? fitted : fitted.replaceAll("\u001b[0m", "");
 }
+
+/** The fact separator, padded. */
+function sep(paint: BoardPaint): string {
+	return paint.fg("separator", ` ${GLYPH.sep} `);
+}
+
+/** Run row cells as text: each cell's lead unpainted, then its glyph and text in its role. */
+function paintCells(paint: BoardPaint, cells: readonly RunCell[], bold?: (cell: RunCell) => boolean): string {
+	return cells
+		.map(
+			(cell) =>
+				`${cell.lead}${paint.fg(cell.role, `${cell.glyph === undefined ? "" : GLYPH[cell.glyph]}${cell.text}`, bold?.(cell) ?? false)}`,
+		)
+		.join("");
+}
+
+/** A bracketed key cap and its word: `[Enter] open`. */
+function keyUnit(paint: BoardPaint, key: string, word: string): string {
+	return `${paint.fg("keyboardHint", `[${key}]`)} ${paint.fg("annotation", word)}`;
+}
+
+/** The key row: as many key units as fit, from the left. */
+function keyRow(paint: BoardPaint, keys: ReadonlyArray<readonly [string, string]>, width: number): string {
+	const shown: string[] = [];
+	for (const [key, word] of keys) {
+		const next = [...shown, keyUnit(paint, key, word)];
+		if (1 + visibleWidth(next.join(sep(paint))) > width) break;
+		shown.push(keyUnit(paint, key, word));
+	}
+	return ` ${shown.join(sep(paint))}`;
+}
+
+const UP_DOWN = `${GLYPH.up}${GLYPH.down}`;
 
 // ---------------------------------------------------------------------------
-// Formatting
+// Run facts
 // ---------------------------------------------------------------------------
-
-function formatClock(ms: number): string {
-	const seconds = Math.max(0, Math.floor(ms / 1000));
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`;
-	const hours = Math.floor(minutes / 60);
-	if (hours < 1000) return `${hours}h${String(minutes % 60).padStart(2, "0")}m`;
-	return `${Math.floor(hours / 24)}d`;
-}
-
-/** `+m:ss` from the run's start, the stream's time column. */
-function formatOffset(ms: number): string {
-	const seconds = Math.max(0, Math.floor(ms / 1000));
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `+${minutes}:${String(seconds % 60).padStart(2, "0")}`;
-	return `+${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
-}
-
-function formatDuration(ms: number): string {
-	return ms < 1000 ? `${Math.round(ms)}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : formatClock(ms);
-}
 
 /** The descriptor vocabulary's progressive verbs in the past tense; the TUI's worker card uses the same table. */
 const FINISHED_VERBS: Readonly<Record<string, string>> = {
@@ -175,73 +216,450 @@ function callText(row: StreamRow): string {
 	return object.length > 0 ? `${clean(verb)} ${object}` : clean(verb);
 }
 
-// ---------------------------------------------------------------------------
-// Card rows
-// ---------------------------------------------------------------------------
-
-function stateGlyph(paint: BoardPaint, card: WorkerCard): string {
-	switch (card.state) {
-		case "running":
-			return paint.fg("activity", "●");
-		case "queued":
-			return paint.fg("toolMetadata", "◌");
-		case "stale":
-			return paint.fg("warning", "!");
-		case "succeeded":
-			return card.toolCalls === 0 ? paint.fg("toolMetadata", "◌") : paint.fg("success", "✓");
-		case "canceled":
-			return paint.fg("toolMetadata", "⊘");
+/** What a live run is doing now, in the phase words the run row leads with. */
+function phaseText(card: WorkerCard): string {
+	if (card.state === "stale") return "stale: no heartbeat";
+	if (card.state === "queued") return "waiting for a slot";
+	if (card.current !== null) return callText(card.current);
+	switch (card.phase) {
+		case "thinking":
+			return "thinking";
+		case "writing":
+			return "writing";
+		case "tool":
+			return "calling a tool";
+		case "waiting":
+			return "waiting on the model";
+		case "verification-queued":
+			return "waiting for a verification slot";
+		case "verifying":
+			return "running host checks";
+		case "settled":
+			return "sealing the run record";
 		default:
-			return paint.fg("error", "✗");
+			return "starting";
 	}
 }
 
-/** The card state in the words the rest of Clio shows; `canceled` stays the state's wire spelling. */
-function stateWord(state: CardState): string {
-	return state === "succeeded" ? "done" : state === "canceled" ? "cancelled" : state;
+function cardOutcome(card: WorkerCard): RunOutcome {
+	switch (card.state) {
+		case "queued":
+			return "queued";
+		case "running":
+		case "stale":
+			return "running";
+		case "succeeded":
+			return "succeeded";
+		case "canceled":
+			return "cancelled";
+		default:
+			return "failed";
+	}
+}
+
+/** Why a finished run counts against it: the failure, a broken seal, a failed contract or check. */
+function failureReason(card: WorkerCard): string | undefined {
+	const record = card.record;
+	if (record === null) return card.ledgerDetail === undefined ? undefined : clean(card.ledgerDetail);
+	if (record.outcome === "succeeded") {
+		if (record.integrity === "compromised") return clean(record.seal ?? "seal broken");
+		if (record.contract === "fail") return "contract failed";
+		if (record.validationState === "failed") return clean(record.validation ?? "validation failed");
+		return undefined;
+	}
+	const first = (record.failure?.split("\n", 1)[0] ?? "").trim();
+	return clean(first.length > 0 ? first : plainOutcomeLabel(record.outcomeCode ?? record.outcome));
+}
+
+/** The run's tokens as a count on a shared row, with the shared estimate or lower-bound mark. */
+function tokensText(card: WorkerCard): string | undefined {
+	const match = /^([~≈≥]?)(\d[\d.,]*[kMG]?)/u.exec(card.tokens ?? "");
+	if (match === null) return undefined;
+	const mark = match[1] === "≥" ? GLYPH.atLeast : match[1] === "" ? "" : GLYPH.estimate;
+	return `${mark}${match[2]} tok`;
+}
+
+function approvalWords(asking: StreamRow): string {
+	const what = clean([asking.tool, asking.text].filter((part) => part !== undefined && part.length > 0).join(" "));
+	return what.length > 0 ? `waiting for you ${GLYPH.sep} ${what}` : "waiting for you";
+}
+
+/** A card's facts for the run row model. */
+function runFacts(card: WorkerCard): RunFacts {
+	const outcome = cardOutcome(card);
+	const record = card.record;
+	const reason = outcome === "succeeded" || outcome === "failed" ? failureReason(card) : undefined;
+	const asking = card.asking;
+	const tokens = tokensText(card);
+	return {
+		agent: clean(card.agentId),
+		origin: card.origin,
+		...(card.helper ? { helper: true } : {}),
+		outcome,
+		...(record !== null
+			? { validation: record.contract === "fail" ? "failed" : record.validationState, integrity: record.integrity }
+			: {}),
+		...(isLive(card.state) ? { phase: phaseText(card) } : {}),
+		task: clean(card.task),
+		...(reason !== undefined ? { reason } : {}),
+		...(asking !== null && outcome === "running"
+			? { approval: { decider: "operator" as const, words: (room: number) => cut(approvalWords(asking), room) } }
+			: {}),
+		...(card.elapsedMs !== undefined ? { elapsed: formatElapsed(card.elapsedMs) } : {}),
+		startedAt: card.startedAtMs,
+		runId: card.runId,
+		telemetry: {
+			route: clean(card.target),
+			calls: card.toolCalls,
+			...(tokens !== undefined ? { tokens } : {}),
+		},
+	};
+}
+
+/** A stale run is live but has stopped reporting: a warning by glyph and word, wherever its row prints. */
+function withStale(card: WorkerCard, cells: RunCell[]): RunCell[] {
+	if (card.state !== "stale") return cells;
+	return cells.map((cell) => (cell.slot === "state" ? { ...cell, glyph: "warn", role: "warning" } : cell));
+}
+
+function stateWord(card: WorkerCard, state: RunState): string {
+	return card.state === "stale" ? "stale" : state.word;
+}
+
+/** The same run with its text cell reduced to the state word, for the first row of a taller card. */
+function wordOnly(facts: RunFacts, state: RunState, word: string): RunFacts {
+	const { phase: _phase, task: _task, reason: _reason, approval, ...rest } = facts;
+	return {
+		...rest,
+		// A warning row already leads with its trust word.
+		task: state.kind === "warning" ? "" : word,
+		...(approval !== undefined ? { approval: { ...approval, words: () => word } } : {}),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Cards
+// ---------------------------------------------------------------------------
+
+/** The identity column a list gives its agents, never more than half the row. */
+function identityColumn(facts: readonly RunFacts[], width: number): number {
+	return Math.min(IDENTITY_MAX, Math.floor((width - CURSOR_CELLS) / 2), runIdentityWidth(facts, visibleWidth));
+}
+
+/** A card's second row: the reason of a failure, the phase then the task of a live run, the task of a finished one. */
+function secondRow(paint: BoardPaint, facts: RunFacts, state: RunState, width: number): string {
+	const room = width - SUB_INDENT.length;
+	let text: string;
+	if (state.kind === "error") text = paint.fg("error", facts.reason ?? state.word);
+	else {
+		const parts: string[] = [];
+		if (facts.approval !== undefined && state.kind === "pending")
+			parts.push(paint.fg("attention", facts.approval.words(room)));
+		else if (facts.phase !== undefined) parts.push(paint.fg("activity", facts.phase));
+		if ((facts.task ?? "").length > 0) parts.push(paint.fg("body", facts.task ?? ""));
+		text = parts.join(sep(paint));
+	}
+	return `${SUB_INDENT}${cut(text, room)}`;
+}
+
+/** The words a card's first row keeps whole: the state word of a taller card, else the trust or wait words. */
+function keptWord(rows: number, state: RunState, word: string): string | null {
+	if (rows > 1) return word;
+	if (state.kind === "warning") return state.word;
+	return state.kind === "pending" ? "waiting for you" : null;
 }
 
 /**
- * The facts row, shed in a fixed order as the dock narrows: the model is cut,
- * then cost, route and tokens leave; the tool budget stays longest.
+ * The run row with `word` whole: the elapsed cell leaves first, then the identity column narrows, before a state word
+ * is cut (2.7). The row is returned as laid out when the word cannot fit at all.
  */
-function factsText(card: WorkerCard, width: number): string {
-	const target = clean(card.target);
-	const model = clean(card.model);
-	const tools = card.toolCallsDisplay === undefined ? "" : `tools ${card.toolCallsDisplay}`;
-	const tokens = card.tokens === undefined ? null : `${card.tokens} tok`;
-	const cost = card.cost ?? null;
-	const join = (parts: ReadonlyArray<string | null>): string => parts.filter((part) => part !== null).join(SEPARATOR);
-	const tail = [tools, tokens, cost];
-	const withoutRoute = join(tail);
-	const routeRoom = width - visibleWidth(withoutRoute) - SEPARATOR.length;
-	const full = model.length > 0 ? `${target}/${model}` : target;
-	if (routeRoom >= visibleWidth(full)) return join([full, ...tail]);
-	if (model.length > 0 && routeRoom >= visibleWidth(target) + 4) return join([cut(full, routeRoom), ...tail]);
-	if (routeRoom >= Math.min(visibleWidth(target), 8)) return join([cut(target, routeRoom), ...tail]);
-	const noCost = join([tools, tokens]);
-	if (visibleWidth(noCost) <= width) return noCost;
-	return cut(tools, width);
+function wholeWordRow(facts: RunFacts, options: RunRowOptions, word: string | null): RunRowLayout {
+	const fits = (layout: RunRowLayout): boolean =>
+		word === null ||
+		layout.cells.some(
+			(cell) => (cell.slot === "task" || cell.slot === "trust" || cell.slot === "approval") && cell.text.startsWith(word),
+		);
+	const first = runRow(facts, options);
+	if (fits(first)) return first;
+	const noElapsed = { ...options, elapsedFloor: Number.POSITIVE_INFINITY };
+	for (let identity = options.identityWidth; identity > 0; identity -= 1) {
+		const layout = runRow(facts, { ...noElapsed, identityWidth: identity });
+		if (fits(layout)) return layout;
+	}
+	return first;
 }
 
-function phaseWords(phase: WorkerPhase): [string, string] {
-	switch (phase) {
+/**
+ * One card: exactly the tier's `paneCardRows` rows. A one-row card is the whole run row, so a failure's reason starts
+ * on it; a taller card puts the state word on row one, the reason, phase or task on row two, telemetry on row three.
+ */
+export function renderCard(
+	paint: BoardPaint,
+	card: WorkerCard,
+	width: number,
+	options: { selected: boolean; identityWidth: number },
+): string[] {
+	const rows = Math.max(1, tierPolicy().paneCardRows);
+	const facts = runFacts(card);
+	const layoutOptions = {
+		width: Math.max(1, width - CURSOR_CELLS),
+		identityWidth: options.identityWidth,
+		measure: visibleWidth,
+		elapsedFloor: ELAPSED_FLOOR - CURSOR_CELLS,
+		rail: false,
+	};
+	const full = runRow(facts, layoutOptions);
+	const word = stateWord(card, full.state);
+	const headFacts = rows === 1 ? facts : wordOnly(facts, full.state, word);
+	const head = wholeWordRow(headFacts, layoutOptions, keptWord(rows, full.state, word));
+	const cells = withStale(
+		card,
+		head.cells.map((cell) => (rows > 1 && cell.slot === "task" ? { ...cell, role: full.state.role } : cell)),
+	);
+	const cursor = options.selected ? `${paint.fg("selectedOption", GLYPH.cursor, true)} ` : "  ";
+	const lines = [
+		`${cursor}${paintCells(paint, cells, (cell) => options.selected && cell.slot === "agent")}`,
+		secondRow(paint, facts, full.state, width),
+		full.telemetry === null ? "" : paintCells(paint, full.telemetry),
+	];
+	return lines.slice(0, rows).map((line) => cut(line, width));
+}
+
+// ---------------------------------------------------------------------------
+// Board
+// ---------------------------------------------------------------------------
+
+export interface BoardView {
+	selectedRunId: string | null;
+	/** First card on screen, kept across frames and tiers so the list does not jump. */
+	top: number;
+}
+
+/** The board's runs in one list, worst first, oldest first inside a state. */
+function orderedCards(board: BoardModel): WorkerCard[] {
+	return [...board.running, ...board.finished]
+		.map((card) => ({ card, facts: runFacts(card) }))
+		.sort((a, b) => compareRuns(a.facts, b.facts))
+		.map((entry) => entry.card);
+}
+
+/**
+ * The header: counts worst first, cut from the right. The `workers` title shows only when it costs no count and no
+ * word, so a narrow pane keeps a failure, a wait and a live run before its own name.
+ */
+function boardHeader(paint: BoardPaint, facts: readonly RunFacts[], width: number): string {
+	const title = paint.fg("heading", "workers", true);
+	if (facts.length === 0) return cut(` ${title}`, width);
+	const buckets = runCountBuckets(facts);
+	const plain = runCountRow(buckets, width - 1);
+	const titled = runCountRow(buckets, width - 1 - "workers ".length);
+	const same = titled.length === plain.length && titled.every((cell, index) => cell.text === plain[index]?.text);
+	return cut(same ? ` ${title} ${paintCells(paint, titled)}` : ` ${paintCells(paint, plain)}`, width);
+}
+
+const EMPTY_BOARD = [
+	"No runs in this session yet.",
+	"",
+	"Dispatch one from CLIO Coder:",
+	"  /run <agent> <task>    one worker on a task",
+	"  /fleet run <playbook>  a playbook",
+	"  or ask CLIO Coder to delegate the work.",
+	"",
+	"Runs appear here as workers start.",
+];
+
+/** The whole board screen, exactly `height` rows (fewer only when the terminal is tiny). */
+function renderBoard(
+	paint: BoardPaint,
+	cards: readonly WorkerCard[],
+	view: BoardView,
+	width: number,
+	height: number,
+): string[] {
+	const columns = Math.max(1, width);
+	const rule = paint.fg("divider", GLYPH.rule.repeat(columns));
+	const facts = cards.map(runFacts);
+	const header = [boardHeader(paint, facts, columns), rule];
+	const footer = [
+		rule,
+		keyRow(
+			paint,
+			[
+				[UP_DOWN, "select"],
+				["Enter", "open"],
+				["q", "hide"],
+			],
+			columns,
+		),
+	];
+	const bodyHeight = Math.max(1, height - header.length - footer.length);
+	if (cards.length === 0) {
+		const body = EMPTY_BOARD.map((line) =>
+			cut(` ${paint.fg(line.startsWith("  ") ? "commandHint" : "emptyState", line)}`, columns),
+		);
+		while (body.length < bodyHeight) body.push("");
+		return [...header, ...body.slice(0, bodyHeight), ...footer];
+	}
+	const cardRows = Math.max(1, tierPolicy().paneCardRows);
+	const scrolls = cards.length * cardRows > bodyHeight;
+	const pageCards = Math.max(1, Math.floor((bodyHeight - (scrolls ? 1 : 0)) / cardRows));
+	const selected = Math.max(
+		0,
+		cards.findIndex((card) => card.runId === view.selectedRunId),
+	);
+	let top = Math.min(view.top, Math.max(0, cards.length - pageCards));
+	if (selected < top) top = selected;
+	if (selected >= top + pageCards) top = selected - pageCards + 1;
+	top = Math.max(0, top);
+	view.top = top;
+	const identityWidth = identityColumn(facts, columns);
+	const body: string[] = [];
+	cards.slice(top, top + pageCards).forEach((card, offset) => {
+		body.push(...renderCard(paint, card, columns, { selected: top + offset === selected, identityWidth }));
+	});
+	if (scrolls) {
+		const last = Math.min(cards.length, top + pageCards);
+		body.push(cut(` ${paint.fg("scrollMarker", `${top + 1}-${last} of ${cards.length} runs`)}`, columns));
+	}
+	while (body.length < bodyHeight) body.push("");
+	return [...header, ...body.slice(0, bodyHeight), ...footer];
+}
+
+// ---------------------------------------------------------------------------
+// Run detail
+// ---------------------------------------------------------------------------
+
+export interface TakeoverView {
+	runId: string;
+	/** First body row on screen, or null to follow the newest row of a live run. */
+	scrollTop: number | null;
+	/** Move to the run that carries this one's work on once it finishes. */
+	followSuccessor: boolean;
+	/** `[t]`: the whole task, at any tier. */
+	taskExpanded: boolean;
+	/** Where the answer or stream began on the last frame, so a change above it does not move it; -1 before one. */
+	answerStart: number;
+	/** Written by each render: body rows, the rows the window shows them in, and whether the run is live. */
+	streamLength: number;
+	bodyHeight: number;
+	live: boolean;
+}
+
+function newTakeoverView(runId: string, live: boolean, followSuccessor: boolean): TakeoverView {
+	return {
+		runId,
+		scrollTop: live ? null : 0,
+		followSuccessor,
+		taskExpanded: false,
+		answerStart: -1,
+		streamLength: 0,
+		bodyHeight: 1,
+		live,
+	};
+}
+
+/** Rows of the task the detail shows before `[t]`: none at one-row cards, two at two, the whole task at three. */
+function detailTaskRows(policy: TierPolicy): number {
+	return policy.paneCardRows >= 3 ? Number.POSITIVE_INFINITY : (policy.paneCardRows - 1) * 2;
+}
+
+/** `+m:ss` from the run's start, the stream's time column. */
+function formatOffset(ms: number): string {
+	const seconds = Math.max(0, Math.floor(ms / 1000));
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return `+${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+	return `+${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function wrapPrefixed(prefix: string, text: string, width: number, indent: number): string[] {
+	const room = Math.max(1, width - indent);
+	const lines: string[] = [];
+	for (const paragraph of text.split("\n")) {
+		const wrapped = paragraph.trim().length === 0 ? [""] : wrapTextWithAnsi(paragraph, room);
+		for (const line of wrapped) lines.push(line);
+	}
+	while (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+	return lines.map((line, index) => `${index === 0 ? prefix : " ".repeat(indent)}${line}`);
+}
+
+function outcomeMark(paint: BoardPaint, row: StreamRow): string {
+	const took = row.durationMs === undefined ? "" : ` ${formatElapsed(row.durationMs)}`;
+	if (row.pending) return paint.fg("activity", ` ${GLYPH.ellipsis}`);
+	if (row.outcome === "error") return paint.fg("error", ` ${GLYPH.error} failed${took}`);
+	if (row.outcome === "blocked") return paint.fg("warning", ` ${GLYPH.cancelled} blocked${took}`);
+	if (row.outcome === "ok") return `${paint.fg("success", ` ${GLYPH.ok}`)}${paint.fg("metadata", took)}`;
+	return paint.fg("metadata", took);
+}
+
+/** One stream row as screen lines, its time offset in the left column. */
+function streamLines(paint: BoardPaint, row: StreamRow, startedAtMs: number, width: number): string[] {
+	const at = Date.parse(row.at);
+	const offset = paint.fg("metadata", formatOffset(Number.isFinite(at) ? at - startedAtMs : 0).padStart(6));
+	const prefixWidth = 9;
+	const room = Math.max(1, width - prefixWidth);
+	const lead = (glyph: string): string => `${offset} ${glyph} `;
+	switch (row.kind) {
+		case "tool": {
+			const mark = outcomeMark(paint, row);
+			const call = cut(callText(row), Math.max(1, room - visibleWidth(mark)));
+			const lines = [
+				`${lead(paint.fg("toolGlyph", GLYPH.phaseTool))}${paint.fg(row.pending ? "activity" : "toolTarget", call)}${mark}`,
+			];
+			if (row.reason !== undefined && row.outcome !== "ok") {
+				// Two rows say why; the whole reason is in the record and `fleet view`.
+				const why = wrapPrefixed(" ".repeat(prefixWidth), clean(row.reason), width, prefixWidth);
+				if (why.length > 2) why[1] = cut(`${why[1]}${GLYPH.ellipsis}`, width);
+				lines.push(...why.slice(0, 2).map((line) => paint.fg("warning", line)));
+			}
+			return lines;
+		}
+		case "text": {
+			const prose = row.text
+				.split("\n")
+				.map((line) => clean(line))
+				.join("\n");
+			return wrapPrefixed(lead(paint.fg("assistantProse", GLYPH.agent)), prose, width, prefixWidth).map((line, index) =>
+				index === 0 ? line : paint.fg("assistantProse", line),
+			);
+		}
 		case "thinking":
-			return ["◐", "thinking"];
-		case "writing":
-			return ["◑", "writing"];
-		case "tool":
-			return ["⚙", "calling a tool"];
-		case "waiting":
-			return ["◔", "waiting for the model"];
-		case "verification-queued":
-			return ["◌", "waiting for a verification slot"];
-		case "verifying":
-			return ["⚙", "running host checks"];
-		case "settled":
-			return ["◔", "sealing the run record"];
+			return [`${lead(paint.fg("metadata", GLYPH.phaseThinking))}${paint.dim("thinking")}`];
+		case "approval": {
+			const what = [row.tool, row.text].filter((part) => part !== undefined && part.length > 0).join(" ");
+			return wrapPrefixed(
+				lead(paint.fg("attention", GLYPH.phaseBlocked)),
+				paint.fg("attention", `approval asked ${GLYPH.sep} ${clean(what)}`),
+				width,
+				prefixWidth,
+			);
+		}
+		case "decision": {
+			const approved = row.outcome === "ok";
+			const words = `${approved ? "approved" : clean(row.text || "denied")} ${clean(row.tool ?? "")}`.trim();
+			const reason = row.reason === undefined ? "" : `: ${clean(row.reason)}`;
+			return wrapPrefixed(
+				lead(paint.fg(approved ? "success" : "warning", approved ? GLYPH.ok : GLYPH.cancelled)),
+				paint.fg(approved ? "success" : "warning", `${words}${reason}`),
+				width,
+				prefixWidth,
+			);
+		}
+		case "error": {
+			const reason = row.reason === undefined ? "" : `: ${clean(row.reason)}`;
+			return wrapPrefixed(
+				lead(paint.fg("error", GLYPH.error)),
+				paint.fg("error", `${clean(row.text)}${reason}`),
+				width,
+				prefixWidth,
+			);
+		}
 		default:
-			return ["◌", "starting"];
+			return wrapPrefixed(
+				lead(paint.fg("metadata", GLYPH.dot)),
+				paint.fg("metadata", clean(row.text)),
+				width,
+				prefixWidth,
+			);
 	}
 }
 
@@ -261,23 +679,24 @@ export function verdictText(paint: BoardPaint, card: WorkerCard, width: number):
 	const record = card.record;
 	if (record === null) {
 		const detail = card.ledgerDetail === undefined ? "run record unavailable" : clean(card.ledgerDetail);
-		return cut(
-			`${stateGlyph(paint, card)} ${paint.fg(card.state === "failed" ? "error" : "toolMetadata", `${stateWord(card.state)} · ${detail}`)}`,
-			width,
-		);
+		const failed = card.state === "failed";
+		return cut(paint.fg(failed ? "error" : "metadata", `${failed ? GLYPH.error : GLYPH.ok} ${detail}`), width);
 	}
 	// Shown in this order; `rank` says which leaves first when the row is too narrow, the highest first.
 	const parts: Array<{ text: string; rank: number }> = [];
 	if (record.outcome === "succeeded") {
 		parts.push({
-			text: card.toolCalls === 0 ? paint.fg("toolMetadata", "◌ ran no tools") : paint.fg("success", "✓ succeeded"),
+			text:
+				card.toolCalls === 0
+					? paint.fg("metadata", `${GLYPH.queued} ran no tools`)
+					: paint.fg("success", `${GLYPH.ok} succeeded`),
 			rank: 0,
 		});
 	} else if (record.outcome === "canceled") {
-		parts.push({ text: paint.fg("toolMetadata", "⊘ cancelled"), rank: 0 });
+		parts.push({ text: paint.fg("metadata", `${GLYPH.cancelled} cancelled`), rank: 0 });
 	} else {
 		parts.push({
-			text: paint.fg("error", `✗ ${clean(plainOutcomeLabel(record.outcomeCode ?? record.outcome))}`),
+			text: paint.fg("error", `${GLYPH.error} ${clean(plainOutcomeLabel(record.outcomeCode ?? record.outcome))}`),
 			rank: 0,
 		});
 	}
@@ -289,18 +708,15 @@ export function verdictText(paint: BoardPaint, card: WorkerCard, width: number):
 	} else if (record.verdict !== undefined) {
 		const sound = ["reviewed", "grounded", "unverified", "unknown"].includes(record.verdict);
 		parts.push({
-			text: paint.fg(sound ? "toolMetadata" : "warning", sound ? `trust ${record.verdict}` : clean(record.verdict)),
+			text: paint.fg(sound ? "metadata" : "warning", sound ? `trust ${record.verdict}` : clean(record.verdict)),
 			rank: sound ? 4 : 2,
 		});
 	}
 	if (record.contract !== undefined) {
 		const failed = record.contract === "fail";
-		parts.push({
-			text: paint.fg(failed ? "error" : "toolMetadata", contractWords(record.contract)),
-			rank: failed ? 1 : 5,
-		});
+		parts.push({ text: paint.fg(failed ? "error" : "metadata", contractWords(record.contract)), rank: failed ? 1 : 5 });
 	}
-	const separator = paint.fg("toolMetadata", SEPARATOR);
+	const separator = sep(paint);
 	const shown = [...parts];
 	while (shown.length > 1 && visibleWidth(shown.map((part) => part.text).join(separator)) > width) {
 		let drop = shown.length - 1;
@@ -312,404 +728,272 @@ export function verdictText(paint: BoardPaint, card: WorkerCard, width: number):
 	return cut(shown.map((part) => part.text).join(separator), width);
 }
 
-/** The live row: the call running now, the prose being written, or the phase. */
-function activityText(paint: BoardPaint, card: WorkerCard, width: number): string {
-	if (!isLive(card.state)) return verdictText(paint, card, width);
-	if (card.state === "queued") return paint.fg("toolMetadata", "◌ queued, waiting for a slot");
-	if (card.current !== null) return `${paint.fg("toolGlyph", "⚙")} ${paint.fg("toolTarget", callText(card.current))}`;
-	if (card.phase === "writing" && card.lastText !== undefined) {
-		const prose = clean(card.lastText.replace(/\s+/gu, " ").trim());
-		return `${paint.fg("activity", "◑")} ${paint.fg("assistantProse", prose)}`;
-	}
-	if (card.phase === "waiting" && card.last !== null) {
-		return `${paint.fg("toolMetadata", "◔")} ${paint.fg("toolMetadata", `last: ${callText(card.last)}`)}`;
-	}
-	const [glyph, words] = phaseWords(card.phase);
-	return paint.fg("activity", `${glyph} ${words}`);
+/** One fact of the detail's block: its label and its painted value rows. */
+interface DetailFact {
+	label: string;
+	/** The label when `limit` cuts the value: it names the key that shows the rest. */
+	cutLabel?: string;
+	/** Painted value; wrapped to the value column unless `wrap` is false, when each entry is already one row. */
+	value: string[];
+	wrap: boolean;
+	/** The most rows the value shows; the last ends with `…` when it is cut. */
+	limit?: number;
 }
 
-/** Rows of a task too long for the header, at most three, the last cut with an ellipsis. */
-function taskRows(paint: BoardPaint, task: string, width: number): string[] {
-	const rows = wrapTextWithAnsi(task, width);
-	const shown =
-		rows.length > TASK_ROWS ? [...rows.slice(0, TASK_ROWS - 1), cut(rows.slice(TASK_ROWS - 1).join(" "), width)] : rows;
-	return shown.map((row) => `  ${paint.fg("body", row)}`);
-}
-
-/**
- * One card: the aligned header, the facts, and the live or verdict row. The dock's share leaves the header about 20
- * cells for the task, so the selected card spells a longer task out below it instead of cutting it there.
- */
-export function renderCard(
-	paint: BoardPaint,
-	card: WorkerCard,
-	width: number,
-	options: { selected: boolean; nameWidth: number; nowMs: number; style: OutputStyle },
-): string[] {
-	const gutter = options.selected ? paint.fg("selectionBadge", "▌") : " ";
-	const inner = width - 1;
-	const name = clean(card.agentId);
-	const nameWidth = Math.max(1, Math.min(options.nameWidth, inner - TIMER_WIDTH - 4));
-	const shownName = cut(name, nameWidth);
-	const timer = (card.elapsed ?? "not available").padStart(TIMER_WIDTH);
-	const head = `${stateGlyph(paint, card)} ${paint.fg(options.selected ? "selectedOption" : "workerIdentity", shownName, options.selected)}${" ".repeat(Math.max(0, nameWidth - visibleWidth(shownName)))} ${paint.fg("toolMetadata", timer)}`;
-	const taskRoom = inner - visibleWidth(head) - 2;
-	const task = clean(card.task);
-	const spelled = options.selected && options.style !== "compact" && visibleWidth(task) > taskRoom;
-	const first =
-		!spelled && taskRoom >= 4 && task.length > 0 ? `${head}  ${paint.fg("body", cut(task, taskRoom))}` : head;
-	const below = spelled ? taskRows(paint, task, inner - 2) : [];
-	const attempt = card.attempt > 0 ? `↻${card.attempt + 1} ` : "";
-	const facts = `  ${paint.fg("toolMetadata", `${attempt}${factsText(card, inner - 2 - attempt.length)}`)}`;
-	const activity = `  ${cut(activityText(paint, card, inner - 2), inner - 2)}`;
-	const lines =
-		options.style === "detailed"
-			? [first, ...below, facts, activity]
-			: options.style === "standard"
-				? [first, ...below, activity]
-				: [`${head} ${activityText(paint, card, inner - visibleWidth(head) - 1)}`];
-	return lines.map((row) => cut(`${gutter}${cut(row, inner)}`, width));
-}
-
-// ---------------------------------------------------------------------------
-// Board
-// ---------------------------------------------------------------------------
-
-export interface BoardView {
-	selectedRunId: string | null;
-	/** First row of the card list on screen; kept across frames so the list does not jump. */
-	top: number;
-}
-
-function boardCounts(paint: BoardPaint, board: BoardModel): string {
-	const done = board.finished.filter((card) => card.state === "succeeded").length;
-	const cancelled = board.finished.filter((card) => card.state === "canceled").length;
-	const failed = board.finished.length - done - cancelled;
-	return [
-		paint.fg("activity", `● ${board.running.length} running`),
-		paint.fg("success", `✓ ${done} done`),
-		...(cancelled > 0 ? [paint.fg("toolMetadata", `⊘ ${cancelled} cancelled`)] : []),
-		...(failed > 0 ? [paint.fg("error", `✗ ${failed} failed`)] : []),
-	].join("  ");
-}
-
-function hints(paint: BoardPaint, parts: ReadonlyArray<string>, width: number): string {
-	const row: string[] = [];
-	for (const part of parts) {
-		if (visibleWidth([...row, part].join("  ")) > width - 1) break;
-		row.push(part);
-	}
-	return ` ${paint.fg("keyboardHint", row.join("  "))}`;
-}
-
-const EMPTY_BOARD = [
-	"No workers in this session yet.",
-	"",
-	"Dispatch one from CLIO Coder:",
-	"  /run <agent> <task>    one worker on a task",
-	"  /fleet run <playbook>      a playbook",
-	"  or ask CLIO Coder to delegate the work.",
-	"",
-	"Cards appear here as workers start.",
-];
-
-/** The whole board screen, exactly `height` rows (fewer only when the terminal is tiny). */
-function renderBoard(
-	paint: BoardPaint,
-	board: BoardModel,
-	view: BoardView,
-	width: number,
-	height: number,
-	nowMs: number,
-	style: OutputStyle,
-): string[] {
-	const columns = Math.max(1, width);
-	const rule = paint.fg("divider", RULE.repeat(columns));
-	const cards = [...board.running, ...board.finished];
-	const header = [cut(` ${paint.fg("heading", "workers", true)}  ${boardCounts(paint, board)}`, columns), rule];
-	const footer = [rule, hints(paint, ["↑↓ select", "⏎ open", "q hide", "ctrl+c close"], columns)];
-	const bodyHeight = Math.max(1, height - header.length - footer.length);
-	if (cards.length === 0) {
-		const body = EMPTY_BOARD.map((line) =>
-			cut(` ${paint.fg(line.startsWith("  ") ? "commandHint" : "emptyState", line)}`, columns),
-		);
-		while (body.length < bodyHeight) body.push("");
-		return [...header, ...body.slice(0, bodyHeight), ...footer];
-	}
-	const nameWidth = Math.min(NAME_MAX, Math.max(...cards.map((card) => visibleWidth(clean(card.agentId)))));
-	const rows: string[] = [];
-	let selectedStart = 0;
-	let selectedEnd = 0;
-	cards.forEach((card, index) => {
-		if (index === board.running.length && board.running.length > 0) {
-			rows.push(cut(` ${paint.fg("groupHeading", "finished")}`, columns));
-		}
-		const selected = card.runId === view.selectedRunId;
-		if (selected) selectedStart = rows.length;
-		rows.push(...renderCard(paint, card, columns, { selected, nameWidth, nowMs, style }));
-		if (selected) selectedEnd = rows.length;
-	});
-	const scrolls = rows.length > bodyHeight;
-	const pageRows = Math.max(1, bodyHeight - (scrolls ? 1 : 0));
-	// Reserve the position row instead of overwriting the selected card with a scroll marker.
-	let top = Math.min(view.top, Math.max(0, rows.length - pageRows));
-	if (selectedStart < top) top = selectedStart;
-	if (selectedEnd > top + pageRows) top = selectedEnd - pageRows;
-	top = Math.max(0, top);
-	view.top = top;
-	const body = rows.slice(top, top + pageRows);
-	if (scrolls)
-		body.push(
-			cut(
-				` ${paint.fg("scrollMarker", `${top + 1}-${Math.min(rows.length, top + pageRows)} / ${rows.length} rows`)}`,
-				columns,
-			),
-		);
-	while (body.length < bodyHeight) body.push("");
-	return [...header, ...body, ...footer];
-}
-
-// ---------------------------------------------------------------------------
-// Takeover
-// ---------------------------------------------------------------------------
-
-export interface TakeoverView {
-	runId: string;
-	/** First stream line on screen, or null to follow the newest. */
-	scrollTop: number | null;
-	/** Move to the run that carries this one's work on once it finishes. */
-	followSuccessor: boolean;
-	/** Written by each render: stream lines and the rows the window shows them in. */
-	streamLength: number;
-	bodyHeight: number;
-}
-
-function wrapPrefixed(prefix: string, text: string, width: number, indent: number): string[] {
+/** The fact block: label beside value from 44 cells, the label above its value under that (W1). */
+function factLines(paint: BoardPaint, facts: readonly DetailFact[], width: number): string[] {
+	const stack = width < SIDE_BY_SIDE_CELLS;
+	const labelWidth = Math.max(...facts.map((fact) => visibleWidth(fact.cutLabel ?? fact.label)));
+	const indent = stack ? 3 : 1 + labelWidth + 2;
 	const room = Math.max(1, width - indent);
 	const lines: string[] = [];
-	for (const paragraph of text.split("\n")) {
-		const wrapped = paragraph.trim().length === 0 ? [""] : wrapTextWithAnsi(paragraph, room);
-		for (const line of wrapped) lines.push(line);
-	}
-	while (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-	return lines.map((line, index) => `${index === 0 ? prefix : " ".repeat(indent)}${line}`);
-}
-
-function outcomeMark(paint: BoardPaint, row: StreamRow): string {
-	const took = row.durationMs === undefined ? "" : ` ${formatDuration(row.durationMs)}`;
-	if (row.pending) return paint.fg("activity", " …");
-	if (row.outcome === "error") return paint.fg("error", ` ✗ failed${took}`);
-	if (row.outcome === "blocked") return paint.fg("warning", ` ⊘ blocked${took}`);
-	if (row.outcome === "ok") return paint.fg("success", ` ✓${paint.fg("toolMetadata", took)}`);
-	return paint.fg("toolMetadata", took);
-}
-
-/** One stream row as screen lines, its time offset in the left column. */
-function streamLines(paint: BoardPaint, row: StreamRow, startedAtMs: number, width: number): string[] {
-	const at = Date.parse(row.at);
-	const offset = paint.fg("toolMetadata", formatOffset(Number.isFinite(at) ? at - startedAtMs : 0).padStart(6));
-	const prefixWidth = 9;
-	const room = Math.max(1, width - prefixWidth);
-	const lead = (glyph: string): string => `${offset} ${glyph} `;
-	switch (row.kind) {
-		case "tool": {
-			const mark = outcomeMark(paint, row);
-			const call = cut(callText(row), Math.max(1, room - visibleWidth(mark)));
-			const lines = [
-				`${lead(paint.fg("toolGlyph", "⚙"))}${paint.fg(row.pending ? "activity" : "toolTarget", call)}${mark}`,
-			];
-			if (row.reason !== undefined && row.outcome !== "ok") {
-				// Two rows say why; the whole reason is in the record and `fleet view`.
-				const why = wrapPrefixed(" ".repeat(prefixWidth), clean(row.reason), width, prefixWidth);
-				if (why.length > 2) why[1] = cut(`${why[1]}…`, width);
-				lines.push(...why.slice(0, 2).map((line) => paint.fg("warning", line)));
-			}
-			return lines;
+	for (const fact of facts) {
+		let rows = fact.wrap ? fact.value.flatMap((value) => wrapTextWithAnsi(value, room)) : [...fact.value];
+		const limit = fact.limit ?? Number.POSITIVE_INFINITY;
+		const cutRows = rows.length > limit;
+		if (cutRows) {
+			const kept = Math.max(0, limit);
+			rows = kept === 0 ? [] : [...rows.slice(0, kept - 1), cut(rows.slice(kept - 1).join(" "), room)];
 		}
-		case "text": {
-			const prose = row.text
-				.split("\n")
-				.map((line) => clean(line))
-				.join("\n");
-			return wrapPrefixed(lead(paint.fg("assistantProse", "✦")), prose, width, prefixWidth).map((line, index) =>
-				index === 0 ? line : paint.fg("assistantProse", line),
-			);
+		rows = rows.map((row) => cut(row, room));
+		const text = cutRows ? (fact.cutLabel ?? fact.label) : fact.label;
+		const label = paint.fg("annotation", text);
+		if (stack) {
+			lines.push(cut(` ${label}`, width));
+			for (const row of rows) lines.push(`   ${row}`);
+			continue;
 		}
-		case "thinking":
-			return [`${lead(paint.fg("toolMetadata", "◐"))}${paint.dim("thinking")}`];
-		case "approval": {
-			const what = [row.tool, row.text].filter((part) => part !== undefined && part.length > 0).join(" ");
-			return wrapPrefixed(
-				lead(paint.fg("warning", "⏸")),
-				paint.fg("warning", `approval asked · ${clean(what)}`),
-				width,
-				prefixWidth,
-			);
-		}
-		case "decision": {
-			const approved = row.outcome === "ok";
-			const words = `${approved ? "approved" : clean(row.text || "denied")} ${clean(row.tool ?? "")}`.trim();
-			const reason = row.reason === undefined ? "" : `: ${clean(row.reason)}`;
-			return wrapPrefixed(
-				lead(paint.fg(approved ? "success" : "warning", approved ? "✓" : "⊘")),
-				paint.fg(approved ? "success" : "warning", `${words}${reason}`),
-				width,
-				prefixWidth,
-			);
-		}
-		case "error": {
-			const reason = row.reason === undefined ? "" : `: ${clean(row.reason)}`;
-			return wrapPrefixed(
-				lead(paint.fg("error", "✗")),
-				paint.fg("error", `${clean(row.text)}${reason}`),
-				width,
-				prefixWidth,
-			);
-		}
-		default:
-			return wrapPrefixed(
-				lead(paint.fg("toolMetadata", "·")),
-				paint.fg("toolMetadata", clean(row.text)),
-				width,
-				prefixWidth,
-			);
-	}
-}
-
-function runRecordLines(paint: BoardPaint, model: TakeoverModel, width: number): string[] {
-	const { card } = model;
-	if (isLive(card.state)) return [];
-	const lines: string[] = [
-		"",
-		`${paint.fg("divider", RULE.repeat(2))} ${paint.fg("annotation", "run record")} ${paint.fg("divider", RULE.repeat(Math.max(0, width - 14)))}`,
-	];
-	lines.push(verdictText(paint, card, width));
-	const record = card.record;
-	if (record === null) return lines;
-	const spend = [
-		renderCalls(card.toolCallsDisplay ?? "unknown"),
-		...(card.tokens !== undefined ? [`${card.tokens} tokens`] : []),
-		...(card.cost !== undefined ? [card.cost] : []),
-		...(card.elapsed !== undefined ? [card.elapsed] : []),
-	].join(SEPARATOR);
-	lines.push(cut(paint.fg("toolMetadata", spend), width));
-	const trust = [record.seal, record.verdict === undefined ? undefined : `trust ${record.verdict}`, record.validation]
-		.filter((part) => part !== undefined)
-		.map((part) => clean(part as string))
-		.join(SEPARATOR);
-	if (trust.length > 0) lines.push(...wrapPrefixed("", paint.fg("toolMetadata", trust), width, 2));
-	if (record.failure !== undefined) {
-		const first = (record.failure.split("\n", 1)[0] ?? "").trim();
-		if (first.length > 0) lines.push(...wrapPrefixed("", paint.fg("error", clean(first)), width, 2));
-	}
-	if (record.changedPaths !== undefined) {
-		lines.push(...wrapPrefixed("", paint.fg("body", `changed ${record.changedPaths.map(clean).join(", ")}`), width, 2));
-	}
-	if (record.answer !== undefined) {
-		const answer = record.answer.split("\n").map((line) => clean(line));
-		const shown = answer.slice(0, ANSWER_PREVIEW_LINES);
-		lines.push(paint.fg("groupHeading", "answer"));
-		lines.push(...wrapPrefixed("  ", paint.fg("assistantProse", shown.join("\n")), width, 2));
-		if (answer.length > shown.length) {
-			lines.push(
-				cut(
-					paint.fg("toolMetadata", `  … ${answer.length - shown.length} more lines · clio-coder fleet view ${card.runId}`),
-					width,
-				),
-			);
-		}
+		const pad = " ".repeat(Math.max(0, labelWidth - visibleWidth(text)));
+		rows.forEach((row, index) => {
+			lines.push(index === 0 ? ` ${label}${pad}  ${row}` : `${" ".repeat(indent)}${row}`);
+		});
+		if (rows.length === 0) lines.push(cut(` ${label}`, width));
 	}
 	return lines;
 }
 
-function takeoverHeader(paint: BoardPaint, model: TakeoverModel, width: number, _nowMs: number): string[] {
-	const { card } = model;
-	const back = paint.fg("keyboardHint", "◂ esc");
-	const who = `${stateGlyph(paint, card)} ${paint.fg("workerIdentity", clean(card.agentId), true)}`;
-	const clock = paint.fg("toolMetadata", card.elapsed ?? "not available");
-	const run = paint.fg("toolMetadata", `run ${card.runId}`);
-	const left = `${back}  ${who} ${paint.fg("toolMetadata", stateWord(card.state))} ${clock}`;
-	const first =
-		visibleWidth(`${left}  ${run}`) <= width
-			? `${left}${" ".repeat(width - visibleWidth(left) - visibleWidth(run))}${run}`
-			: cut(left, width);
-	const task = wrapTextWithAnsi(clean(card.task), Math.max(1, width - 1))
-		.slice(0, 2)
-		.map((line) => ` ${paint.fg("body", line)}`);
-	const facts = ` ${paint.fg("toolMetadata", factsText(card, width - 1))}`;
-	const lines = [first, ...task, facts];
-	if (model.fleet !== null) {
-		const fleet = model.fleet;
-		const progress = fleet.plannedSteps > 0 ? ` · ${fleet.settledSteps}/${fleet.plannedSteps} steps settled` : "";
-		lines.push(
-			cut(
-				` ${paint.fg("dispatchAction", `⇲ fleet ${clean(fleet.name)}`)}${paint.fg("toolMetadata", `${progress}${fleet.running ? " · following" : ""}`)}`,
-				width,
-			),
-		);
-	}
-	return lines.map((line) => cut(line, width));
+/** A section title on a rule: `answer ────`. */
+function sectionRule(paint: BoardPaint, title: string, width: number): string {
+	const fill = Math.max(0, width - visibleWidth(title) - 2);
+	return cut(` ${paint.fg("annotation", title)} ${paint.fg("divider", GLYPH.rule.repeat(fill))}`, width);
 }
 
-/** The takeover screen: pinned header, the stream window, the hint row. */
+const LIST_ITEM = /^(\s*(?:[-*+]|\d+[.)])\s+)/u;
+
+/** The answer as wrapped Markdown: list items hang under their marker, headings in the heading role. */
+function answerLines(paint: BoardPaint, answer: string, width: number): string[] {
+	const room = Math.max(1, width - 1);
+	const lines: string[] = [];
+	for (const raw of answer.split("\n")) {
+		const line = clean(raw);
+		if (line.trim().length === 0) {
+			lines.push("");
+			continue;
+		}
+		if (/^#{1,6}\s/u.test(line)) {
+			for (const row of wrapTextWithAnsi(line, room)) lines.push(` ${paint.fg("heading", row, true)}`);
+			continue;
+		}
+		const hangMarker = LIST_ITEM.exec(line)?.[1] ?? "";
+		const hang = Math.min(Math.max(0, room - 1), visibleWidth(hangMarker));
+		const marker = hang > 0 ? hangMarker : "";
+		const rows = wrapTextWithAnsi(line.slice(marker.length), Math.max(1, room - hang));
+		rows.forEach((row, index) => {
+			const lead = index === 0 ? marker : " ".repeat(hang);
+			lines.push(` ${paint.fg("assistantProse", `${lead}${row}`)}`);
+		});
+	}
+	while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+	return lines;
+}
+
+/** The pinned row: `[Esc] back · <state> <identity> · <elapsed>`. */
+function detailHeader(paint: BoardPaint, card: WorkerCard, width: number): string {
+	const facts = runFacts(card);
+	const layout = runRow(facts, {
+		width: Number.MAX_SAFE_INTEGER,
+		identityWidth: runIdentityWidth([facts], visibleWidth),
+		measure: visibleWidth,
+	});
+	const identity = withStale(
+		card,
+		layout.cells.filter((cell) => ["state", "origin", "helper", "agent"].includes(cell.slot)),
+	);
+	const parts = [keyUnit(paint, "Esc", "back"), paintCells(paint, identity, (cell) => cell.slot === "agent")];
+	if (facts.elapsed !== undefined && card.state !== "queued") parts.push(paint.fg("metadata", facts.elapsed));
+	return cut(` ${parts.join(sep(paint))}`, width);
+}
+
+/** The scroll region: the fact block, then the answer, or the stream while the run is live. */
+function detailBody(
+	paint: BoardPaint,
+	model: TakeoverModel,
+	view: TakeoverView,
+	width: number,
+): { lines: string[]; answerStart: number } {
+	const policy = tierPolicy();
+	const { card } = model;
+	const facts = runFacts(card);
+	const state = runRow(facts, { width, identityWidth: 0, measure: visibleWidth }).state;
+	const live = isLive(card.state);
+	const record = card.record;
+	const block: DetailFact[] = [];
+
+	const calls = renderCalls(card.toolCallsDisplay ?? String(card.toolCalls), "call");
+	const tokens = tokensText(card);
+	const result = [
+		paint.fg(card.state === "stale" ? "warning" : state.role, stateWord(card, state)),
+		...(live && state.kind !== "pending" && facts.phase !== undefined ? [paint.fg("activity", facts.phase)] : []),
+		...(state.kind === "pending" && facts.approval !== undefined
+			? [paint.fg("attention", facts.approval.words(Number.MAX_SAFE_INTEGER))]
+			: []),
+		paint.fg("metadata", calls),
+		...(tokens !== undefined ? [paint.fg("metadata", tokens)] : []),
+		...(record?.refused !== undefined ? [paint.fg("warning", clean(record.refused))] : []),
+	].join(sep(paint));
+	block.push({ label: "result", value: [result], wrap: true });
+	if (state.kind === "error" && facts.reason !== undefined)
+		block.push({ label: "reason", value: [paint.fg("error", facts.reason)], wrap: true });
+
+	const sideRows = policy.paneCardRows;
+	if (sideRows >= 2 && !live) {
+		const changed = record?.changedPaths;
+		block.push({
+			label: "changed",
+			value: [paint.fg("body", changed === undefined ? "nothing" : changed.map(clean).join(", "))],
+			wrap: true,
+		});
+	}
+	if (sideRows >= 2 && model.fleet !== null) {
+		const fleet = model.fleet;
+		const progress =
+			fleet.plannedSteps > 0 ? ` ${GLYPH.sep} ${fleet.settledSteps}/${fleet.plannedSteps} steps settled` : "";
+		block.push({
+			label: "fleet",
+			value: [paint.fg("metadata", `${clean(fleet.name)}${progress}${fleet.running ? ` ${GLYPH.sep} following` : ""}`)],
+			wrap: true,
+		});
+	}
+	const task = clean(card.task);
+	const taskRows = view.taskExpanded ? Number.POSITIVE_INFINITY : detailTaskRows(policy);
+	if (taskRows > 0 && task.length > 0) {
+		block.push({
+			label: "task",
+			cutLabel: `task ${GLYPH.sep} [t] all of it`,
+			value: [paint.fg("body", task)],
+			wrap: true,
+			limit: taskRows,
+		});
+	}
+	if (policy.runSubRows > 0) {
+		const route = [clean(card.target), clean(card.model)].filter((part) => part.length > 0).join(` ${GLYPH.sep} `);
+		block.push({ label: "route", value: [paint.fg("metadata", route)], wrap: true });
+		if (!live) {
+			const validation = record?.validation === undefined ? [] : [paint.fg("metadata", clean(record.validation))];
+			block.push({
+				label: "record",
+				value: [verdictText(paint, card, Number.MAX_SAFE_INTEGER), ...validation],
+				wrap: true,
+			});
+		}
+	}
+	if (policy.runTrail > 0 && card.trail.length > 0) {
+		block.push({
+			label: "trail",
+			value: card.trail
+				.slice(-policy.runTrail)
+				.map(
+					(row) =>
+						`${paint.fg("toolGlyph", GLYPH.phaseTool)} ${paint.fg("toolTarget", callText(row))}${outcomeMark(paint, row)}`,
+				),
+			wrap: false,
+		});
+	}
+	const lines = factLines(paint, block, width);
+
+	if (live) {
+		lines.push(sectionRule(paint, "stream", width));
+		const answerStart = lines.length;
+		if (!model.fold.present) {
+			lines.push(
+				cut(` ${paint.fg("emptyState", "no display feed for this run (fleet.history.journal may be off)")}`, width),
+			);
+		} else if (model.fold.droppedRows > 0 || model.fold.truncated) {
+			lines.push(cut(paint.fg("metadata", `   ${GLYPH.ellipsis} earlier events are not shown`), width));
+		}
+		for (const row of model.fold.rows) lines.push(...streamLines(paint, row, card.startedAtMs, width));
+		if (model.fold.present && model.fold.rows.length === 0) {
+			lines.push(cut(` ${paint.fg("emptyState", "started; no events yet")}`, width));
+		}
+		return { lines: lines.map((line) => cut(line, width)), answerStart };
+	}
+	const answer = record?.answer;
+	if (answer !== undefined && answer.trim().length > 0) {
+		lines.push(sectionRule(paint, "answer", width));
+		const answerStart = lines.length;
+		lines.push(...answerLines(paint, answer, width));
+		return { lines: lines.map((line) => cut(line, width)), answerStart };
+	}
+	const answerStart = lines.length;
+	if (model.fleet?.running === true && view.followSuccessor) {
+		lines.push(
+			cut(` ${paint.fg("activity", `${GLYPH.phaseWaiting} waiting for the fleet's next step${GLYPH.ellipsis}`)}`, width),
+		);
+	}
+	return { lines: lines.map((line) => cut(line, width)), answerStart };
+}
+
+/** Run detail: the pinned identity row, the one scroll region, the key row. */
 function renderTakeover(
 	paint: BoardPaint,
 	model: TakeoverModel | null,
 	view: TakeoverView,
 	width: number,
 	height: number,
-	nowMs: number,
 ): string[] {
 	const columns = Math.max(1, width);
-	const rule = paint.fg("divider", RULE.repeat(columns));
+	const rule = paint.fg("divider", GLYPH.rule.repeat(columns));
+	const keys = keyRow(
+		paint,
+		[
+			[UP_DOWN, "scroll"],
+			["t", "task"],
+			["Esc", "back"],
+		],
+		columns,
+	);
 	if (model === null) {
 		const waiting = [
-			cut(` ${paint.fg("keyboardHint", "◂ esc")}  ${paint.fg("toolMetadata", `run ${clean(view.runId)}`)}`, columns),
+			cut(` ${keyUnit(paint, "Esc", "back")}${sep(paint)}${paint.fg("metadata", `run ${clean(view.runId)}`)}`, columns),
 			rule,
-			cut(` ${paint.fg("emptyState", "waiting for this run to reach the ledger…")}`, columns),
-			cut(` ${paint.fg("toolMetadata", "a queued run appears once it starts")}`, columns),
+			cut(` ${paint.fg("emptyState", `waiting for this run to reach the ledger${GLYPH.ellipsis}`)}`, columns),
+			cut(` ${paint.fg("metadata", "a queued run appears once it starts")}`, columns),
 		];
 		while (waiting.length < height - 2) waiting.push("");
-		return [...waiting, rule, hints(paint, ["esc board", "q hide"], columns)];
+		return [...waiting, rule, keys];
 	}
-	const header = [...takeoverHeader(paint, model, columns, nowMs), rule];
-	const stream: string[] = [];
-	if (!model.fold.present) {
-		stream.push(
-			cut(` ${paint.fg("emptyState", "no display feed for this run (fleet.history.journal may be off)")}`, columns),
-		);
-	} else if (model.fold.droppedRows > 0 || model.fold.truncated) {
-		stream.push(cut(paint.fg("toolMetadata", "   … earlier events are not shown"), columns));
-	}
-	for (const row of model.fold.rows) stream.push(...streamLines(paint, row, model.card.startedAtMs, columns));
-	if (model.fold.present && model.fold.rows.length === 0 && isLive(model.card.state)) {
-		stream.push(cut(` ${paint.fg("emptyState", "started; no events yet")}`, columns));
-	}
-	if (isLive(model.card.state) && model.card.current === null && model.card.state !== "queued") {
-		const [glyph, words] = phaseWords(model.card.phase);
-		if (model.card.phase !== "writing") stream.push(cut(`        ${paint.fg("activity", `${glyph} ${words}`)}`, columns));
-	}
-	stream.push(...runRecordLines(paint, model, columns - 1).map((line) => (line.length === 0 ? line : ` ${line}`)));
-	if (!isLive(model.card.state) && model.fleet?.running === true && view.followSuccessor) {
-		stream.push(cut(` ${paint.fg("activity", "◔ waiting for the fleet's next step…")}`, columns));
-	}
-	const footerHints =
-		view.scrollTop === null
-			? ["esc board", "↑↓ scroll", "q hide", "ctrl+c close"]
-			: ["esc board", "↑↓ scroll", "G newest", "q hide"];
-	const footer = [rule, hints(paint, footerHints, columns)];
+	const header = [detailHeader(paint, model.card, columns), rule];
+	const footer = [rule, keys];
 	const bodyHeight = Math.max(1, height - header.length - footer.length);
-	view.streamLength = stream.length;
-	view.bodyHeight = bodyHeight;
-	const maxTop = Math.max(0, stream.length - bodyHeight);
-	if (view.scrollTop !== null && view.scrollTop >= maxTop) view.scrollTop = null;
-	const top = view.scrollTop ?? maxTop;
-	const body = stream.slice(top, top + bodyHeight);
-	if (view.scrollTop !== null) {
-		const newer = stream.length - (top + bodyHeight);
-		if (newer > 0)
-			body[body.length - 1] = cut(` ${paint.fg("scrollMarker", `↓ ${newer} newer lines · G to follow`)}`, columns);
+	const { lines, answerStart } = detailBody(paint, model, view, columns);
+	// A change above the answer (the task folding, the tier) never moves what the answer shows.
+	if (view.scrollTop !== null && view.answerStart >= 0 && answerStart !== view.answerStart) {
+		view.scrollTop =
+			view.scrollTop >= view.answerStart
+				? view.scrollTop + (answerStart - view.answerStart)
+				: Math.min(view.scrollTop, answerStart);
 	}
+	view.answerStart = answerStart;
+	view.live = isLive(model.card.state);
+	view.streamLength = lines.length;
+	view.bodyHeight = bodyHeight;
+	const maxTop = Math.max(0, lines.length - bodyHeight);
+	if (view.scrollTop !== null) view.scrollTop = Math.max(0, Math.min(view.scrollTop, maxTop));
+	const top = view.scrollTop ?? maxTop;
+	const body = lines.slice(top, top + bodyHeight);
+	const below = lines.length - (top + bodyHeight);
+	if (below > 0)
+		body[body.length - 1] = cut(` ${paint.fg("scrollMarker", `${GLYPH.ellipsis} ${below + 1} more rows`)}`, columns);
 	while (body.length < bodyHeight) body.push("");
 	return [...header, ...body, ...footer];
 }
@@ -745,33 +1029,27 @@ export async function runWorkersDashboard(options: WorkersDashboardOptions): Pro
 	let mode: "board" | "takeover" = "board";
 	const boardView: BoardView = { selectedRunId: null, top: 0 };
 	let takeoverView: TakeoverView | null = null;
-	let board: BoardModel = { running: [], finished: [], scopedToSession: false };
+	let cards: WorkerCard[] = [];
 	let takeover: TakeoverModel | null = null;
 
-	const cards = (): WorkerCard[] => [...board.running, ...board.finished];
-
 	/**
-	 * `follow` arms the jump to a retry or the fleet's next step. Enter on a
-	 * card that already finished inspects it and stays; a run Clio asked for
-	 * by name is followed even when the request lands after it finished.
+	 * `follow` arms the jump to a retry or the fleet's next step. Enter on a card that already finished inspects it
+	 * and stays; a run Clio asked for by name is followed even when the request lands after it finished.
 	 */
 	const enterTakeover = (runId: string, follow: "always" | "when-live"): void => {
 		mode = "takeover";
 		boardView.selectedRunId = runId;
 		takeover = loadTakeover(source, runId, Date.now());
 		const live = takeover === null || isLive(takeover.card.state);
-		takeoverView = {
-			runId,
-			scrollTop: null,
-			followSuccessor: follow === "always" || live,
-			streamLength: 0,
-			bodyHeight: 1,
-		};
+		takeoverView = newTakeoverView(runId, live, follow === "always" || live);
 	};
 
 	const applyRequest = (): void => {
 		request = readWatchRequest(options.selectionPath) ?? request;
-		if (request === null || request.seq === lastSeq) return;
+		if (request === null) return;
+		// The tier rides on every request; a refresh changes it without a new `seq`, so selection and scroll stay.
+		setPresentationTier(request.outputDetail);
+		if (request.seq === lastSeq) return;
 		lastSeq = request.seq;
 		if (request.runId === null) {
 			mode = "board";
@@ -788,42 +1066,38 @@ export async function runWorkersDashboard(options: WorkersDashboardOptions): Pro
 			if (takeover !== null && !isLive(takeover.card.state) && view.followSuccessor) {
 				const next = successorRun(source, view.runId);
 				if (next !== null) {
-					view.runId = next;
-					view.scrollTop = null;
 					boardView.selectedRunId = next;
 					takeover = loadTakeover(source, next, nowMs);
+					takeoverView = newTakeoverView(next, true, true);
 				}
 			}
 			return;
 		}
-		board = loadBoard(source, request, options.scope, nowMs);
-		const all = cards();
-		if (!all.some((card) => card.runId === boardView.selectedRunId)) boardView.selectedRunId = all[0]?.runId ?? null;
+		cards = orderedCards(loadBoard(source, request, options.scope, nowMs));
+		if (!cards.some((card) => card.runId === boardView.selectedRunId)) boardView.selectedRunId = cards[0]?.runId ?? null;
 	};
 
 	const moveSelection = (delta: number): void => {
-		const all = cards();
-		if (all.length === 0) return;
-		const index = all.findIndex((card) => card.runId === boardView.selectedRunId);
-		const next = Math.max(0, Math.min(all.length - 1, (index < 0 ? 0 : index) + delta));
-		boardView.selectedRunId = all[next]?.runId ?? null;
+		if (cards.length === 0) return;
+		const index = cards.findIndex((card) => card.runId === boardView.selectedRunId);
+		const next = Math.max(0, Math.min(cards.length - 1, (index < 0 ? 0 : index) + delta));
+		boardView.selectedRunId = cards[next]?.runId ?? null;
 	};
 
-	/** Scroll by lines; reaching the newest line resumes following. */
+	/** Scroll by rows; reaching the newest row of a live run resumes following it. */
 	const scrollTakeover = (view: TakeoverView, delta: number): void => {
 		const maxTop = Math.max(0, view.streamLength - view.bodyHeight);
 		const next = Math.max(0, Math.min(maxTop, (view.scrollTop ?? maxTop) + delta));
-		view.scrollTop = next >= maxTop ? null : next;
+		view.scrollTop = next >= maxTop && view.live ? null : next;
 	};
 
 	const view = {
 		render(width: number): string[] {
 			const height = Math.max(6, terminal.rows);
-			const nowMs = Date.now();
 			if (mode === "takeover" && takeoverView !== null) {
-				return renderTakeover(paint, takeover, takeoverView, width, height, nowMs);
+				return renderTakeover(paint, takeover, takeoverView, width, height);
 			}
-			return renderBoard(paint, board, boardView, width, height, nowMs, request?.outputDetail ?? "standard");
+			return renderBoard(paint, cards, boardView, width, height);
 		},
 		invalidate(): void {},
 	};
@@ -881,16 +1155,17 @@ export async function runWorkersDashboard(options: WorkersDashboardOptions): Pro
 				else if (matchesKey(data, "down") || data === "j") scrollTakeover(open, 1);
 				else if (matchesKey(data, "ctrl+u")) scrollTakeover(open, -half);
 				else if (matchesKey(data, "ctrl+d")) scrollTakeover(open, half);
+				else if (data === "t") open.taskExpanded = !open.taskExpanded;
 				else if (data === "g") open.scrollTop = 0;
-				else if (data === "G") open.scrollTop = null;
+				else if (data === "G") open.scrollTop = open.live ? null : Math.max(0, open.streamLength - open.bodyHeight);
 				else return undefined;
 				tui.requestRender();
 				return { consume: true };
 			}
 			if (matchesKey(data, "up") || data === "k") moveSelection(-1);
 			else if (matchesKey(data, "down") || data === "j") moveSelection(1);
-			else if (data === "g") moveSelection(-cards().length);
-			else if (data === "G") moveSelection(cards().length);
+			else if (data === "g") moveSelection(-cards.length);
+			else if (data === "G") moveSelection(cards.length);
 			else if (matchesKey(data, "enter") || matchesKey(data, "right") || data === "l") {
 				if (boardView.selectedRunId !== null) enterTakeover(boardView.selectedRunId, "when-live");
 			} else return undefined;
