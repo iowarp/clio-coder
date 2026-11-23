@@ -2282,7 +2282,8 @@ test("an opened Fleet Runs detail keeps its trust row on screen and says how man
 	board.selectNext();
 	board.selectNext();
 	const folded = board.render(100).map(stripTerminalSequences);
-	match(folded.join("\n"), /1–5 of 12 runs/u);
+	// The header row takes one of the ten rows, so the window holds four runs.
+	match(folded.join("\n"), /1–4 of 12 runs/u);
 	strictEqual(board.wantsGrowth(), false);
 	board.toggleDetail();
 	strictEqual(board.wantsGrowth(), true);
@@ -2290,8 +2291,11 @@ test("an opened Fleet Runs detail keeps its trust row on screen and says how man
 	ok(open.length <= 10, `open detail used ${open.length} rows`);
 	const text = open.join("\n");
 	match(text, /trust\s+✗ not trusted/u);
-	match(text, /completion not recorded/u);
 	match(text, /3 of 12 runs · 11 hidden while the detail is open/u);
+	// The table's header row takes one row, so the trust record's axes are one page down.
+	board.scrollDetail(1);
+	match(board.render(100).map(stripTerminalSequences).join("\n"), /completion not recorded/u);
+	board.scrollDetail(-1);
 	ok(
 		open.some((line) => line.includes("❯")),
 		"the selected run stays listed",

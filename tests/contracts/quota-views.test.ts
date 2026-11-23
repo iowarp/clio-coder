@@ -142,17 +142,20 @@ test("worker quota joins only known local credential owners and does not claim a
 		ttft: null,
 	};
 	const text = plain(renderWorkerUsage([row], [], quotaRows([account]), 100));
-	match(text, /prompt 1,000 {2}out 234/);
-	match(text, /not measured/);
+	// Token columns are headed once (6.5); cost is a detailed column, and an unmeasured cost is never a figure.
+	match(text, /\bin\s+out\b/);
+	match(text, /\b1\.0k {2}234\b/);
+	doesNotMatch(text, /prompt|\$0/);
 	match(text, /Shared antigravity/);
 	doesNotMatch(text, /\$0.00|quota saved/);
 	match(
 		plain(renderWorkerUsage([{ ...row, usage: { kind: "unavailable" } }], [], quotaRows([account]), 80)),
-		/n\/a {2}n\/a {2}not measured/,
+		// No measured value is the dash in every cell, and the legend under the table says why once.
+		/— {4}—[\s\S]*n\/a not measured/,
 	);
 	match(
 		plain(renderWorkerUsage([{ ...row, usage: { kind: "pending" } }], [], quotaRows([account]), 80)),
-		/researcher {2}1\.0s {2}— {2}— {2}no calls yet/,
+		/researcher {2}1\.0s {3}— {4}—[\s\S]*— no calls yet/,
 	);
 });
 

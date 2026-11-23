@@ -273,7 +273,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		const rendered = view.render(180).join("\n");
 		match(rendered, /coder/);
 		match(rendered, /check failed/);
-		match(stripTerminalSequences(rendered), /prompt 90 · out 30/);
+		match(stripTerminalSequences(rendered), /\bin\s+out\b[\s\S]*\b90\s+30\b/);
 		deepStrictEqual(projection.snapshot().runs.find((row) => row.runId === IDENTITY.runId)?.evidence, {
 			firstPassSuccess: true,
 			findingCount: 2,
@@ -379,15 +379,14 @@ describe("dispatch board uses the telemetry projection", () => {
 		deepStrictEqual(row.writeRecordDowngrade, { reason: "opaque_tool_succeeded", tool: "bash", toolCallId: "call-3" });
 		// The expanded card names the call by its tool, never by the provider's call id (bt-11 i22-toolu).
 		const { council: _council, ...alone } = row;
-		const record = stripTerminalSequences(
-			createDispatchBoardView(
-				() => [alone],
-				() => undefined,
-				() => "detailed",
-			)
-				.render(200)
-				.join("\n"),
+		const recordView = createDispatchBoardView(
+			() => [alone],
+			() => undefined,
 		);
+		// The board opens folded at every tier; Enter opens the whole record.
+		recordView.toggleDetail();
+		// 140 columns keeps the open record under the table; from W5 it sits in the narrower side pane.
+		const record = stripTerminalSequences(recordView.render(140).join("\n"));
 		match(record, /record\s+open: a successful 'bash' call can write paths its arguments do not name/u);
 		doesNotMatch(record, /call-3/u);
 		strictEqual(prior.runs[0]?.status, "running");
