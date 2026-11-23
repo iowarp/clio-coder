@@ -866,18 +866,23 @@ export class ClioEditor extends Editor {
 			.join(theme.fg("separator", ` ${GLYPH.sep} `));
 	}
 
-	/** The draft's own units for the bottom rail: which shell a `!` line runs in, and how tall a draft is that overflows. */
+	/**
+	 * The draft's own units for the bottom rail: which shell a `!` line runs in, and how tall a draft is that overflows.
+	 * Both read `submitted`, the text Enter hands on (pastes expanded, a pasted `!` kept literal), so a one-line
+	 * `!echo 1[paste #1 +31 lines]` reads as the 31-line prompt Enter sends, not as a shell line (FX-11b).
+	 */
 	private draftRailLead(
-		text: string,
+		submitted: string,
 		hidden: number,
 		theme: ClioTheme,
 	): { shell: readonly string[]; lines: string | null } {
 		const shell =
-			this.chrome.getDraftOperator?.(text) === "shell"
-				? SHELL_RAIL_FORMS[text.trimStart().startsWith("!!") ? "private" : "shared"]
+			this.chrome.getDraftOperator?.(submitted) === "shell"
+				? SHELL_RAIL_FORMS[submitted.trimStart().startsWith("!!") ? "private" : "shared"]
 				: [];
-		const count = this.getLines().length;
-		return { shell, lines: hidden > 0 ? theme.fg("positionCount", `${count} lines`) : null };
+		const count = submitted.split("\n").length;
+		const taller = hidden > 0 || count > this.getLines().length;
+		return { shell, lines: taller ? theme.fg("positionCount", `${count} lines`) : null };
 	}
 
 	private railLabelRoom(width: number): number {
@@ -955,7 +960,9 @@ export class ClioEditor extends Editor {
 			rail,
 			right,
 			(steer || this.isShowingAutocomplete()) && mode !== "CONFIRM" ? this.approvalLabelRoom(width) : undefined,
-			mode === "CONFIRM" ? undefined : this.draftRailLead(text, this.renderedTopHidden + hiddenLineCount, theme),
+			mode === "CONFIRM"
+				? undefined
+				: this.draftRailLead(this.getTextForSubmit(), this.renderedTopHidden + hiddenLineCount, theme),
 		);
 		return this.renderedBottomRail;
 	}

@@ -67,7 +67,7 @@ import {
 	summaryFleetRuns,
 } from "./dispatch-board.js";
 import { dockTop, setDockFooterRows } from "./dock.js";
-import { parseEditorBashCommand } from "./editor-bash.js";
+import { parseEditorBashCommand, unguardPastedEditorOperator } from "./editor-bash.js";
 import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
 import {
 	createFileReferenceCompletionSource,
@@ -315,27 +315,31 @@ const DEFAULT_FACTORIES: InteractivePresentationFactories = {
 	buildLayout,
 };
 
-/** A draft whose Enter is not a message: Clio runs it, wherever a turn is. */
+/**
+ * A draft whose Enter is not a message: Clio runs it, wherever a turn is. `text` is what Enter submits
+ * (`getTextForSubmit`): a pasted `!` stays a prompt, and a slash command reads through the paste envelope.
+ */
 function draftOperator(text: string): "command" | "shell" | null {
 	if (parseEditorBashCommand(text)) return "shell";
-	const kind = parseSlashCommand(text.trim()).kind;
+	const kind = parseSlashCommand(unguardPastedEditorOperator(text).trim()).kind;
 	return kind === "unknown" || kind === "empty" ? null : "command";
 }
 
-/** What Enter does with this draft, for the hint row. An empty composer has nothing to say about Enter. */
+/** What Enter does with this draft, for the hint row, read from the text Enter submits. An empty composer has nothing to say about Enter. */
 function draftKeyContext(
-	text: string,
+	submitted: string,
 	streaming: boolean,
 	holding: boolean,
 	localShell: boolean,
 	runsCommand: (token: string) => boolean = () => false,
 ): ComposerKeyContext {
+	const text = unguardPastedEditorOperator(submitted);
 	const empty = text.trim().length === 0;
-	if (parseEditorBashCommand(text)) {
+	if (parseEditorBashCommand(submitted)) {
 		if (streaming || localShell) return "shell-refused";
 		return holding ? "hold" : "send-shell";
 	}
-	if (!empty && draftOperator(text) === "command") {
+	if (!empty && draftOperator(submitted) === "command") {
 		const parsed = parseSlashCommand(text.trim());
 		const name = truncateToWidth(text.trim().split(/\s+/u)[0] ?? "", 24, GLYPH.ellipsis, false);
 		if (parsed.kind === "usage-error") return `usage:${name}`;
@@ -746,7 +750,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				(footerDeps.getAgentStatus?.() ?? statusController.current()).phase === "cancelling";
 			if (stopping && text.trim().length === 0) return "stopping";
 			const context = draftKeyContext(
-				text,
+				composerEditor?.getTextForSubmit() ?? "",
 				deps.chat.isStreaming(),
 				deps.chat.turnPreparation().phase !== "idle",
 				localBashStartedAt !== null,

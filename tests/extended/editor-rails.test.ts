@@ -286,4 +286,23 @@ test("rail content: a multi-line `!` draft is a prompt, so its bottom rail has n
 		match(tall, /^━ 31 lines ━/u);
 		doesNotMatch(tall, /\$|shell/u);
 	}
+	// A paste reads as Enter reads it: the expanded draft, with a `!` that came in the paste kept literal (FX-11b).
+	const keyed = (keys: readonly string[], width: number): string => {
+		editor.setText("");
+		for (const key of keys) editor.handleInput(key);
+		const rows = editor.render(width);
+		ok(rows.every((row) => visibleWidth(row) <= width));
+		return stripTerminalSequences(rows.at(-1) ?? "");
+	};
+	for (const width of [80, 48, 33]) {
+		for (const lead of ["!echo 1", "!!echo 1"]) {
+			const pasted = keyed([lead, `\x1b[200~\n${more}\x1b[201~`], width);
+			match(pasted, /^━ 31 lines ━/u);
+			doesNotMatch(pasted, /\$|shell/u);
+		}
+		match(keyed(["!", "\x1b[200~echo 1\x1b[201~"], width), /^━ \$ shared/u);
+		match(keyed(["!!", "\x1b[200~echo 1\x1b[201~"], width), /^━ \$ private/u);
+		doesNotMatch(keyed(["\x1b[200~!echo 1\x1b[201~"], width), /\$|shell/u);
+	}
+	match(keyed(["!", "\x1b[200~echo 1\x1b[201~"], 80), /^━ \$ shared shell · Enter runs/u);
 });
