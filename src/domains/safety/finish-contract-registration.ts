@@ -27,10 +27,12 @@ import {
 	assessFinishContract,
 	DEFAULT_RECENT_ENTRY_LIMIT,
 	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
+	FINISH_CONTRACT_RETIRED_SUFFIX,
 	type FinishContractAssessment,
 	type FinishContractInput,
 	mutationPathsForTool,
 	recentEntries,
+	retiredChecksNote,
 	type SessionVerifier,
 	standingFailedCheck,
 } from "./finish-contract.js";
@@ -242,7 +244,10 @@ export function createFinishContractRegistration(
 				return [];
 			}
 			if (rigor === "high") {
-				const failedChecks = assessment.failedAfterEdit?.length ? { failedChecks: assessment.failedAfterEdit } : {};
+				const failedChecks = {
+					...(assessment.failedAfterEdit?.length ? { failedChecks: assessment.failedAfterEdit } : {}),
+					...(assessment.retiredBy ? { retired: assessment.retiredBy } : {}),
+				};
 				const constraints = options.getTurnConstraints?.();
 				const names = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;
 				const reachable = typeof names === "string" ? names.split(",") : undefined;
@@ -277,14 +282,16 @@ export function createFinishContractRegistration(
 					: verificationTools.length > 0 && canRecordLimitation
 						? activeAcceptance?.verification.length || assessment.policyUnassessable
 							? assessment.message
-							: HIGH_RIGOR_REVALIDATION_MESSAGE
+							: `${HIGH_RIGOR_REVALIDATION_MESSAGE}${assessment.retiredBy ? FINISH_CONTRACT_RETIRED_SUFFIX : ""}`
 						: `[CLIO Coder] High-rigor finish gate: validation evidence is missing. ${verificationTools.length > 0 ? `Use an authorized check through ${verificationTools.join(" or ")}; if the operator excluded validation, report the blocker without running it.` : "Record the unavailable validation with limitation."} Do not claim checks passed without evidence.`;
 				const message = reserved ? `${directive}${CONTAINED_YOLO_CHECK_WAIVER}` : directive;
 				return [
 					{
 						kind: "request_continuation",
 						message,
-						note: "the change has no validation evidence yet",
+						note: assessment.retiredBy
+							? retiredChecksNote(assessment.retiredBy)
+							: "the change has no validation evidence yet",
 						...(reserved ? { reserved: "verification" as const } : {}),
 						fact: "unvalidated_mutation",
 					},
@@ -298,6 +305,7 @@ export function createFinishContractRegistration(
 					severity: "warn",
 					fact: "unvalidated_mutation",
 					...(assessment.failedAfterEdit?.length ? { failedChecks: assessment.failedAfterEdit } : {}),
+					...(assessment.retiredBy ? { retired: assessment.retiredBy } : {}),
 				},
 			];
 		},
