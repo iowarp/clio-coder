@@ -43,6 +43,7 @@ import removeCopilotConsent from "./2026-11-07-remove-copilot-consent.js";
 import retireFleetLocks from "./2026-11-21-retire-fleet-locks.js";
 import retiredSettings from "./2026-11-21-retired-settings.js";
 import writerSetLeaseClock from "./2026-11-21-writer-set-lease-clock.js";
+import exitSummaryOnOff from "./2026-11-23-exit-summary-on-off.js";
 import { appendMigrationNotice } from "./notices.js";
 import { legacyMigrationManifestPath, migrationManifestPath, REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
@@ -97,11 +98,12 @@ const MIGRATION_MANIFEST_MAX_BYTES = 1024 * 1024;
 // were retired with the legacy naming layer. Homes that recorded their ids keep
 // them in the manifest; an id with no registered migration is inert.
 //
-// `retiredSettings` runs first: the strict reader does not tolerate retired
-// keys, so it must run before any migration that reads settings through
-// `readSettings`.
+// `retiredSettings` runs first and `exitSummaryOnOff` second: the strict reader
+// does not tolerate retired keys or value spellings, so both must run before any
+// migration that reads settings through `readSettings`.
 const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	retiredSettings,
+	exitSummaryOnOff,
 	playbooksAndPackages,
 	acpAdapters,
 	claudeSubscription,

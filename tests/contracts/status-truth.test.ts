@@ -2945,10 +2945,14 @@ test("the exit summary counts a finished worker whose validation failed as Fleet
 	}
 	bus.emit("run.started", { runId: "run-d", agentId: "verifier", targetId: "mini", wireModelId: "m" } as never);
 	bus.emit("run.failed", { runId: "run-d", agentId: "verifier", outcome: "canceled" } as never);
-	const card = renderExitSummary(collector.snapshot(), "standard", 120, false).join("\n");
-	match(card, /Workers: 2 validation failed · 1 succeeded · 1 cancelled/u, card);
-	const detail = renderExitSummary(collector.snapshot(), "report", 120, false).join("\n");
-	match(detail, /Workers \(4; 2 validation failed, 1 succeeded, 1 cancelled\)/u, detail);
+	const card = renderExitSummary(collector.snapshot(), "on", 120, false, "standard").join("\n");
+	match(card, /^ {2}workers +2 validation failed · 1 succeeded · 1 cancelled$/mu, card);
+	const detail = renderExitSummary(collector.snapshot(), "on", 120, false, "detailed").join("\n");
+	match(
+		detail,
+		/^ {2}workers +(?=.*verifier run-a validation failed)(?=.*verifier run-b validation failed).*cancelled/mu,
+		detail,
+	);
 	strictEqual(detail.match(/verifier validation failed/gu)?.length, 2, "the timeline says what each run's record says");
 });
 
@@ -2995,8 +2999,8 @@ test("the exit summary counts a failed-over council member once, by its last att
 	} as never);
 	bus.emit("run.completed", { runId: "seal-1", agentId: "council-synthesis", outcome: "succeeded" } as never);
 	const snapshot = collector.snapshot();
-	const card = renderExitSummary(snapshot, "standard", 120, false).join("\n");
-	match(card, /Workers: 1 failed · 1 succeeded/u, card);
+	const card = renderExitSummary(snapshot, "on", 120, false, "standard").join("\n");
+	match(card, /^ {2}workers +1 failed · 1 succeeded$/mu, card);
 	deepStrictEqual(
 		(snapshot?.workers ?? []).map((worker) => worker.runId),
 		["broken-r2", "alpha-r0"],

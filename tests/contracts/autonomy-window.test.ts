@@ -422,10 +422,15 @@ test("the exit summary closes a yolo session with its window, its halt and the d
 		getModel: () => null,
 		autonomy: () => fx.window.report(),
 	});
-	const brief = renderExitSummary(collector.snapshot(), "brief", 200, false).join("\n");
-	match(brief, /Autonomy: contained yolo · 3 tool calls, .* tokens · paused at the 3-call cap · 1 open decision$/mu);
-	const standard = renderExitSummary(collector.snapshot(), "standard", 200, false).join("\n");
-	match(standard, /Autonomy: .*1 open decision · 1\) bash `git push origin main` \(operator-only, rule git-push\)/u);
+	const compact = renderExitSummary(collector.snapshot(), "on", 200, false, "compact").join("\n");
+	match(compact, /^ {2}autonomy +yolo for \S+ · 3 calls ran unasked · paused at the 3-call cap · 1 open decision$/mu);
+	const standard = renderExitSummary(collector.snapshot(), "on", 200, false, "standard").join("\n");
+	match(standard, /^ {2}autonomy +yolo .*1 open decision · contained · \S+ cap tokens$/mu);
+	const detailed = renderExitSummary(collector.snapshot(), "on", 200, false, "detailed").join("\n");
+	match(
+		detailed,
+		/^ {2}autonomy +.*1 open decision · .* · 1\) bash `git push origin main` \(operator-only, rule git-push\)/mu,
+	);
 	collector.dispose();
 });
 
