@@ -26,12 +26,14 @@ import {
 	type CompletionSlotName,
 	completeArgs,
 	renderArgsSpec,
+	usageLine,
 } from "../session-control/slash-spec.js";
 import { resolveFdBinary } from "../tools/executables.js";
 import {
 	createFileReferenceCompletionSource,
 	type FileReferenceCompletionSource,
 } from "./file-reference-completion.js";
+import { GLYPH } from "./theme/glyphs.js";
 
 export type SlashAutocompleteCommand = SlashCommand;
 
@@ -82,6 +84,10 @@ export interface SlashCompletionItem extends AutocompleteItem {
 	path?: string;
 	/** Why a refused row does nothing, as a full sentence. */
 	nextAction?: string;
+	/** The command's group (`session`), a supporting word at the row end where room allows; never in the description. */
+	group?: string;
+	/** The usage line the detail rows add at the detailed tier, e.g. `/fleet run <playbook>`. */
+	usage?: string;
 	/** An argument row the parser demands. An auto-opened list of rows that are all optional opens unselected. */
 	required?: boolean;
 	/** A command row whose bare invocation does something, so Enter on it runs it. */
@@ -156,7 +162,7 @@ function personalOrder(
 	return [...used, ...matches.filter((match) => !used.includes(match))];
 }
 
-const REFUSED_DURING_TURN_REASON = "a turn is running · Esc stops it first";
+const REFUSED_DURING_TURN_REASON = `a turn is running ${GLYPH.sep} Esc stops it first`;
 
 /** No dynamic values for any slot; the default when a caller supplies no sources. */
 export function emptyCompletionSources(): CompletionSources {
@@ -185,11 +191,11 @@ export function compactArgumentHint(args: CommandArgsSpec | undefined): string |
 	const flagParts = (args.flags ?? []).map((flag) => renderArgsSpec({ flags: [flag] }));
 	const kept: string[] = [];
 	for (const part of flagParts) {
-		if (`${[...kept, part].join(" ")} …${tail}`.length > ARGUMENT_HINT_BUDGET) break;
+		if (`${[...kept, part].join(" ")} ${GLYPH.ellipsis}${tail}`.length > ARGUMENT_HINT_BUDGET) break;
 		kept.push(part);
 	}
 	let flags = kept.join(" ");
-	if (kept.length < flagParts.length) flags = flags ? `${flags} …` : "…";
+	if (kept.length < flagParts.length) flags = flags ? `${flags} ${GLYPH.ellipsis}` : GLYPH.ellipsis;
 	const hint = `${flags}${flags ? tail : positionalTail}`.trim();
 	return hint || undefined;
 }
@@ -257,7 +263,7 @@ function rowLabel(name: string, tail: string | undefined): string {
 	if (visibleWidth(whole) <= ROW_LABEL_BUDGET) return whole;
 	const room = ROW_LABEL_BUDGET - visibleWidth(name) - 2;
 	if (room < 3) return name;
-	return `${name} ${truncateToWidth(tail, room, "", false).trimEnd()}…`;
+	return `${name} ${truncateToWidth(tail, room, "", false).trimEnd()}${GLYPH.ellipsis}`;
 }
 
 /**
@@ -287,7 +293,14 @@ function runsBare(name: string): boolean {
 
 function compactDescription(description: string | undefined): string | undefined {
 	if (!description || visibleWidth(description) <= COMPLETION_DESCRIPTION_BUDGET) return description;
-	return `${truncateToWidth(description, COMPLETION_DESCRIPTION_BUDGET - 1, "", false).trimEnd()}…`;
+	return `${truncateToWidth(description, COMPLETION_DESCRIPTION_BUDGET - 1, "", false).trimEnd()}${GLYPH.ellipsis}`;
+}
+
+/** The usage line of a command or one of its subcommands, without its `usage:` lead. */
+function usageText(ref: { name: string; args?: CommandArgsSpec }, subcommand?: string): string {
+	return usageLine(ref, subcommand)
+		.replace(/^\nusage:\s*/u, "")
+		.replace(/\n$/u, "");
 }
 
 const BARE_VALID_PARENTS = new Set(["context", "memory", "panes"]);
@@ -472,7 +485,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			const summary = template.unavailable
 				? `unavailable: ${template.unavailable}`
 				: template.displayOnly
-					? `${REFERENCE_TEMPLATE_MARKER} · ${template.description}`
+					? `${REFERENCE_TEMPLATE_MARKER} ${GLYPH.sep} ${template.description}`
 					: template.description;
 			const description = compactDescription(summary);
 			const item: SlashCompletionItem = {
@@ -486,6 +499,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 						? `Reference card shown to you; nothing is sent to the model: ${template.description}`
 						: `Prompt template: ${summary}`,
 				path: `/${name}`,
+				usage: hint ? `/${name} ${hint}` : `/${name}`,
 				...(template.unavailable ? { nextAction: "Unavailable until the package reference resolves." } : {}),
 				replacement: range,
 				appendSpace: Boolean(hint),
@@ -553,7 +567,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				id: `open:${exactRef.name}`,
 				kind: "open-submenu",
 				value: "",
-				label: "Open …",
+				label: `Open ${GLYPH.ellipsis}`,
 				description: `Open /${exactRef.name} actions`,
 				effectDescription: `Open /${exactRef.name} actions`,
 				replacement: { start: context.commandEnd, end: context.commandEnd },
@@ -632,6 +646,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 					description: compactDescription(`extension (${row.scope}): ${row.description}`) ?? row.description,
 					effectDescription: `${row.description.replace(/[.\s]+$/u, "")}. Runs installed operator extension code; output is local to you.`,
 					path: `/${row.invocation}`,
+					usage: `/${row.invocation}`,
 					...(!row.available ? { nextAction: `Unavailable: ${row.reason ?? "runtime unavailable"}.` } : {}),
 					replacement: { start: context.commandStart, end: context.commandEnd },
 					appendSpace: true,
@@ -656,6 +671,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		const selectedSubcommand = Object.keys(ref.args.subcommands ?? {}).find(
 			(name) => argumentText.trimStart().split(/\s+/, 1)[0] === name,
 		);
+		const parentUsage = usageText(ref, selectedSubcommand);
 		const items: SlashCompletionItem[] = [];
 		for (const completion of result.completions) {
 			if (completion.completionSlot) {
@@ -678,6 +694,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 							context.argsStart + result.tokenStart,
 							context.argsStart + result.tokenEnd,
 							[`/${ref.name}`, ...(selectedSubcommand ? [selectedSubcommand] : [])].join(` ${PATH_SEPARATOR} `),
+							parentUsage,
 							result.quote,
 						),
 					);
@@ -699,6 +716,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				// The grammar rides in the name cell; the purpose owns the description cell.
 				label: rowLabel(completion.token, result.submenu ? labelGrammar(subSpec) : completion.hint),
 				path: [...trail, ...(result.submenu || isFlag ? [completion.token] : [])].join(` ${PATH_SEPARATOR} `),
+				usage: result.submenu && subSpec ? usageText(ref, completion.token) : parentUsage,
 				replacement: { start: context.argsStart + result.tokenStart, end: context.argsStart + result.tokenEnd },
 				appendSpace: completion.hasNextSlot,
 				// A verb is required exactly when the bare command does nothing on its own.
@@ -743,7 +761,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 	private commandItem(match: CommandMatch, context: SlashContext): SlashCompletionItem {
 		const { ref } = match;
 		const replacement = { start: context.commandStart, end: context.commandEnd };
-		const group = ` · ${ref.group.toLowerCase()}`;
+		const group = ref.group.toLowerCase();
 		let item: SlashCompletionItem;
 		if (match.alias || match.verb) {
 			const line = match.alias
@@ -757,16 +775,18 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				id: match.alias ? `alias:${match.alias.name}` : `verb:${ref.name}:${match.verb}`,
 				kind: "command",
 				value: line,
-				label: match.alias ? `${match.alias.name} → /${line}` : rowLabel(line, labelGrammar(spec)),
+				label: match.alias ? `${match.alias.name} ${GLYPH.next} /${line}` : rowLabel(line, labelGrammar(spec)),
 				effectDescription: effect,
 				path: `/${line.replace(" ", ` ${PATH_SEPARATOR} `)}`,
+				group,
+				usage: match.verb ? usageText(ref, match.verb) : match.alias?.args ? `/${line}` : ref.usage,
 				replacement,
 				appendSpace: line.includes(" ") || Boolean(spec && (spec.positionals || spec.flags || spec.subcommands)),
 				// An alias runs what it stands for (`/clear` Enter starts `/new`); a verb row only completes.
 				runsBare: match.alias !== undefined && runsBare(line),
 			};
 			const description = compactDescription(effect);
-			if (description) item.description = `${description}${group}`;
+			if (description) item.description = description;
 		} else {
 			const remainingGrammar = compactArgumentHint(ref.args);
 			const subcommands = Object.keys(ref.args?.subcommands ?? {});
@@ -781,13 +801,15 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 						: rowLabel(ref.name, labelGrammar(ref.args)),
 				effectDescription: ref.description,
 				path: `/${ref.name}`,
+				group,
+				usage: ref.usage,
 				replacement,
 				appendSpace: Boolean(ref.args && (ref.args.positionals || ref.args.flags || ref.args.subcommands)),
 				// Only a row whose name the operator typed runs on Enter; a letters or description
 				// match (`/session` finding compact) completes and waits.
 				runsBare: (match.class === "exact" || match.class === "name") && runsBare(ref.name),
 			};
-			if (description) item.description = `${description}${group}`;
+			if (description) item.description = description;
 			if (remainingGrammar) item.remainingGrammar = remainingGrammar;
 			if (match.class === "description") item.describedOnly = true;
 		}
@@ -810,6 +832,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		start: number,
 		end: number,
 		parentPath: string,
+		usage: string,
 		quote?: '"' | "'",
 	): SlashCompletionItem {
 		return {
@@ -822,6 +845,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			appendSpace: grammar.hasNextSlot,
 			effectDescription: value.description,
 			path: parentPath,
+			usage,
 			required: grammar.required,
 			...(value.disabledReason ? { nextAction: `Unavailable: ${value.disabledReason}.` } : {}),
 			...(grammar.completionSlot ? { completionSlot: grammar.completionSlot } : {}),

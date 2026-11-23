@@ -1,4 +1,5 @@
 import type { OutputStyle } from "../core/defaults.js";
+import { tierPolicy } from "../core/presentation-tier.js";
 import {
 	Editor,
 	getKeybindings,
@@ -589,12 +590,18 @@ export class ClioEditor extends Editor {
 			.join(theme.fg("border", " › "));
 		const unavailable = item.disabledReason ? theme.fg("emptyState", "  unavailable") : "";
 		const rows = [`${gutter}${truncateToWidth(`${crumb}${unavailable}`, room, GLYPH.ellipsis, false)}`];
-		// A sentence that outgrows its two lines ends in an ellipsis rather than a silent cut.
+		// A sentence that outgrows the rows under the breadcrumb ends in an ellipsis rather than a silent cut.
+		const bodyRows = SUGGESTION_PANEL_ROWS - 1;
 		const wrapClamped = (text: string, paint: (line: string) => string): string[] => {
 			const wrapped = wrapTextWithAnsi(text, room);
-			const shown = wrapped.slice(0, 2);
-			if (wrapped.length > 2)
-				shown[1] = truncateToWidth(`${shown[1] ?? ""} ${wrapped[2] ?? ""}`, room, GLYPH.ellipsis, false);
+			const shown = wrapped.slice(0, bodyRows);
+			if (wrapped.length > bodyRows)
+				shown[bodyRows - 1] = truncateToWidth(
+					`${shown[bodyRows - 1] ?? ""} ${wrapped[bodyRows] ?? ""}`,
+					room,
+					GLYPH.ellipsis,
+					false,
+				);
 			return shown.map((line) => `${gutter}${paint(line)}`);
 		};
 		const effect = item.effectDescription ?? item.description ?? "";
@@ -602,7 +609,14 @@ export class ClioEditor extends Editor {
 		const nextRows = item.nextAction ? wrapClamped(item.nextAction, (line) => theme.fg("keyboardHint", line)) : [];
 		// A refused row's reason is why Enter did nothing, so a short panel keeps it over the description.
 		rows.push(...(item.disabledReason ? [...nextRows, ...effectRows] : [...effectRows, ...nextRows]));
-		return rows.slice(0, SUGGESTION_PANEL_ROWS);
+		const shown = rows.slice(0, SUGGESTION_PANEL_ROWS);
+		// The usage example belongs to the full detail pane, so it joins the detail rows only at detailed, and only
+		// when it says more than the breadcrumb.
+		if (item.usage && tierPolicy().pickerDetail === "pane" && item.usage !== parts.join(" ")) {
+			const usage = `${theme.fg("annotation", "usage ")}${theme.fg("commandHint", item.usage)}`;
+			shown.push(`${gutter}${truncateToWidth(usage, room, GLYPH.ellipsis, false)}`);
+		}
+		return shown;
 	}
 
 	/** Two-column gutter on each side of a docked body, the autocomplete's own indent. */
@@ -1154,18 +1168,103 @@ export class ClioEditor extends Editor {
 		const suggestions = lines.slice(this.autocompleteSourceStart);
 		const last = suggestions.at(-1);
 		const hasCount = last !== undefined && /^\s*\(\d+\/\d+\)\s*$/u.test(stripTerminalSequences(last));
-		const items = hasCount ? suggestions.slice(0, -1) : suggestions;
+		const engineItems = hasCount ? suggestions.slice(0, -1) : suggestions;
 		const selectedItem = this.selectedSuggestion();
 		const panel = selectedItem ? this.suggestionPanel(selectedItem, width, theme) : [];
-		const wanted = rows.length + items.length + (hasCount ? 1 : 0) + panel.length;
+		const wanted = rows.length + engineItems.length + (hasCount ? 1 : 0) + panel.length;
 		const bodyRows = dockAdaptiveRows(this.dockHost, wanted - 1);
 		const room = Math.max(1, bodyRows + 1 - rows.length);
 		// A short dock keeps a few list rows and gives the panel what is left.
 		const panelRows = Math.min(
 			panel.length,
-			Math.max(0, room - Math.min(items.length + (hasCount ? 1 : 0), SUGGESTION_MIN_LIST_ROWS)),
+			Math.max(0, room - Math.min(engineItems.length + (hasCount ? 1 : 0), SUGGESTION_MIN_LIST_ROWS)),
 		);
 		const listRoom = room - panelRows;
+		// Slash rows are composed here from the engine's own list, so the tier applies on the next frame, the group word
+		// sits at the row end where room allows, and a cut description ends in an ellipsis instead of a silent cut.
+		const policy = tierPolicy();
+		const list = this.suggestionEngine().autocompleteList as
+			| {
+					filteredItems?: ReadonlyArray<Partial<SlashCompletionItem>>;
+					selectedIndex?: number;
+					getVisibleRange?(): { startIndex: number; endIndex: number };
+					getPrimaryColumnWidth?(): number;
+			  }
+			| undefined;
+		// An unarmed list has no focused row: the engine drew its window with no selection, so the range is read the same way.
+		const armed = this.syncSuggestionArming();
+		const keptIndex = list?.selectedIndex;
+		if (!armed && list !== undefined) list.selectedIndex = -1;
+		let range: { startIndex: number; endIndex: number } | undefined;
+		try {
+			range = list?.getVisibleRange?.();
+		} finally {
+			if (!armed && list !== undefined && keptIndex !== undefined) list.selectedIndex = keptIndex;
+		}
+		const focused = armed ? keptIndex : undefined;
+		const visible = range ? (list?.filteredItems ?? []).slice(range.startIndex, range.endIndex) : [];
+		const composed =
+			range !== undefined &&
+			visible.length > 0 &&
+			visible.length === engineItems.length &&
+			visible.every((item) => item.kind !== undefined && typeof item.value === "string");
+		const rowRoom = Math.max(1, width - 4);
+		const column = list?.getPrimaryColumnWidth?.() ?? 32;
+		const minDescription = 10;
+		// The group words share one right-hand slot, shown on every row or none: descriptions keep this many cells first.
+		const groupFloor = 40;
+		const groupSlot =
+			policy.listDescriptions === "all" ? Math.max(0, ...visible.map((item) => visibleWidth(item.group ?? ""))) : 0;
+		const groupsFit = groupSlot > 0 && rowRoom - 2 - Math.min(column, rowRoom - 4) - groupSlot - 2 >= groupFloor;
+		const fit = (text: string, cells: number): string => {
+			if (visibleWidth(text) <= cells) return text;
+			const cut = truncateToWidth(text, Math.max(0, cells - visibleWidth(GLYPH.ellipsis)), "", false).trimEnd();
+			return `${cut}${GLYPH.ellipsis}`;
+		};
+		// The focused row states its description inline at compact only when the detail rows cannot carry it.
+		const focusedInline = panelRows < SUGGESTION_PANEL_ROWS;
+		const slashRow = (item: Partial<SlashCompletionItem>, selected: boolean): string => {
+			const lead = selected ? `${GLYPH.cursor} ` : "  ";
+			const cells = Math.max(1, rowRoom - visibleWidth(lead));
+			// A refused row keeps its reason at every tier, and a row without detail rows keeps its own description.
+			const described =
+				policy.listDescriptions === "all" ||
+				item.disabledReason !== undefined ||
+				item.path === undefined ||
+				(selected && focusedInline);
+			const description = described ? (item.description ?? "").replace(/[\r\n]+/gu, " ").trim() : "";
+			const group = groupsFit ? (item.group ?? "") : "";
+			const cell = Math.max(1, Math.min(column, cells - 2));
+			const name = item.label || item.value || "";
+			let label = fit(name, cells);
+			let gap = "";
+			let shown = "";
+			let showGroup = false;
+			const groupCells = group ? visibleWidth(group) + 2 : 0;
+			if (description && cells - cell >= minDescription) {
+				label = fit(name, Math.max(1, cell - 2));
+				gap = " ".repeat(Math.max(1, cell - visibleWidth(label)));
+				let descriptionRoom = cells - visibleWidth(label) - gap.length;
+				showGroup = group !== "" && descriptionRoom - groupCells >= minDescription;
+				if (showGroup) descriptionRoom -= groupCells;
+				shown = fit(description, descriptionRoom);
+			} else if (description && item.disabledReason !== undefined) {
+				// Too narrow for the description column: a refused row keeps its reason right after its name.
+				const reasonCells = Math.min(visibleWidth(description), Math.max(minDescription, cells - visibleWidth(name) - 2));
+				label = fit(name, Math.max(1, cells - 2 - reasonCells));
+				gap = "  ";
+				shown = fit(description, Math.max(1, cells - visibleWidth(label) - 2));
+			}
+			const head = shown ? `${label}${gap}${shown}` : label;
+			const tail = showGroup
+				? `${" ".repeat(Math.max(2, cells - visibleWidth(head) - visibleWidth(group)))}${theme.fg("annotation", group)}`
+				: "";
+			if (selected) return `${theme.style("selectedOption", `${lead}${head}`, { bold: true })}${tail}`;
+			return `${lead}${label}${shown ? theme.fg("menuDescription", `${gap}${shown}`) : ""}${tail}`;
+		};
+		const items = composed
+			? visible.map((item, index) => slashRow(item, range !== undefined && range.startIndex + index === focused))
+			: engineItems;
 		const selected = Math.max(
 			0,
 			items.findIndex((line) => stripTerminalSequences(line).trimStart().startsWith(`${GLYPH.cursor} `)),
@@ -1192,7 +1291,7 @@ export class ClioEditor extends Editor {
 		if (items.length === 0) appendSuggestion(theme.fg("emptyState", "No suggestions to display"), -1);
 		// The count row exists only when the list overflows, which is when the page keys move it.
 		if (hasCount && listRoom > 1 && last !== undefined)
-			appendSuggestion(`${last.trimEnd()}${theme.fg("keyboardHint", " · PgUp/PgDn page")}`, lines.length - 1);
+			appendSuggestion(`${last.trimEnd()}${theme.fg("keyboardHint", ` ${GLYPH.sep} PgUp/PgDn page`)}`, lines.length - 1);
 		for (const line of panel.slice(0, panelRows)) {
 			rows.push(padAnsi(`  ${line}`, width));
 			rowMap.push(-1);
