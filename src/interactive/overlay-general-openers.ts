@@ -645,6 +645,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			question,
 			columns: deps.terminal.columns,
 			onClose: () => controller.abort(),
+			// Live as the rail reads it: a streaming turn, or a worker the board has not settled.
+			isRunLive: () =>
+				deps.isTurnInFlight?.() === true ||
+				deps.telemetry.snapshot().runs.some((run) => !["completed", "failed", "aborted", "dead"].includes(run.status)),
 		});
 		deps.transitions.handle = session;
 		deps.requestRender();
