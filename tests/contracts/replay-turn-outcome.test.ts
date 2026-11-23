@@ -347,7 +347,7 @@ test("an unknown dynamic tool reads by its persisted action class, live and on r
 	} as ChatLoopEvent);
 	live.applyEvent(end as ChatLoopEvent);
 	const liveRow = rowOf(live.render(120));
-	assert.equal(liveRow, "$ ran deploy_preview · stage staging · 16B ✓ · 1.2s");
+	assert.equal(liveRow, "$ ran deploy_preview · 16B ✓ · 1.2s");
 
 	const replayed = createChatPanel();
 	rehydrateChatPanelFromTurns(replayed, [
@@ -410,7 +410,7 @@ test("a refused skill load reads the same live and on replay, from its persisted
 	live.applyEvent({ type: "tool_execution_start", toolCallId: "load-1", toolName: "context", args } as ChatLoopEvent);
 	live.applyEvent(end as ChatLoopEvent);
 	const plain = (lines: string[]) => lines.map(stripTerminalSequences).filter((line) => line.length > 0);
-	assert.deepEqual(plain(live.render(120)), ["§ skill tech-spec not loaded · manual-only: /skill tech-spec ✗"]);
+	assert.deepEqual(plain(live.render(120)), ["§ skill tech-spec not loaded · manual-only: /skill tech-spec ✗ failed"]);
 
 	// The replay clock advances on every read, as a slow runner's does. A
 	// replayed row may only state a duration the ledger recorded, never the

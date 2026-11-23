@@ -181,8 +181,9 @@ test("invocation previews omit redundant short primary values, retain options an
 		};
 		const text = plain(renderToolPreview(call, 100, transcriptDetail(style)));
 		strictEqual(text.split("README.md").length - 1, 1);
-		match(text, /offset.*40/);
-		match(text, /limit.*80/);
+		// Arguments the row does not consume leave the header; detailed states them as the card's `args` row.
+		(style === "detailed" ? match : doesNotMatch)(text, /offset.*40/);
+		(style === "detailed" ? match : doesNotMatch)(text, /limit.*80/);
 		match(plain(renderToolExecution(call, 100)), /path.*README.md/);
 		const long = { ...call, args: { path: `${"directory/".repeat(12)}final.ts` } };
 		// Compact is the action row alone, so a cut path keeps its tail there and

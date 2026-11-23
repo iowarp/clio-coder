@@ -469,7 +469,8 @@ describe("Clio rendering invariants", () => {
 		// No invalidate between the frames: only the clock moved.
 		const after = plainRender(panel);
 		// A running row's verb is progressive; its tail is the live mark and the elapsed.
-		match(before, /running `printf tool-command` ● 0ms/u);
+		// A sub-second live elapsed shows only where the tier states every duration.
+		match(before, /running `printf tool-command` ●\n/u);
 		match(after, /running `printf tool-command` ● 2\.3s/u);
 		strictEqual(after.match(/2\.3s/gu)?.length, 1, "worker elapsed requires a journal DTO");
 	});
@@ -3161,7 +3162,7 @@ describe("transcript block grammar", () => {
 			for (const style of ["compact", "standard", "detailed"] as const) {
 				// One row and no body: the message is the model's instruction and stays in /view.
 				const rows = renderToolPreview(refused(refusal), 100, transcriptDetail(style));
-				deepStrictEqual(rows.map(stripTerminalSequences), [`§ skill tech-spec not loaded · ${reason} ✗`]);
+				deepStrictEqual(rows.map(stripTerminalSequences), [`§ skill tech-spec not loaded · ${reason} ✗ failed`]);
 			}
 		}
 		// CLI-P56: a skill already in context is a no-op, so its row is neutral, never `not loaded · … ✗`.
@@ -3445,16 +3446,16 @@ describe("tool classes", () => {
 			[
 				"dispatch",
 				{ tasks: ["a", "b", "c"], mode: "pipeline", detach: true },
-				`${GLYPH.workerAgent} delegated 3 tasks as a pipeline · detach ✓`,
+				`${GLYPH.workerAgent} delegated 3 tasks as a pipeline ✓`,
 			],
-			["data", { op: "select", path: "runs.csv", limit: 5 }, `${GLYPH.toolHeader} selected from runs.csv · limit 5 ✓`],
+			["data", { op: "select", path: "runs.csv", limit: 5 }, `${GLYPH.toolHeader} selected from runs.csv ✓`],
 			[
 				"web_fetch",
 				{ url: "https://api.example.com/v1/items", method: "POST" },
-				`${GLYPH.classNetwork} sent api.example.com/v1/items · method POST ✓`,
+				`${GLYPH.classNetwork} sent api.example.com/v1/items ✓`,
 			],
 			["verify", {}, `${GLYPH.classExecute} listed checks ✓`],
-			["git", { op: "diff", path: "src/a.ts", cached: true }, `${GLYPH.classExecute} ran git diff src/a.ts · cached ✓`],
+			["git", { op: "diff", path: "src/a.ts", cached: true }, `${GLYPH.classExecute} ran git diff src/a.ts ✓`],
 			[
 				"run_script",
 				{ interpreter: "python3", script: "probe.py", args: ["--n", "5"] },
@@ -3467,7 +3468,7 @@ describe("tool classes", () => {
 				`${GLYPH.classKnowledge} consulted ledger post finding src/a.ts:12 ✓`,
 			],
 			["context", { scope: "skills", query: "profiling" }, `${GLYPH.classKnowledge} consulted skills \`profiling\` ✓`],
-			["grep", { pattern: "x", ignore_case: true }, `${GLYPH.toolHeader} searched for \`x\` · ignore_case ✓`],
+			["grep", { pattern: "x", ignore_case: true }, `${GLYPH.toolHeader} searched for \`x\` ✓`],
 			[
 				"artifact",
 				{ kind: "plan", title: "Retry design", path: "docs/plan.md", content: "…" },
@@ -3519,7 +3520,7 @@ describe("tool classes", () => {
 				{ isError: true, durationMs: 4_100 },
 			),
 		);
-		strictEqual(failed[0], `${GLYPH.classExecute} ran \`pnpm run lint\` · exit 1 ✗ · 4.1s`);
+		strictEqual(failed[0], `${GLYPH.classExecute} ran \`pnpm run lint\` · exit 1 · 4.1s ✗ failed`);
 		strictEqual(failed.join("\n").match(/exit 1|exited with code|command failed/gu)?.length, 1, failed.join("\n"));
 		match(failed.join("\n"), /│ src\/a\.ts:1:1 lint\/style\/useTemplate/u);
 		// The main agent's error path delivers only text; a status that carries the diagnosis keeps it.
@@ -3528,7 +3529,7 @@ describe("tool classes", () => {
 				isError: true,
 			}),
 		);
-		match(missing[0] ?? "", /· exit 127 ✗/u);
+		match(missing[0] ?? "", /· exit 127 ✗ failed$/u);
 		deepStrictEqual(missing.slice(1), ["  │ pnpm: not found"]);
 		// A silent command's status says only the exit again, and its size is the status text's, not output's.
 		const silent = rows(
@@ -3543,14 +3544,15 @@ describe("tool classes", () => {
 				{ isError: true, durationMs: 73 },
 			),
 		);
-		deepStrictEqual(silent, [`${GLYPH.classExecute} ran \`node -e 'process.exit(3)'\` · exit 3 ✗ · 73ms`]);
+		deepStrictEqual(silent, [`${GLYPH.classExecute} ran \`node -e 'process.exit(3)'\` · exit 3 ✗ failed`]);
 	});
 
 	it("states an exit code only when the result carries one", () => {
 		const panes = rows(settled("panes", { action: "list" }, text("2 panes", { action: "list", panes: [] })));
 		doesNotMatch(panes[0] ?? "", /exit/u);
 		const unknown = rows(settled("deploy_preview", { stage: "staging" }, text("deployed"), { actionClass: "execute" }));
-		ok(unknown[0]?.startsWith(`${GLYPH.classExecute} ran deploy_preview · stage staging`), unknown[0]);
+		ok(unknown[0]?.startsWith(`${GLYPH.classExecute} ran deploy_preview`), unknown[0]);
+		doesNotMatch(unknown[0] ?? "", /stage/u, "an argument the row does not consume leaves the header");
 		doesNotMatch(unknown[0] ?? "", /exit/u);
 	});
 
@@ -3564,7 +3566,7 @@ describe("tool classes", () => {
 			),
 		);
 		deepStrictEqual(failed, [
-			`${GLYPH.classMutate} edit failed src/a.ts ✗ · 42ms`,
+			`${GLYPH.classMutate} edit failed src/a.ts ✗ failed`,
 			"  │ oldText › OLD",
 			"  │ newText › NEW",
 			"  │ edit: oldText not found in src/a.ts.",
@@ -3579,14 +3581,12 @@ describe("tool classes", () => {
 				text("## AbortSignal", { status: 200, format: "markdown", bytesRead: 12_431 }),
 			),
 		);
-		deepStrictEqual(fetched, [
-			`${GLYPH.classNetwork} fetched nodejs.org/api/globals.html · 200 · markdown · 12.1KB ✓ · 42ms`,
-		]);
+		deepStrictEqual(fetched, [`${GLYPH.classNetwork} fetched nodejs.org/api/globals.html · 200 · markdown · 12.1KB ✓`]);
 		const issue = settled("web_fetch", { url: "https://github.com/iowarp/clio-coder/issues/412" }, text("# issue"));
 		match(rows(issue, "standard", 100)[0] ?? "", /fetched github\.com\/iowarp\/clio-coder\/issues\/412 /u);
 		// At 40 columns the label shortens to the path tail instead of splitting mid-token.
 		const narrow = rows(issue, "standard", 40);
-		match(narrow.join("\n"), /github\.com\/…\/412/u);
+		match(narrow.join("\n"), /github\.com\/…\/(?:issues\/)?412/u);
 		ok(
 			narrow.every((row) => !/https?:/u.test(row) && visibleWidth(row) <= 40),
 			narrow.join("\n"),
@@ -3605,7 +3605,7 @@ describe("tool classes", () => {
 			);
 			strictEqual(
 				mcp[0],
-				`${GLYPH.classExternal} called github › search_issues · query "flaky retry test" · state open ✓ · 42ms`,
+				`${GLYPH.classExternal} called github › search_issues ✓${style === "detailed" ? " · 42ms" : ""}`,
 			);
 			doesNotMatch(mcp.join("\n"), /op ›|capability ›|args ›/u);
 			const builtin = rows(
@@ -3621,13 +3621,16 @@ describe("tool classes", () => {
 				settled("gateway", { op: "find", query: "github issues" }, text("…", { op: "find", count: 3, total: 7 })),
 				style,
 			);
-			strictEqual(find[0], `${GLYPH.classExternal} searched capabilities for \`github issues\` · 3 of 7 found ✓ · 42ms`);
+			strictEqual(
+				find[0],
+				`${GLYPH.classExternal} searched capabilities for \`github issues\` · 3 of 7 found ✓${style === "detailed" ? " · 42ms" : ""}`,
+			);
 		}
 	});
 
 	it("reads an extension tool as server › tool with its scalar arguments inline", () => {
 		const row = rows(settled("extension_hpc__queue_status", { partition: "gpu" }, text("gpu: 3 pending")));
-		deepStrictEqual(row, [`${GLYPH.classExternal} called hpc › queue_status · partition gpu ✓ · 42ms`]);
+		deepStrictEqual(row, [`${GLYPH.classExternal} called hpc › queue_status ✓`]);
 	});
 
 	it("reads an operator question as question → answer and never renders the model's copy", () => {
@@ -3642,7 +3645,9 @@ describe("tool classes", () => {
 				),
 				style,
 			);
-			deepStrictEqual(one, [`${GLYPH.classInteraction} asked Keep it deprecated? → Yes ✓ · 42ms`]);
+			deepStrictEqual(one, [
+				`${GLYPH.classInteraction} asked Keep it deprecated? → Yes ✓${style === "detailed" ? " · 42ms" : ""}`,
+			]);
 			const round = rows(
 				settled(
 					"ask_user",
@@ -3655,7 +3660,7 @@ describe("tool classes", () => {
 				style,
 			);
 			deepStrictEqual(round, [
-				`${GLYPH.classInteraction} asked 2 questions ✓ · 42ms`,
+				`${GLYPH.classInteraction} asked 2 questions ✓${style === "detailed" ? " · 42ms" : ""}`,
 				"  │ Jitter? → 50",
 				"  │ Alias? → Yes",
 			]);
@@ -3667,19 +3672,22 @@ describe("tool classes", () => {
 				),
 				style,
 			);
-			deepStrictEqual(complete, [`${GLYPH.classInteraction} completed the interview ✓ · 42ms`, "  │ Jitter → 50"]);
+			deepStrictEqual(complete, [
+				`${GLYPH.classInteraction} completed the interview ✓${style === "detailed" ? " · 42ms" : ""}`,
+				"  │ Jitter → 50",
+			]);
 		}
 	});
 
 	it("states evidence and run_script calls on their rows instead of as JSON", () => {
 		deepStrictEqual(rows(settled("evidence", { mode: "list" }, text("{}"))), [
-			`${GLYPH.classKnowledge} consulted evidence list ✓ · 42ms`,
+			`${GLYPH.classKnowledge} consulted evidence list ✓`,
 		]);
 		deepStrictEqual(
 			rows(
 				settled("run_script", { script: "scripts/check-flaky.ts", args: ["--runs", "50"] }, text("50/50", { exitCode: 0 })),
 			),
-			[`${GLYPH.classExecute} ran \`scripts/check-flaky.ts --runs 50\` · exit 0 ✓ · 42ms`, "  │ 50/50"],
+			[`${GLYPH.classExecute} ran \`scripts/check-flaky.ts --runs 50\` · exit 0 ✓`, "  │ 50/50"],
 		);
 	});
 
@@ -3877,12 +3885,12 @@ describe("tool classes", () => {
 		const listing = text("a.ts\nb.ts\nsrc/\ntests/\nREADME.md\npackage.json\n.git/", {
 			observation: { unit: "entries", shownCount: 7, totalCount: 7, shownBytes: 55, totalBytes: 55 },
 		});
-		deepStrictEqual(rows(settled("ls", {}, listing)), [`${GLYPH.toolHeader} listed workspace · 7 entries ✓ · 42ms`]);
+		deepStrictEqual(rows(settled("ls", {}, listing)), [`${GLYPH.toolHeader} listed workspace · 7 entries ✓`]);
 		const read = text("x", {
 			observation: { unit: "lines", shownCount: 40, totalCount: 120, shownBytes: 1_434, totalBytes: 4_403 },
 		});
 		deepStrictEqual(rows(settled("read", { path: "src/net/retry.ts" }, read)), [
-			`${GLYPH.toolHeader} read src/net/retry.ts · lines 1-40 of 120 · 1.4KB of 4.3KB ✓ · 42ms`,
+			`${GLYPH.toolHeader} read src/net/retry.ts · lines 1-40 of 120 · 1.4KB of 4.3KB ✓`,
 		]);
 	});
 
@@ -3951,7 +3959,7 @@ describe("tool classes", () => {
 				style,
 			).join("\n");
 			strictEqual(plain.split("bash blocked: system_modify").length - 1, 0, plain);
-			match(plain, /^\$ blocked `rm -rf \.\/build` ✗ · bash blocked: changes the system/u);
+			match(plain, /^\$ blocked `rm -rf \.\/build` · bash blocked: changes the system(?: · 42ms)? ✗ blocked/u);
 			match(plain, /rule: rm-recursive-or-force/u, "the rest of the rejection stays");
 		}
 	});
@@ -3961,26 +3969,24 @@ describe("tool classes", () => {
 		const listing = text("a.ts", { observation: { unit: "entries", shownCount: 7, totalCount: 7, shownBytes: 55 } });
 		// A model that sends absolute paths reads the same as one that sends
 		// relative ones: no cut prefix, no `path ›` row repeating it.
-		deepStrictEqual(rows(settled("ls", { path: cwd }, listing)), [
-			`${GLYPH.toolHeader} listed workspace · 7 entries ✓ · 42ms`,
-		]);
+		deepStrictEqual(rows(settled("ls", { path: cwd }, listing)), [`${GLYPH.toolHeader} listed workspace · 7 entries ✓`]);
 		deepStrictEqual(rows(settled("read", { path: `${cwd}/docs/retry.md` }, text("x"))), [
-			`${GLYPH.toolHeader} read docs/retry.md ✓ · 42ms`,
+			`${GLYPH.toolHeader} read docs/retry.md ✓`,
 		]);
 		deepStrictEqual(rows(settled("grep", { pattern: "needle", path: `${cwd}/src` }, text("x"))), [
-			`${GLYPH.toolHeader} searched for \`needle\` in src ✓ · 42ms`,
+			`${GLYPH.toolHeader} searched for \`needle\` in src ✓`,
 		]);
 		deepStrictEqual(rows(settled("edit", { path: `${cwd}/src/a.ts` }, text("ok"))), [
-			`${GLYPH.classMutate} edited src/a.ts ✓ · 42ms`,
+			`${GLYPH.classMutate} edited src/a.ts ✓`,
 		]);
 		// A resource read the path already names carries no second label.
 		deepStrictEqual(rows(settled("read", { path: "docs/retry.md" }, text("x"))), [
-			`${GLYPH.toolHeader} read docs/retry.md ✓ · 42ms`,
+			`${GLYPH.toolHeader} read docs/retry.md ✓`,
 		]);
 		match(rows(settled("read", { path: "CLIO-CODER.md" }, text("x")))[0] ?? "", /read CLIO-CODER\.md · handbook ✓/u);
 		// A path leaves room for the outcome on the same row and keeps its file name.
 		const whole = rows(settled("read", { path: "library/skills/perf/SKILL.md" }, text("x")), "standard", 40);
-		match(whole[0] ?? "", /^▸ read …\/perf\/SKILL\.md ✓ · 42ms$/u, whole.join("\n"));
+		match(whole[0] ?? "", /^▸ read (?:…|library\/skills)\/perf\/SKILL\.md ✓$/u, whole.join("\n"));
 		doesNotMatch(whole.join("\n"), /path ›/u);
 		// A path outside the workspace that must be cut keeps its file name, on
 		// the row's first line with its outcome, and repeats in full beneath it.
@@ -4212,7 +4218,7 @@ describe("agent invocations", () => {
 		}
 		dispatchEnd(panel, "fan", 3, 1);
 		const rows = plainRender(panel, 100).split("\n");
-		strictEqual(rows[0], `${GLYPH.workerAgent} delegated 3 tasks · 2 ok, 1 failed · 38s`);
+		strictEqual(rows[0], `${GLYPH.workerAgent} delegated 3 tasks · 1 failed · 2 ok · 38s`);
 		strictEqual(rows[1], "", "the cards follow the call as the next entry");
 		const cards = rows.filter((row) => row.startsWith(`${GLYPH.workerAgent} scout`));
 		strictEqual(cards.length, 3);

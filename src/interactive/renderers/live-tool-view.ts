@@ -22,6 +22,7 @@ import { truncateToWidth } from "../../engine/tui.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 import { type CodeInkCarry, type CodeInkLexer, codeInkLangForPath, codeInkLexer } from "./code-ink.js";
+import { tidyPreviewText } from "./preview.js";
 
 /** Lines above the window that redaction reads, so a flag on one line still hides its value on the next. */
 const REDACTION_MARGIN_LINES = 3;
@@ -178,8 +179,10 @@ function liveOutputRows(
 	if (rows <= 0) return [];
 	const trimmed = text.replace(/\s+$/u, "");
 	if (trimmed.length === 0) return [];
+	// The window never opens on a blank row or spends rows on a run of them; the end is already trimmed.
+	const tidy = tidyPreviewText(trimmed);
 	// Trailing whitespace already closed the last run, and the trim would hide that from the hold (#446).
-	const body = trimmed.length === text.length ? holdUnresolvedUserinfo(trimmed) : trimmed;
+	const body = trimmed.length === text.length ? holdUnresolvedUserinfo(tidy) : tidy;
 	let total = 1;
 	for (let at = body.indexOf("\n"); at >= 0; at = body.indexOf("\n", at + 1)) total += 1;
 	const hiddenAbove = options.truncatedTotal !== undefined;
