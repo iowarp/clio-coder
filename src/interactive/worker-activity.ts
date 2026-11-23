@@ -133,6 +133,21 @@ export function bindWorkerResponseLimit(read: () => number | null): void {
 	readWorkerResponseLimitMs = read;
 }
 
+let readDockedApprovalRun: () => string | null = () => null;
+
+/**
+ * Where a worker row reads which run's approval card this session has docked. Only that card answers the ask, so a
+ * row names `[Enter] on the card` for that run alone; the overlay lifecycle that docks the card binds it.
+ */
+export function bindDockedWorkerApproval(read: () => string | null): void {
+	readDockedApprovalRun = read;
+}
+
+/** The run whose approval card this session has docked now, or null. */
+export function dockedWorkerApprovalRun(): string | null {
+	return readDockedApprovalRun();
+}
+
 /** The silence form that fits `room`, or the widest one with no room given. */
 export function workerSilenceWords(
 	progress: Parameters<typeof workerSilenceForms>[0],
@@ -210,8 +225,11 @@ const TOOLS_THE_VERB_NAMES: ReadonlySet<string> = new Set([
 	"think",
 ]);
 
-/** Who owns a parked call. Naming the call's verb here would say it is running when it has not been allowed yet. */
-export const WAITING_FOR_APPROVAL = "waiting for your approval";
+/**
+ * Who owns a parked call, in the pending state's own word. Naming the call's verb here would say it is running when
+ * it has not been allowed yet.
+ */
+export const WAITING_FOR_APPROVAL = "needs approval";
 
 export interface WorkerActionParts {
 	verb: string;
@@ -279,7 +297,12 @@ const APPROVAL_WAITERS: Readonly<Record<WorkerApprovalDecider, readonly [string,
  */
 export function approvalWaitWords(
 	progress: Pick<WorkerProgressSnapshot, "approvalWindow">,
-	options: { now?: number; room?: number } = {},
+	options: {
+		now?: number;
+		room?: number;
+		/** A run row keeps `approval held by session <id>` whole and drops the deadline first (6.2). */
+		ownerFirst?: boolean;
+	} = {},
 ): string {
 	const window = progress.approvalWindow;
 	if (window === undefined) return WAITING_FOR_APPROVAL;
@@ -298,6 +321,7 @@ export function approvalWaitWords(
 		owner !== undefined
 			? [
 					["running", `approval held by session ${owner}`, fails ? `run fails in ${left}` : denied],
+					...(options.ownerFirst === true ? [["running", `approval held by session ${owner}`]] : []),
 					["running", `held by session ${owner}`, fails ? `fails in ${left}` : denied],
 					["running", `held by session ${owner}`],
 					["running", "held by its owner"],

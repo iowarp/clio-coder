@@ -178,15 +178,19 @@ function scoutReport(value: Record<string, unknown>): PresentedContractAnswer | 
  * A mutation report as prose: the paths it changed, each validation with its
  * verdict and evidence, then the summary and commit line. `commitOn` names the
  * branch the proposed commit lands on, undefined when nothing commits it, and
- * null when the reader cannot tell. Null when the object is not that shape.
+ * null when the reader cannot tell. `withNothingChanged` false leaves out the
+ * `changed nothing` line for a card whose facts row already says so; a list of
+ * changed paths always stays. Null when the object is not that shape.
  */
 export function mutationReportLines(
 	value: Record<string, unknown>,
 	commitOn: string | null | undefined,
+	withNothingChanged = true,
 ): string[] | null {
 	if (!isStringArray(value.mutatedPaths) || !Array.isArray(value.validations)) return null;
 	const lines: string[] = [];
-	lines.push(value.mutatedPaths.length === 0 ? "changed nothing" : `changed ${value.mutatedPaths.join(", ")}`);
+	if (value.mutatedPaths.length > 0) lines.push(`changed ${value.mutatedPaths.join(", ")}`);
+	else if (withNothingChanged) lines.push("changed nothing");
 	for (const validation of value.validations) {
 		if (typeof validation !== "object" || validation === null) continue;
 		const check = validation as Record<string, unknown>;

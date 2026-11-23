@@ -345,8 +345,13 @@ for (const mode of ["verified", "tampered", "missing-ledger", "unsealed"] as con
 				if (mode === "verified" || mode === "missing-ledger") assert.match(output, /reproduction reproduced/);
 				else {
 					assert.doesNotMatch(output, /reproduction reproduced/);
-					assert.match(output, /raw output, not admitted as evidence/);
-					assert.match(output, mode === "tampered" ? /seal broken/ : /seal unchecked/);
+					// The run row leads with the record's verdict at every tier; detailed names the record on its own row.
+					assert.match(output, mode === "tampered" ? /✗ ◇ debugger .*seal broken/ : /! ◇ debugger .*unverified/);
+					if (style === "detailed")
+						assert.match(
+							output,
+							mode === "tampered" ? /record: not trusted/ : /record: unverified; raw output, not admitted as evidence/,
+						);
 				}
 			}
 			const exported = createChatPanel({ unboundedToolBodies: true });
