@@ -80,6 +80,10 @@ test("mux panes carry only the canonical owner token and never adopt a released 
 		async paneCurrent() {
 			return { paneId: "self", tabId: "t1", workspaceId: "w1" };
 		},
+		// A wide anchor, so the 60-column floor lets the split to the right through.
+		async paneLayout() {
+			return { panes: [{ paneId: "self", focused: true, rect: { x: 0, y: 0, width: 200, height: 50 } }], splits: [] };
+		},
 		async paneSplit() {
 			return { paneId: "opened", tabId: "t1", workspaceId: "w1" };
 		},

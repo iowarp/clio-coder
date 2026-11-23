@@ -173,20 +173,6 @@ export function win32PaneLaunch(
 	};
 }
 
-/**
- * `tail -n 200 -F path` for a Windows pane. Windows PowerShell reads a file
- * without a byte order mark in the ANSI code page, so the feed's UTF-8 is named.
- */
-export function win32FollowArgv(powershell: string, path: string): string[] {
-	return [
-		powershell,
-		"-NoLogo",
-		"-NoProfile",
-		"-Command",
-		`Get-Content -LiteralPath ${psLiteral(path)} -Tail 200 -Wait -Encoding UTF8`,
-	];
-}
-
 export function createWin32HostPlatform(options: Win32HostOptions = {}): MuxHostPlatform {
 	const stateDir = options.stateDir ?? clioStateDir;
 	let killedClient = false;
