@@ -191,9 +191,9 @@ export interface PanesWatchController {
 	isOpen(): boolean;
 	/**
 	 * A key meant for Clio was pressed inside the dashboard: `hide` is its `q`,
-	 * `key` is Alt+W. Returns the unsubscribe.
+	 * `key` is Alt+W, `tier` is Alt+O. Returns the unsubscribe.
 	 */
-	onDockKey(handler: (key: "hide" | "key") => void): () => void;
+	onDockKey(handler: (key: "hide" | "key" | "tier") => void): () => void;
 	dispose(): void;
 }
 

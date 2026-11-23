@@ -1103,7 +1103,7 @@ export async function runWorkersDashboard(options: WorkersDashboardOptions): Pro
 	};
 	tui.addChild(view);
 
-	const tap = (word: "hide" | "key"): boolean => {
+	const tap = (word: "hide" | "key" | "tier"): boolean => {
 		if (options.tapPath === null) return false;
 		try {
 			appendFileSync(options.tapPath, `${word}\n`);
@@ -1138,6 +1138,11 @@ export async function runWorkersDashboard(options: WorkersDashboardOptions): Pro
 			}
 			if (matchesKey(data, "alt+w")) {
 				tap("key");
+				return { consume: true };
+			}
+			// Alt+O cycles Clio's tier from here too (FX-13); the new tier comes back on the watch file's outputDetail line.
+			if (matchesKey(data, "alt+o")) {
+				tap("tier");
 				return { consume: true };
 			}
 			if (data === "q") {
