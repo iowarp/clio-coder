@@ -1013,19 +1013,21 @@ export class ListOverlayView implements Component {
 			const metaWidth = this.metaWidth(filteredItems);
 			// With no detail pane, a two-column row the width cuts is stated whole under the list for the focused
 			// row. The rows are reserved whenever any row is cut, so moving the cursor never resizes the window.
-			const focus =
+			let focus =
 				focusLine && listMaxLines >= FOCUS_LINE_MIN_LIST_ROWS && this.anyRowCut(width - 2, filteredItems, leadWidth)
 					? this.focusLineRows(width, filteredItems[this.selectedIndex])
 					: [];
-			// With no pane the tier states the selection under the list; the focus line already states it whole.
-			const block = focus.length === 0 && focusLine ? this.reservedSelectionBlock(width, filteredItems) : [];
+			// With no pane the tier states the selection under the list, whether or not the width cut its text: the focus
+			// line restates the row, the block says what the row leaves out.
+			const block = focusLine ? this.reservedSelectionBlock(width, filteredItems) : [];
 			const windowFor = (blockRows: number): { scrollRows: number; itemRows: number } => {
 				const room = listMaxLines - focus.length - blockRows;
 				const scroll = renderedRows.length > room && listMaxLines > 1 ? 1 : 0;
 				return { scrollRows: scroll, itemRows: room - scroll };
 			};
-			// The block gives way, last row first, before the list falls under the rows a cursor needs.
+			// Before the list falls under the rows a cursor needs, the focus line gives way, then the block, last row first.
 			const listFloor = Math.min(STACKED_LIST_MIN_ROWS, renderedRows.length);
+			if (focus.length > 0 && windowFor(block.length).itemRows < listFloor) focus = [];
 			let blockRows = block.length;
 			while (blockRows > 0 && windowFor(blockRows).itemRows < listFloor) blockRows -= 1;
 			const scrollRows = windowFor(blockRows).scrollRows;

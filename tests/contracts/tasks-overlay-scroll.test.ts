@@ -1,5 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, ok } from "node:assert/strict";
 import { after, test } from "node:test";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { SessionArtifact } from "../../src/domains/session/session-artifacts.js";
 import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
 import type { UserTask } from "../../src/domains/user-tasks/store.js";
@@ -174,6 +175,19 @@ test("a board that fits renders whole, with no position row and no page hint (BT
 	const large = mount();
 	large.render();
 	match(large.frame.dockHint(200) ?? "", /\[PgUp\/PgDn\] page/u);
+});
+
+test("compact states the selection in a status row that carries no second cursor (FX-17)", (t) => {
+	t.after(() => setPresentationTier("standard"));
+	setPresentationTier("compact");
+	const small: TaskBoardSnapshot = { ...BOARD, tasks: BOARD.tasks.slice(3) };
+	const screen = mount(small, USER_TASKS.slice(1)).render();
+	deepStrictEqual(
+		screen.filter((row) => row.startsWith(`${GLYPH.cursor} `)).length,
+		1,
+		`only the selected row carries the cursor:\n${screen.join("\n")}`,
+	);
+	match(screen.join("\n"), /^ {2}Review divide\(\) rounding behaviour · /mu, "the status row names the selection");
 });
 
 test("x asks once before it drops an operator task, and any other key keeps the task", () => {
