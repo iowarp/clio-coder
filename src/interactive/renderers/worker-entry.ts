@@ -1,28 +1,19 @@
-import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
-import { renderCalls } from "../../core/telemetry/render.js";
-import { isCouncilSeatNotRun, parseCouncilReport } from "../../domains/agents/index.js";
-import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
-import { redactSecretString } from "../../domains/safety/redaction.js";
-import { COUNCIL_SEALED_REPORT_AGENT_ID, COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
-import { cardRail, cardRows } from "../card.js";
-import type { TranscriptDetailPolicy } from "../transcript-detail.js";
-import { transcriptDetail } from "../transcript-detail.js";
-import { previewBudget, previewRows } from "./preview.js";
+import { formatCount, formatElapsed } from "../../core/format-time.js";
+import { type TierPolicy, tierPolicy } from "../../core/presentation-tier.js";
 import {
-	commitPlacementOf,
-	councilAnswerGist,
-	councilCollectedWords,
-	councilMemberAnswerLines,
-	exactWorkerAnswerObject,
-	mutationReportLines,
-	type PresentedContractAnswer,
-	presentCouncilReport,
-	presentWorkerContractAnswer,
-	WorkerAnswerProjection,
-} from "./worker-answer.js";
-
-/** Bounded worker summaries share the main transcript's output style. */
-
+	type RunApprovalFacts,
+	type RunCell,
+	type RunFacts,
+	type RunIntegrity,
+	type RunRowLayout,
+	type RunStateKind,
+	type RunTelemetryFacts,
+	type RunValidation,
+	runIdentityWidth,
+	runRow,
+} from "../../core/run-row.js";
+import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import { isCouncilSeatNotRun, parseCouncilReport } from "../../domains/agents/index.js";
 import {
 	plainOutcomeLabel,
 	refusedCallsWords,
@@ -31,15 +22,19 @@ import {
 	workerFailureHeadline,
 } from "../../domains/dispatch/failure-headline.js";
 import { fleetNodeTaskBrief } from "../../domains/dispatch/fleet-node-prompt.js";
-import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
-import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
+import { trustStateWord, trustVerdict, validationClause } from "../../domains/evidence/trust-projection.js";
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
+import { redactSecretString } from "../../domains/safety/redaction.js";
+import type { WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
+import { COUNCIL_SEALED_REPORT_AGENT_ID, COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
 import {
 	type WorkerEntryState as StreamWorkerEntryState,
 	type WorkerRunResultSummary,
 	workerAskedByModel,
 } from "../../session-control/worker-stream.js";
+import { cardRail, cardRows } from "../card.js";
 import { councilLabelText } from "../council-grid.js";
 import type { RouteFirstOutput } from "../footer/silence-note.js";
 import { actionKeyLabel } from "../keybinding-manager.js";
@@ -52,16 +47,31 @@ import {
 	type SemanticRole,
 	toolFunction,
 } from "../theme/index.js";
+import type { TranscriptDetailPolicy } from "../transcript-detail.js";
+import { transcriptDetail } from "../transcript-detail.js";
 import {
 	approvalWaitWords,
 	compactQuantity,
-	completedRunMark,
+	dockedWorkerApprovalRun,
 	finishedActionFault,
 	workerActionParts,
 	workerPhaseActivity,
 	workerQuietWords,
 	workerSilenceWords,
 } from "../worker-activity.js";
+import { previewBudget } from "./preview.js";
+import {
+	commitPlacementOf,
+	councilAnswerGist,
+	councilCollectedWords,
+	councilMemberAnswerLines,
+	exactWorkerAnswerObject,
+	mutationReportLines,
+	type PresentedContractAnswer,
+	presentCouncilReport,
+	presentWorkerContractAnswer,
+	WorkerAnswerProjection,
+} from "./worker-answer.js";
 
 const theme = clioTheme();
 const meta = (text: string): string => theme.fg("toolMetadata", text);
@@ -123,19 +133,11 @@ export function workerTelemetryDisplay(telemetry: RunTelemetryV1 | null): string
 	].join("\0");
 }
 
-/** A plain display string needs only enough complete words to fill the row (#428). */
-function fitDisplayText(text: string, width: number): string {
-	const head = text.slice(0, Math.max(0, width) + 32);
-	const boundary = head.lastIndexOf(" ");
-	const prefix = head.slice(0, boundary);
-	return truncateToWidth(boundary > 0 && visibleWidth(prefix) > width ? prefix : text, width, GLYPH.ellipsis, false);
-}
-
-// The worker card follows the transcript's gutter grammar: the origin glyph
-// sits in the gutter and the card's body nests under it in the content column.
 const RAIL_WIDTH = visibleWidth(cardRail());
+/** A worker row under a dispatch header nests two cells in; its sub-lines then hang on a rail at column 4. */
+const NEST = "  ";
 const ATTEMPT = "↻ ";
-const SEPARATOR = " · ";
+const SEPARATOR = ` ${GLYPH.sep} `;
 
 export interface WorkerEntryRenderOptions {
 	telemetry?: RunTelemetryV1 | null;
@@ -144,7 +146,7 @@ export interface WorkerEntryRenderOptions {
 	detail?: TranscriptDetailPolicy;
 	terminalRows?: number;
 	/**
-	 * Inspect the card whole, as `/view` and `/export` do: the Detailed card with
+	 * Inspect the card whole, as `/view` and `/export` do: the detailed card with
 	 * every budget lifted and the answer exactly as the run returned it.
 	 */
 	unbounded?: boolean;
@@ -153,15 +155,18 @@ export interface WorkerEntryRenderOptions {
 	 * the round's header row is not repeated above it.
 	 */
 	group?: "leads" | "continues";
-	/** Workers admitted by the same dispatch call, including settled siblings. */
+	/**
+	 * Workers admitted by the same dispatch call, including settled siblings. With them the card is a run row nested
+	 * under the dispatch header, its identity column as wide as the widest sibling's.
+	 */
 	siblings?: ReadonlyArray<WorkerEntryState>;
+	/** The first card of its group. The dispatch tool row is the group's header, so no worker card draws one. */
 	showGroupHeader?: boolean;
 }
 
 /**
- * Who started the run, in the gutter: `◆` the model, `◇` the operator, `↳`
- * Clio's own helper work. Settled or running, the mark keeps its token; the
- * function family uses orange; the separate `●` on the row conveys live state.
+ * Who started the run, in the gutter of a council round's header: `◆` the model, `◇` the operator, `↳` CLIO Coder's
+ * own helper work.
  */
 function originGlyph(entry: WorkerEntryState): string {
 	if (entry.helper) return functionText(theme, "shadowDispatch", GLYPH.subProcess);
@@ -169,55 +174,15 @@ function originGlyph(entry: WorkerEntryState): string {
 }
 
 /**
- * The header's units after the glyph: who ran, where, and which run. A Clio or
- * Claude worker names its target and model; an ACP peer runs behind someone
- * else's process and can only name the protocol it was reached through, so it
- * carries that on the agent instead of a route.
+ * The route that ran the worker as `<target> · <model>`. A model id that already starts with its target's name
+ * (`mock` serving `mock/judge-model`) is not repeated. An ACP peer runs behind someone else's process and names none.
  */
 function workerRoute(entry: WorkerEntryState): string | undefined {
+	if (entry.runtime.kind === "acp") return undefined;
 	const { targetId, wireModelId } = entry.runtime;
-	// A model id that already starts with its target's name (`mock` serving `mock/judge-model`) is not repeated.
-	return targetId !== undefined && wireModelId !== undefined
-		? wireModelId.startsWith(`${targetId}/`)
-			? wireModelId
-			: `${targetId}/${wireModelId}`
-		: (targetId ?? wireModelId);
-}
-
-function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
-	const { kind } = entry.runtime;
-	const route = workerRoute(entry);
-	// A council member reads by its roster label in its roster color, the name
-	// the operator configured, rather than by its agent id. The synthesis card is the council's own row, so it goes by
-	// the council's size. The sealed report ran no model of its own whatever the synthesis (its record carries the first
-	// member's route), so it names no route; a judge's route is on the judge's own card.
-	const report = isSynthesis(entry) && !isPending(entry) ? parseCouncilReport(entry.text) : null;
-	const who =
-		entry.council !== undefined
-			? councilLabelText(
-					theme,
-					isSynthesis(entry)
-						? report !== null && councilSeatsRan(report) > 0
-							? `council of ${councilSeatsRan(report)}`
-							: "council"
-						: entry.council.label,
-					entry.council.color,
-				)
-			: theme.fg("workerIdentity", kind === "acp" ? `${entry.agentId} (acp)` : entry.agentId);
-	const showRoute =
-		kind !== "acp" &&
-		route !== undefined &&
-		entry.agentId !== COUNCIL_SEALED_REPORT_AGENT_ID &&
-		report?.synthesis.kind !== "none";
-	return [
-		who,
-		...(entry.planStep !== undefined ? [theme.fg("info", sanitizeCallTargetText(entry.planStep))] : []),
-		...(entry.helper ? [meta("internal")] : []),
-		...(showRoute && route !== undefined ? [meta(route)] : []),
-		...(withRunId ? [meta(`run ${entry.runId}`)] : []),
-		// A failover keeps the card; the header says which attempt it shows.
-		...(entry.attempts.length > 1 ? [meta(`attempt ${entry.attempts.length}`)] : []),
-	];
+	if (targetId !== undefined && wireModelId !== undefined)
+		return wireModelId.startsWith(`${targetId}/`) ? wireModelId : `${targetId}${SEPARATOR}${wireModelId}`;
+	return targetId ?? wireModelId;
 }
 
 /**
@@ -236,19 +201,19 @@ function councilHeader(entry: WorkerEntryState, width: number, hint: string | nu
 }
 
 /**
- * Compact gives each council member one line, so an answer longer than that line was cut with nothing saying so
+ * Compact gives each council member one row, so an answer longer than that row was cut with nothing saying so
  * (FX-14). The round's header names the key that shows the answers whole once a settled member of that round said
- * more than its first line, or its row cut that line. The row is the one the member renders: aligned beside its
- * siblings, or, as a lone card, an action line that shows no answer at all.
+ * more than its first line, or its row cut that line. A lone card shows no answer at all.
  */
 function compactCouncilHint(
 	entry: WorkerEntryState,
-	detail: TranscriptDetailPolicy,
+	policy: TierPolicy,
 	width: number,
+	nowMs: number,
 	siblings: ReadonlyArray<WorkerEntryState> | undefined,
 ): string | null {
 	const council = entry.council;
-	if (detail.style !== "compact" || council === undefined) return null;
+	if (!outcomesOnly(policy) || council === undefined) return null;
 	const round = (siblings ?? [entry]).filter(
 		(member) => member.council?.group === council.group && member.council.round === council.round,
 	);
@@ -257,20 +222,29 @@ function compactCouncilHint(
 		const text = member.text.trim();
 		if (text.length === 0) return false;
 		if (siblings === undefined) return true;
-		return councilAnswerGist(member.text) !== text || alignedRowCuts(member, width, siblings);
+		if (councilAnswerGist(member.text) !== text) return true;
+		const layout = runRow(runFactsOf(member, nowMs, taskText(member)), {
+			width: width - NEST.length,
+			identityWidth: identityWidthOf(siblings),
+			measure: visibleWidth,
+		});
+		return layout.cells.some((cell) => cell.slot === "ellipsis");
 	});
 	if (!cut) return null;
 	return `${actionKeyLabel("clio-coder.output.cycle") ?? "/view"} shows the answers`;
 }
 
-/** A card's own row starts in the gutter, or, for a council member, in the content column. */
-function cardPrefix(entry: WorkerEntryState): string {
-	return entry.council !== undefined ? "  " : `${originGlyph(entry)} `;
+/**
+ * A tier that previews no answer shows outcomes only: a worker row under a dispatch header appears only when the
+ * operator has something to read in it, and a `/run` card is its one run row.
+ */
+function outcomesOnly(policy: TierPolicy): boolean {
+	return policy.workerRows === 0;
 }
 
 /**
- * A cancel Clio has asked for and the worker has not answered yet. The abort marks the card first, and the sealed
- * result replaces it once the process exits, so until then the card says stopping, as the board and the strip do.
+ * A cancel CLIO Coder has asked for and the worker has not answered yet. The abort marks the card first, and the
+ * sealed result replaces it once the process exits, so until then the card says stopping, as the board and the strip do.
  */
 function isStopping(result: WorkerRunResultSummary | undefined): boolean {
 	return result?.outcome === "canceled" && result.provisional === true;
@@ -292,12 +266,12 @@ function answersByDesign(entry: WorkerEntryState): boolean {
  * A council synthesis that settled with some members unanswered: its own run succeeded, the council did not in full.
  * A seat whose target was down never ran; the card names it in its body but does not read partial for it (FX-20).
  */
-function councilShortfall(entry: WorkerEntryState): boolean {
-	if (!isSynthesis(entry) || entry.result?.outcome !== "succeeded") return false;
+function councilUnanswered(entry: WorkerEntryState): number {
+	if (!isSynthesis(entry) || entry.result?.outcome !== "succeeded") return 0;
 	return (
-		parseCouncilReport(entry.text)?.members.some(
+		parseCouncilReport(entry.text)?.members.filter(
 			(member) => member.failed !== undefined && !isCouncilSeatNotRun(member),
-		) === true
+		).length ?? 0
 	);
 }
 
@@ -306,46 +280,6 @@ function councilSeatsRan(report: {
 	members: ReadonlyArray<{ label: string; runId: string; failed?: unknown }>;
 }): number {
 	return new Set(report.members.filter((member) => !isCouncilSeatNotRun(member)).map((member) => member.label)).size;
-}
-
-function settledMark(result: WorkerRunResultSummary, synthesizes: boolean): string {
-	const mark = completedRunMark(settledRunCaveat(result, synthesizes));
-	return theme.fg(mark.token, mark.glyph);
-}
-
-/** Why a run that executed cleanly still cannot be leaned on, or null when nothing marks it against. */
-function settledAgainst(result: WorkerRunResultSummary): string | null {
-	const caveat = settledRunCaveat(result);
-	return caveat?.kind === "against" ? caveat.words : null;
-}
-
-/**
- * The run's overall outcome, leading with the mark that decides it. A clean
- * exit under a failed validation leads with the failure and keeps the
- * execution fact in words, because a check mark beside a failed check reads
- * as a pass. Abandoned names itself rather than falling through to its `stalled`
- * outcome code, so it reads as a ledger-side finding instead of the ordinary
- * heartbeat-timeout `stalled` a sealed result reports.
- */
-function outcomeUnit(result: WorkerRunResultSummary, synthesizes: boolean): string {
-	// A worker that exited cleanly without executing one tool did none of an
-	// assignment that needed tools, so "done" would read as a done task.
-	// The result stays succeeded when the worker answered in prose by design
-	// (a judge or scout can); the row states the fact in a neutral tone.
-	const caveat = settledRunCaveat(result, synthesizes);
-	if (caveat?.kind === "against") {
-		// The run itself ended cleanly, which is all the trailing words claim; the caveat is what to act on.
-		return `${theme.fg("error", `${GLYPH.error} ${caveat.words}`)}${meta(`${SEPARATOR}it finished`)}`;
-	}
-	if (caveat?.kind === "no-tools") return theme.fg("toolMetadata", `${GLYPH.queued} ${caveat.words}`);
-	// A clean exit is not an all-clear when a call was refused on the way. The row says which is true.
-	if (caveat?.kind === "refused") return theme.fg("warning", `${GLYPH.warn} finished with ${caveat.words}`);
-	// The board, the dock and a council's grid call this outcome done, so the card does too.
-	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} done`);
-	if (isStopping(result)) return theme.fg("warning", `${GLYPH.cancelled} stopping`);
-	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} cancelled`);
-	if (result.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
-	return theme.fg("error", `${GLYPH.error} ${plainOutcomeLabel(result.outcomeCode ?? result.outcome)}`);
 }
 
 /**
@@ -357,7 +291,7 @@ function outcomeUnit(result: WorkerRunResultSummary, synthesizes: boolean): stri
  * result field, so the transcript reads the first line of the answer.
  */
 const CHECKPOINT_PREFIX = /^\s*(?:needs_input\b|task_blocked\b|##\s*CHECKPOINT REACHED\b|##\s*BLOCKED\b)/iu;
-/** Rows a checkpoint's body keeps on the folded row: the questions are the point of the entry. */
+/** Rows a checkpoint's body keeps at every tier: the questions are the point of the entry. */
 const CHECKPOINT_PREVIEW_ROWS = 16;
 
 export function workerNeedsInput(entry: Pick<WorkerEntryState, "text" | "result">): boolean {
@@ -368,35 +302,14 @@ export function workerNeedsInput(entry: Pick<WorkerEntryState, "text" | "result"
 	);
 }
 
-function needsInputUnit(): string {
-	return theme.fg("warning", `${GLYPH.phaseBlocked} needs input`);
-}
-
-/**
- * A block with no settled result yet: the live mark, spinner-free. The row's
- * progress line says what the run is doing; `/view` spells the state out.
- */
-function pendingUnit(entry: WorkerEntryState): string {
-	if (entry.progress?.awaitingApproval === true) return theme.fg("warning", GLYPH.phaseBlocked);
-	// A worker gone quiet as a process is not live work: its mark says so in the dock's own glyph.
-	if (entry.progress?.quietSinceMs !== undefined) return theme.fg("warning", GLYPH.warn);
-	return theme.fg("activity", GLYPH.running);
-}
-
 /**
  * Whether a block should render as still going rather than settled: live,
  * never yet received a result (`entry.result === undefined`), or replayed
  * from a `runs.json` row with no `endedAt` (`stillRunning`) because its
- * process is still executing in another instance of Clio.
+ * process is still executing in another instance of CLIO Coder.
  */
 function isPending(entry: WorkerEntryState): boolean {
 	return entry.result === undefined || entry.result.stillRunning === true;
-}
-
-/** A replayed run no stream here follows has done more than start, and what it does now is unknown. */
-function pendingActivity(entry: WorkerEntryState): readonly [glyph: string, words: string] {
-	if (entry.progress === undefined && entry.result?.stillRunning === true) return [GLYPH.phaseWaiting, "still running"];
-	return workerPhaseActivity(entry.progress);
 }
 
 /** Wrap one annotation onto the rail, prefixed on its first row and hanging under it after. */
@@ -427,10 +340,11 @@ function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnsw
  * The body's source lines. A structured answer (a result-contract JSON object)
  * uses its result identity for a readable preview. Unknown objects retain
  * their original numeric source tokens instead of being parsed and reserialized.
- * Truncated text is not one object and passes through as the prose it is.
+ * Truncated text is not one object and passes through as the prose it is. A mutation report leaves out
+ * `changed nothing` when the facts row above it already says so.
  */
-function bodySourceLines(entry: WorkerEntryState): string[] {
-	// A settled council member's answer reads as words even when its record is unverified; the rail above says so.
+function bodySourceLines(entry: WorkerEntryState, changeOnFacts: boolean): string[] {
+	// A settled council member's answer reads as words even when its record is unverified; the row says so.
 	if (
 		entry.council !== undefined &&
 		!isSynthesis(entry) &&
@@ -453,7 +367,7 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 	const presented = presentedContractAnswer(entry);
 	if (presented !== null) return presented.lines;
 	return (
-		mutationReportLines(structured, commitPlacementOf(entry.result ?? {}).branch) ??
+		mutationReportLines(structured, commitPlacementOf(entry.result ?? {}).branch, !changeOnFacts) ??
 		answerText(entry, entry.text).split("\n")
 	);
 }
@@ -475,7 +389,7 @@ function toolLine(entry: WorkerEntryState, width: number): string | null {
 
 /** One rail line per failover, naming the attempt and the route it moved to. */
 function attemptLines(entry: WorkerEntryState, width: number): string[] {
-	return entry.attempts.flatMap((attempt, index) =>
+	return (entry.attempts ?? []).flatMap((attempt, index) =>
 		index === 0
 			? []
 			: railLines(
@@ -486,27 +400,28 @@ function attemptLines(entry: WorkerEntryState, width: number): string[] {
 	);
 }
 
-/**
- * The failure's first line, on the rail above the footer. The footer stays one
- * line of facts; the reason is prose and wraps like prose, so a long message
- * cannot make the result line heavier than the answer above it.
- */
-function failureLines(entry: WorkerEntryState, width: number, inspect = false): string[] {
-	const message = entry.result?.failureMessage;
-	// A cancelled card's header already says so; the SIGTERM the worker logged adds nothing but alarm.
-	if (message === undefined || (entry.result?.outcome === "canceled" && !inspect)) return [];
-	// Inspection states the receipt's own words; the transcript leads with the reason a person acts on.
-	const first = inspect
-		? (message.split("\n", 1)[0] ?? "").trim()
-		: entry.result?.outcome === "stalled"
-			? STALLED_RUN_HEADLINE
-			: (workerFailureHeadline(message) ?? "");
+/** The failure's receipt words, for `/view`: the run row already leads with the reason a person acts on. */
+function inspectFailureLines(entry: WorkerEntryState, width: number): string[] {
+	const first = (entry.result?.failureMessage?.split("\n", 1)[0] ?? "").trim();
 	return first.length === 0 ? [] : railLines(`${GLYPH.error} ${first}`, "error", width);
 }
 
+/** `/view` keeps the record's own validation wording and its claimant, which the transcript rows put in plain words. */
+function inspectQualityLines(entry: WorkerEntryState, width: number): string[] {
+	const result = entry.result;
+	if (result === undefined || isPending(entry) || isStopping(result)) return [];
+	const grounding = result.trust?.validationGrounding;
+	if (grounding === undefined) return railLines("quality validation unknown", "body", width);
+	const why =
+		grounding.state === "failed" && result.validationFailure !== undefined
+			? `: ${result.validationFailure} · /view dispatch:${entry.runId}`
+			: "";
+	return railLines(`quality ${validationClause({ validationGrounding: grounding })}${why}`, "body", width);
+}
+
 /**
- * Where a finished run's changes are when Clio did not merge them: a `changed` row alone reads as the checkout, and
- * the change sits on the worktree's branch until the operator takes it.
+ * Where a finished run's changes are when CLIO Coder did not merge them: a `changed` row alone reads as the checkout,
+ * and the change sits on the worktree's branch until the operator takes it.
  */
 function keptWorktreeLines(entry: WorkerEntryState, width: number): string[] {
 	const result = entry.result;
@@ -557,91 +472,13 @@ function cancelLines(entry: WorkerEntryState, width: number): string[] {
 			: placement?.mode === "worktree"
 				? `its worktree stays on branch ${placement.branch}`
 				: null;
-	// The header already says cancelled; the row is only for who stopped it and what became of its worktree.
+	// The row already says cancelled; this is only for who stopped it and what became of its worktree.
 	if (why === "cancelled" && worktree === null) return [];
 	const text = `${GLYPH.cancelled} ${why.startsWith("cancelled") ? why : `cancelled: ${why}`}${worktree === null ? "" : `${SEPARATOR}${worktree}`}`;
 	return [
 		...railLines(sanitizeCallTargetText(text), "toolMetadata", width),
 		...(task?.kept === true && task.changedPaths > 0 ? branchCommandLines(task.branch, width) : []),
 	];
-}
-
-/**
- * Folded row: everything the operator needs to decide whether to open it, on
- * one line, shaped like a tool subline. Identity outranks elapsed: when the row
- * is too narrow for both, the elapsed unit goes first, and the identity is then
- * cut where the room ends rather than by whole units, because a partial route
- * still tells two scouts apart and a bare agent id may not. The expand hint
- * renders only when the caller resolved a key binding for it, so a rebound or
- * unbound key never advertises a wrong chord.
- */
-function actionLine(entry: WorkerEntryState, width: number, withRunId: boolean): string {
-	const identity = `${cardPrefix(entry)}${identityUnits(entry, withRunId).join(meta(SEPARATOR))}`;
-	const status =
-		isPending(entry) || entry.result === undefined
-			? pendingUnit(entry)
-			: workerNeedsInput(entry)
-				? needsInputUnit()
-				: councilShortfall(entry)
-					? theme.fg("warning", `${GLYPH.warn} partial`)
-					: outcomeUnit(entry.result, answersByDesign(entry));
-	const elapsed =
-		entry.telemetry === undefined || entry.telemetry === null
-			? ""
-			: meta(`${SEPARATOR}${entry.telemetry.activity.elapsed.display}`);
-	// A narrow row keeps the name and what happened, in the wide row's order, and lets the route take the cut.
-	if (width < NARROW_CARD_WIDTH) {
-		// The outcome never takes the cut: the name gives way first, then the elapsed time.
-		const [who, ...rest] = identityUnits(entry, withRunId);
-		const prefix = cardPrefix(entry);
-		const tail = visibleWidth(`${prefix}  ${status}${elapsed}`) + 4 <= width ? `${status}${elapsed}` : status;
-		const nameRoom = Math.max(1, width - visibleWidth(prefix) - visibleWidth(tail) - 1);
-		const lead = `${prefix}${truncateToWidth(who ?? "", nameRoom, GLYPH.ellipsis, false)} ${tail}`;
-		const route = rest.length > 0 ? `${meta(SEPARATOR)}${rest.join(meta(SEPARATOR))}` : "";
-		return truncateToWidth(`${lead}${route}`, width, GLYPH.ellipsis, false);
-	}
-	const full = ` ${status}${elapsed}`;
-	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}`;
-	// Reserve one identity cell. The optional hint yields before execution
-	// status when the suffix alone would exhaust the header's width.
-	if (visibleWidth(tail) >= width) tail = ` ${status}`;
-	const header = `${truncateToWidth(identity, Math.max(1, width - visibleWidth(tail)), GLYPH.ellipsis, false)}${tail}`;
-	return truncateToWidth(header, width, GLYPH.ellipsis, false);
-}
-
-/**
- * What a settled run spent, and a failed process's exit status. A fact the
- * run did not report is left out rather than stated as zero. Inspection adds
- * the answer's result-contract conformance, which the transcript states by
- * presenting a conforming answer readably and `/view` and `/export` cannot,
- * since they show the answer as the run returned it.
- */
-function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
-	const metrics: string[] = [];
-	const exitCode = entry.result?.exitCode;
-	// The exit status is how the process ended, not what went wrong; the failure row says that, and /view keeps the code.
-	if (inspect && exitCode !== undefined && exitCode !== 0) {
-		metrics.push(`exit ${exitCode}`);
-	}
-	const tokens = entry.telemetry?.row.tokens.display;
-	const calls = entry.telemetry?.activity.toolCalls.display;
-	const refused = entry.result?.refusedCalls ?? 0;
-	const guarded = entry.result?.guardedCalls ?? 0;
-	if (!inspect) {
-		// The card leads with the two facts a reader acts on. The coverage clause, context and contract are one /view away.
-		if (calls !== undefined) metrics.push(renderCalls(calls));
-		if (refused > 0) metrics.push(refusedCallsWords(refused, guarded));
-		const figure = tokens === undefined ? null : compactQuantity(tokens);
-		if (figure !== null) metrics.push(`${figure} tokens`);
-		return metrics;
-	}
-	if (tokens !== undefined) metrics.push(`${tokens} tokens processed`);
-	const context = entry.telemetry?.activity.contextTokens;
-	if (context) metrics.push(`context ${context.display}`);
-	if (calls !== undefined) metrics.push(renderCalls(calls));
-	if (refused > 0) metrics.push(refusedCallsWords(refused, guarded));
-	if (entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
-	return metrics;
 }
 
 /** A finished call as `verb object` in the past tense, or its tool name when the runtime sent no descriptor. */
@@ -654,12 +491,20 @@ function finishedAction(action: WorkerAction): string {
 	return fault === null ? actionText : `${actionText} ${theme.fg(fault.tone, `${GLYPH.error} ${fault.words}`)}`;
 }
 
+/** The same call in plain words, for a telemetry sub-line whose role paints it. */
+function finishedActionWords(action: WorkerAction): string {
+	const parts = workerActionParts(action, "finished");
+	const text = sanitizeCallTargetText(parts.object.length === 0 ? parts.verb : `${parts.verb} ${parts.object}`);
+	const fault = finishedActionFault(action);
+	return fault === null ? text : `${text} ${fault.words}`;
+}
+
 /**
  * A settled card's calls, oldest first, with a run of one repeated call stated
  * once and counted (`read docs/retry.md ×3`): a worker going round in a loop is
  * a fact worth one row, not four identical ones.
  */
-function trailCalls(recent: ReadonlyArray<WorkerAction>): string[] {
+function trailCalls(recent: ReadonlyArray<WorkerAction>): Array<{ text: string; count: number }> {
 	const calls: Array<{ text: string; count: number }> = [];
 	for (const action of [...recent].reverse()) {
 		const text = finishedAction(action);
@@ -667,332 +512,134 @@ function trailCalls(recent: ReadonlyArray<WorkerAction>): string[] {
 		if (last?.text === text) last.count += 1;
 		else calls.push({ text, count: 1 });
 	}
-	return calls.map(({ text, count }) => (count > 1 ? `${text} ${GLYPH.times}${count}` : text));
+	return calls;
 }
-
-/** The running call as `verb object`, or its tool name when the runtime sent no descriptor. */
-function describedAction(entry: WorkerEntryState, room?: number): string | null {
-	const action = entry.progress?.currentAction;
-	if (action === null || action === undefined) return null;
-	if (entry.progress?.awaitingApproval === true) {
-		return approvalWaitWords(entry.progress, room === undefined ? {} : { room });
-	}
-	const parts = workerActionParts(action, "running");
-	return parts.object.length === 0 ? parts.verb : `${parts.verb} ${parts.object}`;
-}
-
-const TIMER_WIDTH = 7;
-const NARROW_CARD_WIDTH = 72;
 
 function workerName(entry: WorkerEntryState): string {
 	// The synthesis run carries the council's result, judged, voted or only collected, so it goes by the council.
-	const label = entry.council?.label === COUNCIL_SYNTHESIS_LABEL ? "council" : entry.council?.label;
+	const label = isSynthesis(entry) ? synthesisName(entry) : entry.council?.label;
 	// A plan's steps can share one agent and one task, so a step's worker goes by its step as the board row does.
 	const step = entry.planStep === undefined ? "" : ` · ${entry.planStep}`;
-	return displayText(entry, "name", `${label ?? entry.agentId}${step}`);
+	const acp = entry.runtime.kind === "acp" ? " (acp)" : "";
+	return displayText(entry, "name", `${label ?? entry.agentId}${acp}${step}`);
 }
 
-/** The widest header outcome word, so sibling cards line up. */
-const HEADER_WORD_WIDTH = "needs input".length;
-const HEADER_WORD_MIN_WIDTH = 60;
-
-/** The aligned header's outcome in one word: the run's state, never the reason, which the rows under it give. */
-function headerWord(entry: WorkerEntryState): string {
-	if (isPending(entry) || entry.result === undefined) return "";
-	if (workerNeedsInput(entry)) return "needs input";
-	const outcome = entry.result.outcome;
-	if (isStopping(entry.result)) return "stopping";
-	if (outcome === "canceled") return "cancelled";
-	// The board, the dock and the notice say this state in these words; `stalled` was a second name for it.
-	if (outcome === "stalled") return "stopped responding";
-	if (outcome === "timed_out") return "timed out";
-	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
-	if (councilShortfall(entry)) return "partial";
-	return settledRunCaveat(entry.result, answersByDesign(entry))?.kind === "no-tools" ? "no tools" : "done";
+/** The council's own row goes by the council's size once its report says how many seats ran. */
+function synthesisName(entry: WorkerEntryState): string {
+	const report = isPending(entry) ? null : parseCouncilReport(entry.text);
+	return report !== null && councilSeatsRan(report) > 0 ? `council of ${councilSeatsRan(report)}` : "council";
 }
 
-/** A settled council member's answer in one line; a running one has none yet, and its live line says what it does. */
-function councilMemberGist(entry: WorkerEntryState): string {
-	if (isPending(entry) || entry.text.trim().length === 0) return "";
-	const lines = presentedContractAnswer(entry)?.lines ?? [councilAnswerGist(entry.text)];
-	const first = lines.find((line) => line.trim().length > 0) ?? "";
-	return displayText(entry, "gist", first.replace(/^\s*-\s*/u, "").trim());
-}
-
-/** A council member's aligned header names the route that answered, since members differ mainly by route. */
-function alignedName(entry: WorkerEntryState): string {
+/** A council member's name carries the route that answered, since members differ mainly by route. */
+function identityName(entry: WorkerEntryState): string {
 	const name = workerName(entry);
-	if (entry.council === undefined || isSynthesis(entry) || entry.runtime.kind === "acp") return name;
+	if (entry.council === undefined || isSynthesis(entry) || entry.agentId === COUNCIL_SEALED_REPORT_AGENT_ID) return name;
 	const route = workerRoute(entry);
 	return route === undefined ? name : `${name} · ${displayText(entry, "route", route)}`;
 }
 
-/** Dispatch rows reserve the clock before cutting the task or agent name. */
-function alignedHeader(
-	entry: WorkerEntryState,
-	width: number,
-	_nowMs: number,
-	siblings?: ReadonlyArray<WorkerEntryState>,
-): string {
-	const { header, task, taskWidth, elapsed } = alignedParts(entry, width, siblings);
-	if (taskWidth > 0 && task.length > 0) return `${header}  ${theme.fg("body", fitDisplayText(task, taskWidth))}`;
-	if (visibleWidth(header) <= width) return header;
-	// Below the header's minimum width, even its identity yields to elapsed.
-	return meta(truncateToWidth(elapsed, width, "", false));
-}
-
-/** Whether a card's aligned row cuts the task or answer it carries, so the row shows less than the run said. */
-function alignedRowCuts(entry: WorkerEntryState, width: number, siblings?: ReadonlyArray<WorkerEntryState>): boolean {
-	const { task, taskWidth } = alignedParts(entry, width, siblings);
-	return task.length > 0 && (taskWidth <= 0 || fitDisplayText(task, taskWidth) !== task);
-}
-
-/** The aligned row before its task: the header, the task it carries, and the columns left for that task. */
-function alignedParts(
-	entry: WorkerEntryState,
-	width: number,
-	siblings?: ReadonlyArray<WorkerEntryState>,
-): { header: string; task: string; taskWidth: number; elapsed: string } {
-	const elapsed = entry.telemetry?.activity.elapsed.display ?? "—";
-	const timer = meta(elapsed.padStart(TIMER_WIDTH));
-	const pending = isPending(entry);
-	const mark = pending
-		? pendingUnit(entry)
-		: workerNeedsInput(entry)
-			? theme.fg("warning", GLYPH.phaseBlocked)
-			: entry.result?.outcome === "canceled"
-				? theme.fg(isStopping(entry.result) ? "warning" : "toolMetadata", GLYPH.cancelled)
-				: entry.result?.outcome !== "succeeded"
-					? theme.fg("error", GLYPH.error)
-					: councilShortfall(entry)
-						? theme.fg("warning", GLYPH.warn)
-						: settledMark(entry.result, answersByDesign(entry));
-	// A settled mark says its outcome in a word as well, padded so sibling cards keep one column, because a lone
-	// glyph is a colour cue NO_COLOR and a quick read both lose. A narrow row keeps the glyph alone.
-	// A running card's live line under the header says what it is doing, so only a settled header carries a word.
-	const word =
-		width >= HEADER_WORD_MIN_WIDTH
-			? entry.progress?.awaitingApproval === true && pending
-				? "approval"
-				: pending
-					? null
-					: headerWord(entry)
-			: null;
-	// The column fits the widest word among the siblings, so a rare long one still lines the cards up.
-	const wordWidth = Math.max(
-		HEADER_WORD_WIDTH,
-		...(siblings ?? []).map((sibling) => (isPending(sibling) ? 0 : visibleWidth(headerWord(sibling)))),
+/** The one identity column of a dispatch's rows: origin, `↳` for a helper, the widest name among the siblings. */
+function identityWidthOf(entries: ReadonlyArray<WorkerEntryState>): number {
+	return runIdentityWidth(
+		entries.map((entry) => ({
+			agent: identityName(entry),
+			origin: "model",
+			outcome: "running",
+			...(entry.helper ? { helper: true } : {}),
+		})),
+		visibleWidth,
 	);
-	const status = word === null ? mark : `${mark}${meta(` ${word.padEnd(wordWidth)}`)}`;
-	const name = alignedName(entry);
-	const widest = Math.max(visibleWidth(name), ...(siblings ?? []).map((sibling) => visibleWidth(alignedName(sibling))));
-	const prefix = cardPrefix(entry);
-	const nameWidth = Math.max(0, Math.min(widest, width - visibleWidth(prefix) - TIMER_WIDTH - 3));
-	const shown = truncateToWidth(name, nameWidth, GLYPH.ellipsis, false);
-	const identity =
-		entry.council !== undefined ? councilLabelText(theme, shown, entry.council.color) : theme.fg("workerIdentity", shown);
-	const header = `${prefix}${identity}${" ".repeat(Math.max(0, nameWidth - visibleWidth(shown)))} ${status} ${timer}`;
-	const taskWidth = width - visibleWidth(header) - 2;
-	// A council member was asked the question the prompt above its round already shows, so its row gives its answer.
-	const task =
+}
+
+/** The task a row carries: a council member was asked the question its round shows, so its row gives its answer. */
+function taskText(entry: WorkerEntryState): string | undefined {
+	const source =
 		entry.council !== undefined && !isSynthesis(entry)
-			? councilMemberGist(entry)
-			: displayText(entry, "task", fleetNodeTaskBrief(entry.task ?? ""));
-	return { header, task, taskWidth, elapsed };
-}
-
-function dispatchHeader(siblings: ReadonlyArray<WorkerEntryState>, width: number): string {
-	const running = siblings.filter(isPending).length;
-	const done = siblings.filter(
-		(entry) =>
-			!isPending(entry) &&
-			entry.result !== undefined &&
-			entry.result.outcome === "succeeded" &&
-			settledAgainst(entry.result) === null,
-	).length;
-	const failed = siblings.length - running - done;
-	const first = siblings[0];
-	const name =
-		first !== undefined && siblings.every((entry) => workerName(entry) === workerName(first))
-			? `${workerName(first)}${siblings.length === 1 ? "" : "s"}`
-			: "workers";
-	return meta(
-		truncateToWidth(
-			`${siblings.length} ${name} · ${running} running · ${done} done${failed > 0 ? ` · ${failed} failed/cancelled` : ""}`,
-			width,
-			GLYPH.ellipsis,
-			false,
-		),
-	);
-}
-
-/** Slice T 1b: one detail row keeps known telemetry and the latest action together. */
-function liveCardDetail(entry: WorkerEntryState, width: number): string {
-	const room = Math.max(0, width - RAIL_WIDTH);
-	const clean = (text: string): string => sanitizeCallTargetText(redactSecretString(text));
-	const target = entry.runtime.targetId === undefined ? "" : clean(entry.runtime.targetId);
-	const model = entry.runtime.wireModelId === undefined ? "" : clean(entry.runtime.wireModelId);
-	const calls = entry.telemetry?.activity.toolCalls.display;
-	const tools = calls === undefined ? "" : `tools ${calls}`;
-	const tokens = entry.telemetry?.row.tokens.display;
-	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
-	const quiet = isPending(entry) ? workerQuietWords(entry.progress) : null;
-	const current = isPending(entry) && quiet === null ? describedAction(entry) : null;
-	const last = (entry.progress?.recentActions ?? entry.recentActions)?.[0];
-	const activity =
-		quiet !== null
-			? quiet
-			: current !== null
-				? clean(current)
-				: isPending(entry) && entry.progress?.verification !== undefined
-					? workerPhaseActivity(entry.progress)[1]
-					: last !== undefined
-						? clean(finishedAction(last))
-						: isPending(entry)
-							? ((entry.progress === undefined
-									? null
-									: workerSilenceWords(entry.progress, { room: 48, history: entry.routeFirstOutput ?? null })) ??
-								pendingActivity(entry)[1])
-							: "";
-	const facts = [
-		target,
-		tools,
-		tokenFigure === null ? "" : `${tokenFigure} tokens`,
-		activity && `${GLYPH.phaseTool} ${activity}`,
-	].filter(Boolean);
-	const modelRoom = room - visibleWidth(facts.join(SEPARATOR)) - (facts.length > 0 ? SEPARATOR.length : 0);
-	if (model && modelRoom > 0) facts.splice(target ? 1 : 0, 0, truncateToWidth(model, modelRoom, GLYPH.ellipsis, false));
-	return truncateToWidth(
-		`${cardRail()}${theme.fg("metadata", truncateToWidth(facts.join(SEPARATOR), room, GLYPH.ellipsis, false))}`,
-		width,
-		GLYPH.ellipsis,
-		false,
-	);
-}
-
-/** Room the live line keeps for its label and facts when it picks which of the worker's words to show. */
-const PROGRESS_FACTS_ROOM = 40;
-
-/** The end of what a worker has written so far, from a word boundary, so the row moves as the stream does. */
-function latestWords(text: string, room: number): string {
-	const flat = text.replace(/\s+/gu, " ").trim();
-	const limit = Math.max(16, room);
-	if (flat.length <= limit) return flat;
-	const tail = flat.slice(flat.length - limit + 1);
-	const space = tail.indexOf(" ");
-	return `${GLYPH.ellipsis}${space > 0 && space < tail.length - 1 ? tail.slice(space + 1) : tail}`;
+			? isPending(entry) || entry.text.trim().length === 0
+				? ""
+				: ((presentedContractAnswer(entry)?.lines ?? [councilAnswerGist(entry.text)])
+						.find((line) => line.trim().length > 0)
+						?.replace(/^\s*-\s*/u, "")
+						.trim() ?? "")
+			: fleetNodeTaskBrief(entry.task ?? "");
+	const flat = displayText(entry, "task", source).replace(/\s+/gu, " ").trim();
+	return flat.length === 0 ? undefined : flat;
 }
 
 /**
- * A running card's one live line, rewritten in place: what it is doing now,
- * how long it has run, and what it has spent. No spinner; the panel's clock
- * moves the elapsed.
+ * Elapsed time from the read model's DTO only: a local clock would tick on a run whose journal says nothing, so a
+ * row without the DTO leaves its time slot blank.
  */
-function progressLine(entry: WorkerEntryState, width: number, nowMs: number, includeTimer = true): string {
-	const elapsed = entry.telemetry?.activity.elapsed.display;
-	// The wait's words shorten to leave the clock beside them, because a cut here would lose the time left.
-	const waitRoom =
-		width - RAIL_WIDTH - 2 - (!includeTimer || elapsed === undefined ? 0 : elapsed.length + SEPARATOR.length);
-	// A worker whose heartbeat stopped is doing nothing it can be seen doing, so its last call or phase would read as current.
-	const quiet = workerQuietWords(entry.progress, nowMs, waitRoom);
-	const action = quiet !== null ? null : describedAction(entry, waitRoom);
-	const tokens = entry.telemetry?.row.tokens.display;
-	const tokenFigure = tokens === undefined ? null : compactQuantity(tokens);
-	const calls = entry.telemetry?.activity.toolCalls.display;
-	const facts = [
-		...(!includeTimer || elapsed === undefined ? [] : [elapsed]),
-		...(tokenFigure === null ? [] : [`${tokenFigure} tokens`]),
-		// An unknown count says nothing a person can use; `unknown calls` read as a fact about the worker.
-		...(calls === undefined || compactQuantity(calls) === null ? [] : [renderCalls(calls, "call")]),
-	];
-	// A model gone quiet past the watchdog tiers says how long and what ends it, the words the dock uses too. The form
-	// is picked for the room the facts beside it leave, so the row never cuts a clause mid-word.
-	const silenceRoom =
-		width - RAIL_WIDTH - 2 - (facts.length === 0 ? 0 : SEPARATOR.length + facts.join(SEPARATOR).length);
-	const silence =
-		quiet !== null || action !== null || entry.progress === undefined
-			? null
-			: workerSilenceWords(entry.progress, {
-					now: nowMs,
-					room: Math.max(16, silenceRoom),
-					history: entry.routeFirstOutput ?? null,
-				});
-	const [glyph, idle] =
-		quiet !== null ? [GLYPH.warnInline, quiet] : silence !== null ? [GLYPH.warnInline, silence] : pendingActivity(entry);
-	// Only a worker writing is saying these words now, and its latest ones: the first sentence of a long run is long stale.
-	const answer =
-		entry.helper ||
-		quiet !== null ||
-		silence !== null ||
-		action !== null ||
-		(entry.progress?.phase !== undefined && entry.progress.phase !== "writing")
-			? ""
-			: latestWords(answerText(entry, stripDeadToolCallMarkup(entry.text)), width - RAIL_WIDTH - PROGRESS_FACTS_ROOM);
-	// A wait on the operator is not a tool running, so it carries the mark every other human wait does.
-	const actionGlyph = entry.progress?.awaitingApproval === true ? GLYPH.phaseBlocked : GLYPH.phaseTool;
-	const doing =
-		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${actionGlyph} ${action}`;
-	// The elapsed time is the line's live signal, so a narrow row cuts the
-	// action's text and then drops the spend, never the clock.
-	const room = Math.max(0, width - RAIL_WIDTH);
-	const activity = displayText(entry, "activity", doing);
-	const current = entry.progress?.currentAction;
-	const prefix =
-		action === null
-			? `${glyph} ${idle}`
-			: `${actionGlyph} ${entry.progress?.awaitingApproval === true ? action : current ? workerActionParts(current, "running").verb : ""}`;
-	const kind = current ? toolFunction(current.tool) : entry.helper ? "shadowDispatch" : "dispatch";
-	const styledActivity = (shown: string): string => {
-		const lead = shown.slice(0, sanitizeCallTargetText(prefix).length);
-		return `${functionText(theme, kind, lead)}${theme.fg("toolTarget", shown.slice(lead.length))}`;
-	};
-	for (let kept = facts.length; kept >= 0; kept -= 1) {
-		const tail = kept === 0 ? "" : `${SEPARATOR}${facts.slice(0, kept).join(SEPARATOR)}`;
-		const activityRoom = room - tail.length;
-		// A wait's words carry its time left, and so does a silent worker's countdown, so they outrank the spend beside them.
-		const countsDown = entry.progress?.awaitingApproval === true || quiet !== null;
-		const wanted = countsDown ? activity.length : Math.min(24, activity.length);
-		if (activityRoom < 1 || (kept > (countsDown ? 0 : 1) && activityRoom < wanted)) continue;
-		const shown = fitDisplayText(activity, activityRoom);
-		return truncateToWidth(`${cardRail()}${styledActivity(shown)}${meta(tail)}`, width, GLYPH.ellipsis, false);
+function elapsedMs(entry: WorkerEntryState): number | undefined {
+	const fact = entry.telemetry?.activity.elapsed.fact;
+	return fact !== undefined && (fact.kind === "measured" || fact.kind === "estimated") ? fact.value : undefined;
+}
+
+/**
+ * A read-model count in the shared row form, its qualifier kept: `≥10,810` reads `≥10.8k`. A wholly unknown figure is
+ * null, because `unknown tokens` tells a reader nothing they can act on.
+ */
+function countFigure(display: string | undefined): string | null {
+	if (display === undefined) return null;
+	const figure = compactQuantity(display);
+	if (figure === null) return null;
+	const match = /^(≥|≈|~|>=)?\s*(\d[\d,]*(?:\.\d+)?)$/u.exec(figure);
+	const value = Number(match?.[2]?.replaceAll(",", ""));
+	return match === null || !Number.isFinite(value) ? figure : `${match[1] ?? ""}${formatCount(value)}`;
+}
+
+function tokensWords(entry: WorkerEntryState): string | undefined {
+	const figure = countFigure(entry.telemetry?.row.tokens.display);
+	return figure === null ? undefined : `${figure} tokens`;
+}
+
+function callCount(entry: WorkerEntryState): number | undefined {
+	const fact = entry.telemetry?.activity.toolCalls.fact;
+	if (fact !== undefined && (fact.kind === "measured" || fact.kind === "estimated")) return fact.value;
+	return entry.result?.toolCalls ?? entry.progress?.toolCalls;
+}
+
+function callsWords(count: number | undefined): string | undefined {
+	return count === undefined ? undefined : `${count} ${count === 1 ? "call" : "calls"}`;
+}
+
+/** What a live worker is doing, by the evidence that outranks the rest: a stopped heartbeat, its call, silence, phase. */
+function livePhase(entry: WorkerEntryState, nowMs: number): string {
+	const progress = entry.progress;
+	if (progress === undefined) return entry.result?.stillRunning === true ? "still running" : "starting";
+	const quiet = workerQuietWords(progress, nowMs, 48);
+	if (quiet !== null) return quiet;
+	const action = progress.currentAction;
+	if (action !== null && action !== undefined) {
+		const parts = workerActionParts(action, "running");
+		return parts.object.length === 0 ? parts.verb : `${parts.verb} ${parts.object}`;
 	}
-	return truncateToWidth(`${cardRail()}${styledActivity(fitDisplayText(activity, room))}`, width, GLYPH.ellipsis, false);
+	const silence =
+		progress.verification === undefined
+			? workerSilenceWords(progress, { now: nowMs, room: 48, history: entry.routeFirstOutput ?? null })
+			: null;
+	return silence ?? workerPhaseActivity(progress)[1];
 }
 
 /**
- * Helper and shadow work keeps its task on the aligned header. Standard adds
- * the current action while running; a failure keeps its explanation below.
+ * The live ask, read from the one deadline record the approval card reads. The key is named only when this session
+ * has the ask's card docked, because only then does Enter answer it.
  */
-function helperRow(
-	entry: WorkerEntryState,
-	width: number,
-	detail: TranscriptDetailPolicy,
-	terminalRows?: number,
-	nowMs = Date.now(),
-	siblings?: ReadonlyArray<WorkerEntryState>,
-): string[] {
-	const pending = isPending(entry);
-	return [
-		alignedHeader(entry, width, nowMs, siblings),
-		...(pending && detail.style === "standard" ? [progressLine(entry, width, nowMs, false)] : []),
-		...(entry.result?.mergeDetail ? railLines(entry.result.mergeDetail, "success", width) : []),
-		...keptWorktreeLines(entry, width),
-		...previewRows(
-			[...failureLines(entry, width), ...attemptLines(entry, width)],
-			previewBudget(detail.errorRows, terminalRows),
-			width,
-			false,
-			cardRail(),
-			RAIL_WIDTH,
-		),
-		...(entry.result?.resultUnavailable ? railLines("result unavailable", "warning", width) : []),
-		...(entry.result?.abandonedDetail ? railLines(entry.result.abandonedDetail, "warning", width) : []),
-	].map((row) => redactedRow(row, width));
+function approvalFacts(entry: WorkerEntryState, nowMs: number): RunApprovalFacts | undefined {
+	const progress = entry.progress;
+	if (progress?.awaitingApproval !== true) return undefined;
+	const window = progress.approvalWindow;
+	return {
+		decider: window?.decider ?? "operator",
+		...(window?.owner !== undefined ? { owner: window.owner } : {}),
+		words: (room) => approvalWaitWords(progress, { now: nowMs, room, ownerFirst: true }),
+		...(dockedWorkerApprovalRun() === entry.runId ? { cardDocked: true } : {}),
+	};
 }
 
 /**
  * The first validation the worker itself reported as passing, by name, or null when the card lists none. An unnamed
- * passing row still counts, so the verdict line can name whose word it is.
+ * passing row still counts, so the check fact can name whose word it is.
  */
 function reportedPassingCheck(entry: WorkerEntryState): string | null {
 	const structured = entry.droppedLines === 0 ? exactWorkerAnswerObject(entry.text) : null;
@@ -1006,46 +653,332 @@ function reportedPassingCheck(entry: WorkerEntryState): string | null {
 	return null;
 }
 
-/**
- * A failure the run's own record holds reads as a failure on the card; where the verdict came from stays with the
- * detail view. A failed validation also names its validator and evidence, because a headline that says failed above
- * checks that read as passed is otherwise a contradiction the operator cannot resolve without opening the run.
- */
-function qualityRow(
-	result: WorkerRunResultSummary | undefined,
-	runId: string,
-	inspect: boolean,
-	passingCheck: string | null = null,
-): string | null {
-	// A cancelled run checked nothing by design, so a validation verdict under it says nothing the cancel did not.
-	if (!inspect && result?.outcome === "canceled") return null;
-	// A run that failed before any check ran has nothing to say about validation that its failure row does not.
-	if (!inspect && result?.outcome !== "succeeded" && result?.trust?.validationGrounding.state === "absent") return null;
-	// The failure row already says the answer was unusable; naming the report shape it missed is the record's detail.
-	if (
-		!inspect &&
-		result?.outcome !== "succeeded" &&
-		/^the answer did not match the /u.test(result?.validationFailure ?? "")
-	)
-		return `/view dispatch:${runId} shows what it wrote`;
+/** The validation verdict for the run row: a check that passed only on the worker's word is `self-reported`. */
+function validationOf(entry: WorkerEntryState): RunValidation {
+	const grounding = entry.result?.trust?.validationGrounding;
+	switch (grounding?.state) {
+		case "validated":
+			return "passed";
+		case "failed":
+			return "failed";
+		case "ungrounded":
+			return "self-reported";
+		case "absent":
+			return reportedPassingCheck(entry) !== null ? "self-reported" : "none";
+		default:
+			return "unknown";
+	}
+}
+
+/** The record's integrity: verified by its seal, compromised when the seal broke, else unverified. */
+function integrityOf(result: WorkerRunResultSummary): RunIntegrity {
+	const state = result.trust?.artifactIntegrity?.state;
+	return state === "verified" ? "verified" : state === "failed" ? "compromised" : "unverified";
+}
+
+/** Why a run that did not succeed stopped, in the words a person acts on. */
+function failureReason(entry: WorkerEntryState): string {
+	const result = entry.result as WorkerRunResultSummary;
+	if (result.outcome === "stalled") return STALLED_RUN_HEADLINE;
+	const headline = workerFailureHeadline(result.failureMessage);
+	if (headline !== null) return headline;
+	if (result.validationFailure !== undefined) return result.validationFailure;
+	if (result.abandonedDetail !== undefined) return "abandoned";
+	return plainOutcomeLabel(result.outcomeCode ?? result.outcome);
+}
+
+/** Outcome, validation and integrity of the entry as run facts; the run row computes the state from them. */
+function runFactsOf(
+	entry: WorkerEntryState,
+	nowMs: number,
+	task: string | undefined,
+	telemetry?: RunTelemetryFacts,
+): RunFacts {
+	const elapsed = elapsedMs(entry);
+	const base = {
+		agent: identityName(entry),
+		origin: workerAskedByModel(entry) ? ("model" as const) : ("operator" as const),
+		...(entry.helper ? { helper: true } : {}),
+		runId: entry.runId,
+		...(elapsed === undefined ? {} : { elapsed: formatElapsed(elapsed) }),
+		...(task === undefined ? {} : { task }),
+		...(telemetry === undefined ? {} : { telemetry }),
+	};
+	// A checkpoint is a question the operator answers next, so the row waits on them as an ask does.
+	if (workerNeedsInput(entry))
+		return { ...base, outcome: "running", approval: { decider: "operator", words: () => "needs input" } };
+	if (isPending(entry)) {
+		const approval = approvalFacts(entry, nowMs);
+		return { ...base, outcome: "running", phase: livePhase(entry, nowMs), ...(approval ? { approval } : {}) };
+	}
+	const result = entry.result as WorkerRunResultSummary;
+	if (isStopping(result)) return { ...base, outcome: "cancelled", reason: "stopping" };
+	if (result.outcome === "canceled") return { ...base, outcome: "cancelled" };
+	if (result.outcome !== "succeeded") return { ...base, outcome: "failed", reason: failureReason(entry) };
+	const unanswered = councilUnanswered(entry);
+	if (unanswered > 0)
+		return {
+			...base,
+			outcome: "succeeded",
+			validation: "failed",
+			reason: `partial: ${unanswered} ${unanswered === 1 ? "member" : "members"} gave no answer`,
+		};
+	const caveat = settledRunCaveat(result, answersByDesign(entry));
+	if (caveat?.kind === "against")
+		return {
+			...base,
+			outcome: "succeeded",
+			validation: "failed",
+			reason: result.validationFailure === undefined ? caveat.words : `${caveat.words}: ${result.validationFailure}`,
+		};
+	return { ...base, outcome: "succeeded", validation: validationOf(entry), integrity: integrityOf(result) };
+}
+
+/** The axes a whole trust record carries; a partial one is graded from what it has. */
+const TRUST_AXES = [
+	"artifactIntegrity",
+	"validationGrounding",
+	"independentReview",
+	"contextProvenance",
+	"completionEvidence",
+] as const;
+
+/** The trust record in one word for detailed rows: what a reader may lean on. */
+function recordWord(result: WorkerRunResultSummary | undefined): string {
 	const trust = result?.trust;
-	if (!trust) return "quality validation unknown";
-	const entry = trust.validationGrounding;
-	const why =
-		entry.state === "failed" && result?.validationFailure !== undefined
-			? `: ${result.validationFailure} · /view dispatch:${runId}`
-			: "";
-	if (!inspect && entry.state === "failed" && entry.authority.id === "result-quality")
-		return `${trustStateWord("validationGrounding", entry.state)}${why}`;
-	// The folded card says whether anything checked the work in plain words; the record's axis wording is for /view.
-	// A worker's own passing check row stays above this line, so the record's verdict names whose word that row is
-	// instead of denying it ran: an ad-hoc command such as `python3 -c` is not one Clio credits as a check, but it did
-	// run and pass, so the line names it rather than claiming no test was recognized.
-	if (!inspect && entry.state === "absent")
-		return passingCheck !== null
-			? `${passingCheck} passed on the worker's own report; CLIO Coder graded no check of its own`
-			: "no check ran on this work";
-	return `quality ${validationClause(trust)}${why}`;
+	const integrity = trust?.artifactIntegrity?.state;
+	if (integrity === "failed") return "not trusted";
+	if (trust === undefined || integrity !== "verified") return "unverified; raw output, not admitted as evidence";
+	// A record that leaves an axis out cannot be graded whole; its validation still says what it can.
+	const complete = TRUST_AXES.every((axis) => trust[axis] !== undefined);
+	const verdict = complete
+		? trustVerdict(trust)
+		: trust.validationGrounding?.state === "validated"
+			? "grounded"
+			: "unverified";
+	if (verdict === "compromised") return "not trusted";
+	// A sealed record that nothing checked is not adverse; the check fact beside it says no check ran.
+	return verdict === "unverified" ? trustStateWord("artifactIntegrity", "verified") : verdict;
+}
+
+/** What the run changed, from its sealed facts or its own report: `changed nothing`, `changed 3 files`. */
+function changeWords(entry: WorkerEntryState): string | null {
+	const result = entry.result;
+	if (result === undefined || result.outcome === "canceled") return null;
+	const structured = entry.droppedLines === 0 ? exactWorkerAnswerObject(entry.text) : null;
+	const reported = structured?.mutatedPaths;
+	const count =
+		result.changedPaths?.length ??
+		result.placement?.changedPaths?.length ??
+		result.taskWorktree?.changedPaths ??
+		(Array.isArray(reported) ? reported.length : undefined);
+	if (count === undefined) return null;
+	return count === 0 ? "changed nothing" : `changed ${count} ${count === 1 ? "file" : "files"}`;
+}
+
+/**
+ * Whether anything checked the work, in plain words. A worker's own passing check names whose word it is instead
+ * of denying it ran; no check ran is a fact, not an adverse verdict.
+ */
+function checkWords(entry: WorkerEntryState): string | null {
+	const result = entry.result;
+	if (result === undefined || result.outcome === "canceled") return null;
+	const trust = result.trust;
+	const grounding = trust?.validationGrounding;
+	if (trust === undefined || grounding === undefined)
+		return result.outcome === "succeeded" ? "validation unknown" : null;
+	if (grounding.state === "absent") {
+		if (result.outcome !== "succeeded") return null;
+		if (answersByDesign(entry)) return null;
+		const passing = reportedPassingCheck(entry);
+		return passing !== null ? `${passing} passed on the worker's own report` : "no check ran";
+	}
+	// A failed validation is the row's own reason; the facts row does not say it twice.
+	if (grounding.state === "failed") return null;
+	return validationClause(trust);
+}
+
+/**
+ * The settled facts row: what changed, whether a check ran, the calls and the tokens. `/view` adds the exit status,
+ * the context and the result contract the transcript states by presenting a conforming answer.
+ */
+function factsRow(entry: WorkerEntryState, inspect: boolean): string[] {
+	const result = entry.result;
+	const refused = result?.refusedCalls ?? 0;
+	const exitCode = result?.exitCode;
+	const context = entry.telemetry?.activity.contextTokens;
+	return [
+		changeWords(entry),
+		checkWords(entry),
+		...(inspect && exitCode !== undefined && exitCode !== 0 ? [`exit ${exitCode}`] : []),
+		callsWords(callCount(entry)),
+		refused > 0 ? refusedCallsWords(refused, result?.guardedCalls ?? 0) : null,
+		tokensWords(entry),
+		inspect && context ? `context ${context.display}` : null,
+		inspect && result?.contract !== undefined ? `contract ${result.contract}` : null,
+	].filter((fact): fact is string => typeof fact === "string" && fact.length > 0);
+}
+
+/** The route, run id, attempt and trust record of a settled card, on their own row at detailed. */
+function routeRow(entry: WorkerEntryState): string[] {
+	const route = workerRoute(entry);
+	return [
+		...(route === undefined ? [] : [displayText(entry, "route", route)]),
+		`run ${entry.runId}`,
+		...(entry.attempts.length > 1 ? [`attempt ${entry.attempts.length}`] : []),
+		`record: ${recordWord(entry.result)}`,
+	];
+}
+
+/** The telemetry sub-line under a run: route, calls, tokens, then its last call live or its trust record settled. */
+function telemetryFacts(entry: WorkerEntryState): RunTelemetryFacts {
+	const route = workerRoute(entry);
+	const calls = callCount(entry);
+	const tokens = tokensWords(entry);
+	const last = (entry.progress?.recentActions ?? entry.recentActions)?.[0];
+	const pending = isPending(entry);
+	return {
+		...(route === undefined ? {} : { route: displayText(entry, "route", route) }),
+		...(calls === undefined ? {} : { calls }),
+		...(tokens === undefined ? {} : { tokens }),
+		...(pending && last !== undefined ? { lastAction: finishedActionWords(last) } : {}),
+		...(pending ? {} : { record: recordWord(entry.result) }),
+	};
+}
+
+/** Paint the run row's cells: each cell's lead, then its glyph and text in its role. */
+function paintCells(cells: readonly RunCell[], agentPaint?: (text: string) => string): string {
+	let out = "";
+	for (const cell of cells) {
+		const glyph = cell.glyph === undefined ? "" : GLYPH[cell.glyph];
+		const body =
+			cell.slot === "agent" && agentPaint !== undefined
+				? agentPaint(cell.text)
+				: `${glyph}${cell.text}`.length === 0
+					? ""
+					: theme.fg(cell.role, `${glyph}${cell.text}`);
+		out += `${cell.lead}${body}`;
+	}
+	return out;
+}
+
+/** Up to `limit` rows, then one fold row naming how many more there are and where they are. */
+function foldRows(rows: readonly string[], limit: number, width: number, reference: string): string[] {
+	if (rows.length <= limit) return [...rows];
+	if (limit <= 0) return [];
+	const hidden = rows.length - limit;
+	const hint = `${GLYPH.ellipsis} ${hidden} ${hidden === 1 ? "row" : "rows"}${SEPARATOR}${reference}`;
+	return [
+		...rows.slice(0, limit),
+		`${cardRail()}${meta(truncateToWidth(hint, Math.max(1, width - RAIL_WIDTH), GLYPH.ellipsis, false))}`,
+	];
+}
+
+/**
+ * A settled card's last calls, oldest first, then how many came before them. The row budget includes that
+ * count's row.
+ */
+function trailRows(entry: WorkerEntryState, limit: number, width: number): string[] {
+	const recent = entry.progress?.recentActions ?? entry.recentActions ?? [];
+	const calls = trailCalls(recent);
+	const total = Math.max(entry.result?.toolCalls ?? entry.progress?.toolCalls ?? 0, recent.length);
+	const fits = calls.length <= limit && total <= recent.length;
+	const shown = fits ? calls : calls.slice(Math.max(0, calls.length - Math.max(0, limit - 1)));
+	const earlier = total - shown.reduce((sum, call) => sum + call.count, 0);
+	const rows = shown.map(({ text, count }) => (count > 1 ? `${text} ${GLYPH.times}${count}` : text));
+	if (earlier > 0)
+		rows.push(
+			`${GLYPH.ellipsis} ${earlier} earlier ${earlier === 1 ? "call" : "calls"}${SEPARATOR}/view dispatch:${entry.runId}`,
+		);
+	return rows.flatMap((row) => railLines(`${GLYPH.phaseTool} ${row}`, "body", width));
+}
+
+/** Run states a worker row under a dispatch header keeps at a tier that shows outcomes only. */
+const NOTICED_STATES: ReadonlySet<RunStateKind> = new Set(["error", "warning", "pending"]);
+
+interface CardContext {
+	width: number;
+	policy: TierPolicy;
+	nowMs: number;
+	inspect: boolean;
+	terminalRows: number | undefined;
+	/** The identity column when the card is a row of a dispatch or a council round; absent for a lone card. */
+	identityWidth: number | undefined;
+}
+
+/**
+ * A worker as its run row and the rows its tier adds. Under a dispatch header the row nests two cells in and states
+ * the run; the header above it carries the counts. A lone card (`/run`, a helper under another call, `/view`)
+ * adds its settled facts row, route row, answer and trail by tier.
+ */
+function workerCardRows(entry: WorkerEntryState, ctx: CardContext): string[] {
+	const { policy, inspect, nowMs } = ctx;
+	const nested = ctx.identityWidth !== undefined;
+	// A helper the model runs reads as a run row wherever it lands; only a card of its own adds facts, route and trail.
+	const rowOnly = (nested || entry.helper === true) && !inspect;
+	const width = Math.max(1, nested ? ctx.width - NEST.length : ctx.width);
+	const pending = isPending(entry);
+	const needsInput = workerNeedsInput(entry);
+	const outcomes = outcomesOnly(policy) && !inspect;
+	const detailed = policy.runSubRows > 0;
+	const facts = !rowOnly && !pending ? factsRow(entry, inspect) : [];
+	// A lone settled card at compact is one row: its facts take the task's place.
+	const compactFacts =
+		outcomes && !rowOnly && !pending ? [changeWords(entry), checkWords(entry)].filter((fact) => fact !== null) : [];
+	const task = compactFacts.length > 0 ? compactFacts.join(SEPARATOR) : taskText(entry);
+	const subLine = detailed && (rowOnly || pending) ? telemetryFacts(entry) : undefined;
+	const layout: RunRowLayout = runRow(runFactsOf(entry, nowMs, task, subLine), {
+		width,
+		identityWidth: ctx.identityWidth ?? identityWidthOf([entry]),
+		measure: visibleWidth,
+		continueReason: true,
+		rail: true,
+	});
+	// Councils are their own round, not a dispatch card's tally, so every member keeps its row.
+	if (nested && outcomes && entry.council === undefined && !NOTICED_STATES.has(layout.state.kind)) return [];
+	const agentPaint =
+		entry.council !== undefined ? (text: string) => councilLabelText(theme, text, entry.council?.color) : undefined;
+	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, ctx.terminalRows));
+	const reference = detailed ? `/view dispatch:${entry.runId}` : "/view";
+	const answerRows =
+		(!pending || inspect) && (needsInput || policy.workerRows > 0) && entry.text.length > 0 && (!rowOnly || detailed);
+	const answer = answerRows
+		? foldRows(
+				(inspect
+					? answerText(entry, pending ? stripDeadToolCallMarkup(entry.text) : entry.text).split("\n")
+					: bodySourceLines(entry, facts.length > 0)
+				).flatMap((line) => railLines(redactSecretString(line), needsInput ? "warning" : "assistantProse", width)),
+				needsInput && !inspect ? CHECKPOINT_PREVIEW_ROWS : budget(policy.workerRows),
+				width,
+				reference,
+			)
+		: [];
+	const trail =
+		!rowOnly && !pending && (inspect || policy.runTrail > 0) ? trailRows(entry, budget(policy.runTrail), width) : [];
+	const tools = !rowOnly && !pending && detailed && trail.length === 0 ? toolLine(entry, width) : null;
+	const presented = !pending && (!rowOnly || detailed) ? presentedContractAnswer(entry)?.footer : undefined;
+	const rows = [
+		paintCells(layout.cells, agentPaint),
+		...(layout.continuation === null ? [] : [paintCells(layout.continuation)]),
+		...(layout.telemetry === null ? [] : [paintCells(layout.telemetry)]),
+		...(!outcomes && facts.length > 0 ? railLines(joinFacts(facts), "toolMetadata", width) : []),
+		...(!rowOnly && !pending && detailed ? railLines(joinFacts(routeRow(entry)), "metadata", width) : []),
+		...(inspect ? [...inspectFailureLines(entry, width), ...inspectQualityLines(entry, width)] : []),
+		...answer,
+		...(outcomes ? [] : attemptLines(entry, width)),
+		...trail,
+		...(tools === null ? [] : [tools]),
+		...cancelLines(entry, width),
+		...(!outcomes && entry.result?.mergeDetail ? railLines(entry.result.mergeDetail, "success", width) : []),
+		...keptWorktreeLines(entry, width),
+		...(presented ? railLines(presented, "body", width) : []),
+		...(entry.result?.abandonedDetail ? railLines(entry.result.abandonedDetail, "warning", width) : []),
+		...(entry.result?.resultUnavailable ? railLines("result unavailable", "warning", width) : []),
+		...(!outcomes && entry.droppedLines
+			? railLines(`… ${entry.droppedLines} earlier lines unavailable here · /view dispatch:${entry.runId}`, "body", width)
+			: []),
+	];
+	return nested ? rows.map((row) => `${NEST}${row}`) : rows;
 }
 
 export function renderWorkerEntryLines(
@@ -1062,143 +995,22 @@ export function renderWorkerEntryLines(
 	const safeWidth = Math.max(1, Math.floor(width));
 	const inspect = options.unbounded === true;
 	const detail = inspect ? transcriptDetail("detailed") : (options.detail ?? transcriptDetail());
-	if (entry.helper && detail.style !== "detailed" && !workerNeedsInput(entry))
-		return helperRow(entry, safeWidth, detail, options.terminalRows, options.nowMs, options.siblings);
+	// The transcript slice the caller passed governs its own budgets; the tier table supplies the run budgets beside it.
+	const policy: TierPolicy = { ...tierPolicy(detail.style), ...detail };
+	const nowMs = options.nowMs ?? Date.now();
 	// The first card of a council round carries the round's header row.
 	const council =
 		entry.council !== undefined && options.group !== "continues"
-			? [councilHeader(entry, safeWidth, compactCouncilHint(entry, detail, safeWidth, options.siblings))]
+			? [councilHeader(entry, safeWidth, compactCouncilHint(entry, policy, safeWidth, nowMs, options.siblings))]
 			: [];
-	const group =
-		!inspect && detail.style === "detailed" && options.showGroupHeader && (options.siblings?.length ?? 0) > 1
-			? [dispatchHeader(options.siblings ?? [], safeWidth)]
-			: [];
-	const nowMs = options.nowMs ?? Date.now();
-	if (!inspect && detail.style === "detailed" && isPending(entry) && !workerNeedsInput(entry)) {
-		return [
-			...council,
-			...group,
-			alignedHeader(entry, safeWidth, nowMs, options.siblings),
-			liveCardDetail(entry, safeWidth),
-		].map((row) => redactedRow(row, safeWidth));
-	}
-	if (!inspect && isPending(entry)) {
-		return [
-			...council,
-			...group,
-			alignedHeader(entry, safeWidth, nowMs, options.siblings),
-			...(detail.style === "compact" ? [] : [progressLine(entry, safeWidth, nowMs, false)]),
-		].map((row) => redactedRow(row, safeWidth));
-	}
-	const integrity = entry.result?.trust;
-	// A run still stopping has sealed nothing yet, so there is no record to vouch for or check.
-	const stopping = isStopping(entry.result);
-	const provenance =
-		isPending(entry) || stopping || integrity?.artifactIntegrity.state === "verified"
-			? []
-			: railLines(
-					`run: ${integrity ? trustStateWord("artifactIntegrity", integrity.artifactIntegrity.state) : "integrity unavailable"}; raw output, not admitted as evidence`,
-					"warning",
-					safeWidth,
-				);
-	// A council that only collected produced nothing of its own to check; each member's row is its own record.
-	const collected = isSynthesis(entry) && !isPending(entry) && parseCouncilReport(entry.text)?.synthesis.kind === "none";
-	// A council or poll answers in prose, so no recognized check is its design, not a gap to flag.
-	const unchecked =
-		answersByDesign(entry) &&
-		entry.result?.outcome === "succeeded" &&
-		entry.result.trust?.validationGrounding.state === "absent";
-	const qualityText =
-		isPending(entry) || stopping || ((collected || unchecked) && !inspect)
-			? null
-			: qualityRow(entry.result, entry.runId, inspect, reportedPassingCheck(entry));
-	const quality = qualityText === null ? [] : railLines(qualityText, "body", safeWidth);
-	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, options.terminalRows));
-	// A checkpoint's body is the question the operator answers next, so it keeps
-	// its rows whatever the transcript preset hides of an ordinary answer, and
-	// it renders in the warning token rather than as folded prose.
-	const needsInput = workerNeedsInput(entry);
-	const summaryRows = needsInput ? CHECKPOINT_PREVIEW_ROWS : budget(detail.workerRows);
-	// A run that produced no prose has no summary rows, rather than one blank rail row.
-	const summary =
-		entry.text.length === 0
-			? []
-			: (inspect ? answerText(entry, entry.text).split("\n") : bodySourceLines(entry)).flatMap((line) =>
-					railLines(redactSecretString(line), needsInput ? "warning" : "assistantProse", safeWidth),
-				);
-	// A running card says what it is doing on its one live line in every style,
-	// and Detailed adds the call it finished last. A settled card in Detailed
-	// lists the calls it made, oldest first and in the past tense, because they
-	// are finished work, not activity.
-	const pending = isPending(entry);
-	const recent = entry.progress?.recentActions ?? entry.recentActions ?? [];
-	const totalCalls = entry.result?.toolCalls ?? entry.progress?.toolCalls ?? 0;
-	const earlierCalls = pending ? 0 : Math.max(0, totalCalls - recent.length);
-	const trail = pending
-		? recent
-				.slice(0, 1)
-				.flatMap((action) => railLines(`${GLYPH.phaseTool} last: ${finishedAction(action)}`, "body", safeWidth))
-		: [
-				...(earlierCalls > 0
-					? [`… ${earlierCalls} earlier call${earlierCalls === 1 ? "" : "s"} · /view dispatch:${entry.runId}`]
-					: []),
-				...trailCalls(recent),
-			].flatMap((call) => railLines(`${GLYPH.phaseTool} ${call}`, "body", safeWidth));
-	const tools = detail.workerActivity && !pending && trail.length === 0 ? toolLine(entry, safeWidth) : null;
-	const failure = previewRows(
-		failureLines(entry, safeWidth, inspect),
-		budget(detail.errorRows),
-		safeWidth,
-		false,
-		cardRail(true),
-		RAIL_WIDTH,
-	);
-	const presented = presentedContractAnswer(entry)?.footer;
-	// Compact states identity, execution and quality; the spend is a keystroke away.
-	const metrics = pending || detail.style === "compact" ? [] : workerMetrics(entry, inspect);
-	return [
-		...council,
-		...group,
-		...(inspect || options.siblings === undefined
-			? // The run's id is for looking it up, so /view and Detailed state it and the transcript's card does not,
-				// even with its bodies expanded: the live transcript always passes its own style, and /view never does.
-				[actionLine(entry, safeWidth, options.detail === undefined ? inspect : options.detail.style === "detailed")]
-			: [alignedHeader(entry, safeWidth, nowMs, options.siblings)]),
-		...(pending ? [progressLine(entry, safeWidth, options.nowMs ?? Date.now())] : []),
-		...(metrics.length ? railLines(joinFacts(metrics), "toolMetadata", safeWidth) : []),
-		...(entry.helper && entry.task && (inspect || options.siblings === undefined)
-			? previewRows(
-					railLines(entry.task, "body", safeWidth),
-					budget(detail.invocationRows),
-					safeWidth,
-					false,
-					cardRail(),
-					RAIL_WIDTH,
-				)
-			: []),
-		...(detail.workerRows > 0 || needsInput
-			? previewRows(summary, summaryRows, safeWidth, entry.pending, cardRail(), RAIL_WIDTH)
-			: []),
-		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true, cardRail(), RAIL_WIDTH),
-		...(tools ? [tools] : []),
-		...(detail.workerActivity
-			? previewRows(trail, budget(WORKER_ACTION_TRAIL_LIMIT + 1), safeWidth, true, cardRail(), RAIL_WIDTH)
-			: []),
-		...failure,
-		...(inspect ? [] : cancelLines(entry, safeWidth)),
-		...(entry.result?.mergeDetail ? railLines(entry.result.mergeDetail, "success", safeWidth) : []),
-		...keptWorktreeLines(entry, safeWidth),
-		...(presented ? railLines(presented, "body", safeWidth) : []),
-		...(entry.result?.abandonedDetail ? railLines(entry.result.abandonedDetail, "warning", safeWidth) : []),
-		...(entry.result?.resultUnavailable ? railLines("result unavailable", "warning", safeWidth) : []),
-		...(entry.droppedLines
-			? railLines(
-					`… ${entry.droppedLines} earlier lines unavailable here · /view dispatch:${entry.runId}`,
-					"body",
-					safeWidth,
-				)
-			: []),
-		...provenance,
-		...quality,
-	].map((row) => redactedRow(row, safeWidth));
+	const siblings = inspect ? undefined : (options.siblings ?? (entry.council !== undefined ? [entry] : undefined));
+	const rows = workerCardRows(entry, {
+		width: safeWidth,
+		policy,
+		nowMs,
+		inspect,
+		terminalRows: options.terminalRows,
+		identityWidth: siblings === undefined ? undefined : identityWidthOf(siblings.length > 0 ? siblings : [entry]),
+	});
+	return [...council, ...rows].map((row) => redactedRow(row, safeWidth));
 }

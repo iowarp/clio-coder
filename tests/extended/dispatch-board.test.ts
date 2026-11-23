@@ -823,10 +823,20 @@ describe("dispatch quality presentation", () => {
 				stream.started({ ...IDENTITY, agentAudience: "base", pid: null, assignmentId: IDENTITY.runId, attempt: 0 });
 				const worker = stream.completed(COMPLETED)?.entry;
 				ok(worker);
+				// The card's run row leads with the run's state from outcome, validation and record together: a failed or
+				// ungrounded validation is never a check mark, and detailed names the record beside the route.
+				const expected: Record<typeof quality, readonly [string, string]> = {
+					pass: ["✓", "record: grounded"],
+					fail: ["✗", "record: not trusted"],
+					unknown: ["✓", "record: "],
+					ungrounded: ["✗", "record: not trusted"],
+				};
+				const [glyph, record] = expected[quality];
 				for (const style of ["compact", "standard", "detailed"] as const) {
 					const lines = renderWorkerEntryLines(worker, 76, { detail: transcriptDetail(style) });
-					ok(plain(lines).includes(quality === "fail" ? "validation failed" : `quality ${wording}`), plain(lines));
-					match(plain(lines), /✓ done|· it finished/u);
+					ok(plain(lines).includes(`${glyph} ◇ Alpha`), plain(lines));
+					if (quality === "fail") ok(plain(lines).includes("validation failed"), plain(lines));
+					if (style === "detailed") ok(plain(lines).includes(record), plain(lines));
 					ok(lines.every((line) => visibleWidth(line) <= 76));
 				}
 				const monitor = createMonitorTool({

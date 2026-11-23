@@ -614,9 +614,8 @@ describe("worker rendering invariants", () => {
 			attempts: [{ runId: "run-markup", targetLabel: "blade" }],
 			pending: true,
 		} as unknown as WorkerEntryState;
-		const live = renderWorkerEntryLines(entry, 100, { detail: transcriptDetail("standard") })
-			.map(stripTerminalSequences)
-			.join("\n");
+		const live = renderWorkerEntryLines(entry, 100, { unbounded: true }).map(stripTerminalSequences).join("\n");
+		// The live row states the phase; the answer tail reads in /view, with dead markup neutralized.
 		match(live, /Evidence found\.\s+Reporting now\./u);
 		doesNotMatch(live, /<tool_call>|"secrets"/u);
 	});
@@ -656,9 +655,9 @@ describe("worker rendering invariants", () => {
 				`width ${width}: ${lines.map(visibleWidth)}`,
 			);
 			const plain = lines.map(stripTerminalSequences).join(" ").replace(/│/gu, " ").replace(/\s+/gu, " ");
-			// The failure leads; the execution fact stays in words wherever the row has room for it.
-			match(plain, /✗ validation failed/u);
-			if (width >= 44) match(plain, /it finished/u);
+			// The failure leads the row in place of the task; a failed validation never reads as done.
+			match(plain, /✗ ◇ coder validation failed/u);
+			doesNotMatch(plain, /✓|\bdone\b/u);
 			match(plain, /(?<!recorded )validation failed/u);
 			doesNotMatch(plain, /Ctrl\+O/u);
 		}
@@ -2475,8 +2474,7 @@ it("renders aligned helper rows with Standard activity and keeps their identity 
 	doesNotMatch(stripTerminalSequences(renderWorkerEntryLines(state, 100, { nowMs: 13000 }).join("\n")), /12s/);
 	const lines = renderWorkerEntryLines(state, 100, { nowMs: 1000 });
 	deepStrictEqual(lines.map(stripTerminalSequences), [
-		`${GLYPH.subProcess} scout ${GLYPH.running}       —  Explore the source architecture`,
-		`  │ ${GLYPH.phaseWaiting} starting`,
+		`${GLYPH.running} ${GLYPH.workerAgent} ${GLYPH.subProcess} scout         starting ${GLYPH.sep} Explore the source architecture`,
 	]);
 	ok(lines.every((line) => visibleWidth(line) <= 100));
 	for (const style of ["compact", "standard", "detailed"] as const) {
@@ -2487,7 +2485,8 @@ it("renders aligned helper rows with Standard activity and keeps their identity 
 				nowMs: 7000,
 			});
 			ok(rendered.every((line) => visibleWidth(line) <= width));
-			if (style === "compact") match(stripTerminalSequences(rendered.join("\n")), /scout ● +— {2}Explore/u);
+			if (style === "compact" && width >= 80)
+				match(stripTerminalSequences(rendered.join("\n")), /↳ scout +starting · Explore/u);
 		}
 	}
 	const call = renderToolSubline(
@@ -2514,25 +2513,27 @@ it("renders aligned helper rows with Standard activity and keeps their identity 
 	})).get("helper-task");
 	ok(replayed);
 	const done = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
-	match(done, new RegExp(`^${GLYPH.subProcess} scout ✓ done +—  Explore the source architecture`, "u"));
+	// The replayed record is unverified, so the row leads with that word before the task.
+	match(
+		done,
+		new RegExp(`^! ${GLYPH.workerAgent} ${GLYPH.subProcess} scout +unverified · Explore the source architecture`, "u"),
+	);
 	doesNotMatch(done, /full findings|\n/u);
 	const expanded = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, { unbounded: true }).join("\n"));
 	match(expanded, /full findings/);
-	match(expanded, new RegExp(`^${GLYPH.subProcess} scout · internal`, "u"));
+	match(expanded, new RegExp(`^! ${GLYPH.workerAgent} ${GLYPH.subProcess} scout`, "u"));
 	const detailed = stripTerminalSequences(
 		renderWorkerEntryLines(replayed, 100, { detail: transcriptDetail("detailed") }).join("\n"),
 	);
-	// Detailed keeps the settled card whole: the task, the answer and its evidence status.
-	match(
-		detailed,
-		/^↳ scout · internal · blade\/model · run helper-run ✓ done\n {2}│ Explore the source architecture\n {2}│ full findings\n/u,
-	);
-	match(detailed, /not admitted as evidence/u);
+	// Detailed keeps the settled card whole: the task, the route and its evidence status, and the answer.
+	match(detailed, /^! ◆ ↳ scout +unverified · Explore the source architecture\n/u);
+	match(detailed, /\n {2}│ blade · model · record: unverified; raw output, not admitted as evidence\n/u);
+	match(detailed, /\n {2}│ full findings/u);
 
 	replayed.result = { outcome: "failed", failureMessage: "Invalid helper result" };
 	const failed = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
-	match(failed, new RegExp(`^${GLYPH.subProcess} scout ✗ failed +—  Explore the source architecture`, "u"));
-	match(failed, /\n {2}│ ✗ Invalid helper result/u);
+	match(failed, new RegExp(`^✗ ${GLYPH.workerAgent} ${GLYPH.subProcess} scout +Invalid helper result`, "u"));
+	doesNotMatch(failed, /Explore the source architecture/u);
 });
 
 it("preserves complete invocation arguments in inspection and meaningful intent in every style", () => {
@@ -2993,7 +2994,7 @@ describe("transcript block grammar", () => {
 		panel.applyEvent({ type: "agent_end", messages: [assistantMessage("The reviewer found nothing.")] } as never);
 		const rows = plainRender(panel, 100).split("\n");
 		const call = rows.findIndex((row) => row.startsWith(`${GLYPH.workerAgent} delegated`));
-		const card = rows.findIndex((row) => row.startsWith(`${GLYPH.workerAgent} reviewer`));
+		const card = rows.findIndex((row) => row.includes(`${GLYPH.workerAgent} reviewer`));
 		const notice = rows.findIndex((row) => row.includes("a notice between the call and its card"));
 		ok(call >= 0 && card > call && card < notice, rows.join("\n"));
 		// The card states the run, so the call drops its task and its receipt body.
@@ -3004,9 +3005,7 @@ describe("transcript block grammar", () => {
 		panel.applyWorkerState(reviewer("a2", "d2"));
 		const later = plainRender(panel, 100).split("\n");
 		match(later.join("\n"), /delegated to reviewer: audit the docs/u);
-		const lastCard = later
-			.flatMap((row, index) => (row.startsWith(`${GLYPH.workerAgent} reviewer`) ? [index] : []))
-			.at(-1);
+		const lastCard = later.flatMap((row, index) => (row.includes(`${GLYPH.workerAgent} reviewer`) ? [index] : [])).at(-1);
 		ok((lastCard ?? -1) > later.indexOf("▌ Something else"), later.join("\n"));
 	});
 
@@ -3226,25 +3225,25 @@ describe("transcript block grammar", () => {
 			renderWorkerEntryLines(entry, 80, { detail: transcriptDetail(style) })
 				.map(stripTerminalSequences)
 				.join("\n");
-		// Slice T 1b keeps Detailed to the aligned header and one dim detail row.
+		// The row states the live call; detailed adds one telemetry row: route, calls, tokens and the last call.
 		for (const style of ["compact", "standard", "detailed"] as const) {
-			match(render(style), /^◇ scout ● +—/u);
+			match(render(style), /^● ◇ scout +searching retry\(/u);
 		}
 		strictEqual(render("compact").split("\n").length, 1);
-		match(render("standard"), /\n {2}│ ▹ searching retry\(/u);
+		strictEqual(render("standard").split("\n").length, 1);
 		strictEqual(render("detailed").split("\n").length, 2);
-		match(render("detailed"), /\n {2}│ blade · m · ▹ searching retry\(/u);
+		match(render("detailed"), /\n {2}│ blade · m · last: read a\.ts$/u);
 		doesNotMatch(render("standard"), /last: read/u);
-		doesNotMatch(render("detailed"), /state |last:|\?|read a\.ts/u);
+		doesNotMatch(render("detailed"), /state |\?/u);
 		doesNotMatch(render("compact"), /last:/u);
 		ok(entry.progress);
 		entry.toolCallLimit = 150;
 		entry.progress = { ...entry.progress, toolCalls: 12, processedTokens: 1200 };
-		match(render("detailed"), /blade · m · ▹ searching retry\(/u);
+		match(render("detailed"), /blade · m · 12 calls · last: read a\.ts/u);
 		const unknownRoute = { ...entry, runtime: { kind: "acp" as const } };
 		delete unknownRoute.toolCallLimit;
 		const partial = renderWorkerEntryLines(unknownRoute, 80, { detail: transcriptDetail("detailed") });
-		match(stripTerminalSequences(partial[1] ?? ""), /^ {2}│ ▹ searching retry\(/u);
+		match(stripTerminalSequences(partial[1] ?? ""), /^ {2}│ 12 calls · last: read a\.ts/u);
 		doesNotMatch(partial.map(stripTerminalSequences).join("\n"), /unknown|\?|\/150/u);
 	});
 
@@ -3284,17 +3283,18 @@ describe("transcript block grammar", () => {
 			renderWorkerEntryLines(entry(pending), 80, { detail: transcriptDetail("detailed") })
 				.map(stripTerminalSequences)
 				.filter((row) => row.startsWith(`  │ ${GLYPH.phaseTool}`));
+		// Detailed keeps three trail rows: the last calls, oldest first, then how many came before them.
 		deepStrictEqual(trail(false), [
-			`  │ ${GLYPH.phaseTool} git`,
-			`  │ ${GLYPH.phaseTool} searched retry|options`,
 			`  │ ${GLYPH.phaseTool} read docs/retry.md`,
 			`  │ ${GLYPH.phaseTool} limitation`,
+			`  │ ${GLYPH.phaseTool} … 2 earlier calls · /view dispatch:run-3`,
 		]);
 		deepStrictEqual(trail(true), []);
-		match(
-			stripTerminalSequences(renderWorkerEntryLines(entry(true), 80, { detail: transcriptDetail("detailed") }).join("\n")),
-			/\n {2}│ blade · m · ▹ running npm test/u,
+		const live = stripTerminalSequences(
+			renderWorkerEntryLines(entry(true), 80, { detail: transcriptDetail("detailed") }).join("\n"),
 		);
+		match(live, /^● ◆ scout +running npm test/u);
+		match(live, /\n {2}│ blade · m · last: limitation$/u);
 	});
 
 	it("states a run of one repeated call once, counted, and marks a call object the safety layer cut", () => {
@@ -3323,9 +3323,9 @@ describe("transcript block grammar", () => {
 			.map(stripTerminalSequences)
 			.filter((row) => row.startsWith(`  │ ${GLYPH.phaseTool}`));
 		deepStrictEqual(trail, [
-			`  │ ${GLYPH.phaseTool} … 1 earlier call · /view dispatch:run-5`,
 			`  │ ${GLYPH.phaseTool} read docs/a-long-name${GLYPH.ellipsis}`,
 			`  │ ${GLYPH.phaseTool} used evidence ${GLYPH.times}3`,
+			`  │ ${GLYPH.phaseTool} … 1 earlier call · /view dispatch:run-5`,
 		]);
 	});
 
@@ -3360,12 +3360,16 @@ describe("transcript block grammar", () => {
 			stripTerminalSequences,
 		);
 		const inspected = renderWorkerEntryLines(entry, 80, { unbounded: true }).map(stripTerminalSequences);
-		// The same header, spend, trail and quality rows, in the same words.
+		// The same run row, facts, trail and record, in the same words.
 		strictEqual(inspected[0], detailed[0]);
-		strictEqual(inspected[0], "◇ verifier · blade/m · run run-4 ✓ done");
-		strictEqual(inspected[1], "  │ contract pass");
-		match(detailed[1] ?? "", /verdict/u);
-		for (const row of detailed.filter((line) => /│ (▹|quality )/u.test(line))) ok(inspected.includes(row), row);
+		strictEqual(inspected[0], "! ◇ verifier         unverified");
+		strictEqual(inspected[1], "  │ validation unknown · 1 call · contract pass");
+		strictEqual(detailed[1], "  │ validation unknown · 1 call");
+		ok(
+			detailed.slice(3).some((row) => /verdict/u.test(row)),
+			detailed.join("\n"),
+		);
+		for (const row of detailed.filter((line) => /│ (▹|blade )/u.test(line))) ok(inspected.includes(row), row);
 		doesNotMatch(inspected.join("\n"), /└|\btok\b|… \d+ rows/u);
 		// The answer is whole and as the run returned it.
 		const body = inspected
@@ -3922,7 +3926,7 @@ describe("tool classes", () => {
 			const receipt = panel.render(width).map(stripTerminalSequences);
 			for (const [rendered, facts] of [
 				[row, ["exit 0", "18 lines"]],
-				[spend, ["✓ done"]],
+				[spend, ["validation unknown", "6 calls"]],
 				[receipt, ["in 94.4k", "out 930", "reasoning 276"]],
 			] as const) {
 				for (const fact of facts)
@@ -4090,9 +4094,16 @@ describe("agent invocations", () => {
 						doesNotMatch(rows.map(stripTerminalSequences).join("\n"), /\?|state |tools |tokens/u);
 					}
 				}
-				const initialHeaders = initial.map(stripTerminalSequences).filter((row) => row.startsWith("↳"));
-				strictEqual(initialHeaders.length, 4);
-				strictEqual(new Set(initialHeaders.map((row) => visibleWidth(row.slice(0, row.indexOf("●"))))).size, 1);
+				// Live rows under a dispatch nest two cells in; compact shows none while none failed or waits on the operator.
+				const isRow = (row: string) => row.startsWith(`  ${GLYPH.running} ${GLYPH.workerAgent} ${GLYPH.subProcess}`);
+				const textColumn = (row: string) => {
+					const lead = row.match(/^ {2}● ◆ ↳ \S+\s+/u)?.[0];
+					ok(lead, row);
+					return visibleWidth(lead);
+				};
+				const initialHeaders = initial.map(stripTerminalSequences).filter(isRow);
+				strictEqual(initialHeaders.length, style === "compact" ? 0 : 4);
+				if (style !== "compact") strictEqual(new Set(initialHeaders.map(textColumn)).size, 1);
 				const live = siblings[1];
 				ok(live);
 				const fold = createWorkerProgressFold();
@@ -4109,16 +4120,13 @@ describe("agent invocations", () => {
 					strictEqual(frame.length, initial.length, `${style} at ${width}: no reflow`);
 					strictEqual(frame[0], initial[0], "the settled prefix stays byte-stable");
 					ok(frame.every((row) => visibleWidth(row) <= width));
-					const headers = frame.map(stripTerminalSequences).filter((row) => row.startsWith("↳"));
-					const timerColumns = headers.map((row) => {
-						const header = row.match(/^.*●\s+\S+/u)?.[0];
-						ok(header, row);
-						return visibleWidth(header);
-					});
-					strictEqual(new Set(timerColumns).size, 1, "clock columns survive timer format changes");
+					const headers = frame.map(stripTerminalSequences).filter(isRow);
+					strictEqual(headers.length, initialHeaders.length);
+					if (style !== "compact")
+						strictEqual(new Set(headers.map(textColumn)).size, 1, "text columns survive timer format changes");
 					if (style === "detailed" && width >= 80) {
-						match(frame.map(stripTerminalSequences).join("\n"), /4 workers · 4 running · 0 done/u);
-						doesNotMatch(frame.map(stripTerminalSequences).join("\n"), /tools 1\/150/u);
+						// The dispatch tool row is the group's header; no worker card draws a tally of its own.
+						doesNotMatch(frame.map(stripTerminalSequences).join("\n"), /4 workers ·|tools 1\/150/u);
 					}
 				}
 				const first = siblings[0];
@@ -4131,7 +4139,7 @@ describe("agent invocations", () => {
 					ok(rows.length >= 2, "a settled sibling keeps its card in Detailed");
 					ok(rows.every((row) => visibleWidth(row) <= width));
 				}
-				if (style === "detailed" && width >= 80) match(plainRender(panel, width), /4 workers · 3 running · 1 done/u);
+				if (style === "detailed" && width >= 80) doesNotMatch(plainRender(panel, width), /4 workers ·/u);
 			}
 		}
 	});
@@ -4214,11 +4222,16 @@ describe("agent invocations", () => {
 		const rows = plainRender(panel, 100).split("\n");
 		strictEqual(rows[0], `${GLYPH.workerAgent} delegated 3 tasks · 2 ok, 1 failed · 38s`);
 		strictEqual(rows[1], "", "the cards follow the call as the next entry");
-		const cards = rows.filter((row) => row.startsWith(`${GLYPH.workerAgent} scout`));
+		const cards = rows.filter((row) => new RegExp(`^ {2}\\S ${GLYPH.workerAgent} scout`, "u").test(row));
 		strictEqual(cards.length, 3);
 		const lastCard = rows.lastIndexOf(cards[2] ?? "");
 		ok(!rows.slice(2, lastCard).includes(""), "sibling cards stack with no blank row between them");
-		strictEqual(rows.filter((row) => /│ quality /u.test(row)).length, 3);
+		// Each row leads with its own state: the failed run's reason replaces its task.
+		ok(
+			cards.some((row) => row.startsWith(`  ${GLYPH.error} `) && row.includes("context overflow")),
+			rows.join("\n"),
+		);
+		strictEqual(cards.filter((row) => row.startsWith(`  ${GLYPH.warn} `)).length, 2, rows.join("\n"));
 	});
 
 	it("groups a council round under one header with each member's roster label", () => {
@@ -4246,11 +4259,11 @@ describe("agent invocations", () => {
 			[`${GLYPH.workerHuman} council · round 1`, `${GLYPH.workerHuman} council · round 2`],
 		);
 		ok(
-			rows.some((row) => row.startsWith("  Architect · dynamo/qwen ✓ done")),
+			rows.some((row) => /^ {2}! ◇ Architect · dynamo · qwen +unverified · Found 4 call sites\./u.test(row)),
 			rows.join("\n"),
 		);
 		ok(
-			rows.some((row) => row.startsWith("  Skeptic · dynamo/qwen")),
+			rows.some((row) => row.startsWith("  ! ◇ Skeptic · dynamo · qwen")),
 			rows.join("\n"),
 		);
 		doesNotMatch(rows.join("\n"), /^. architect|^. skeptic/mu);
@@ -4276,7 +4289,7 @@ describe("agent invocations", () => {
 			detail: transcriptDetail("standard"),
 			siblings: [member],
 		}).map(stripTerminalSequences);
-		const memberRow = memberRows.find((row) => row.startsWith("  fast")) ?? "";
+		const memberRow = memberRows.find((row) => row.includes("◇ fast")) ?? "";
 		match(memberRow, /calc\.py defines add and mul with no input checks/u);
 		doesNotMatch(memberRow, /\{"findings"/u);
 		const detailed = renderWorkerEntryLines(member, 160, { detail: transcriptDetail("detailed") })
@@ -4297,7 +4310,7 @@ describe("agent invocations", () => {
 		const rows = renderWorkerEntryLines(member, 160, { detail: transcriptDetail("standard"), siblings: [member] }).map(
 			stripTerminalSequences,
 		);
-		const row = rows.find((line) => line.startsWith("  p1")) ?? "";
+		const row = rows.find((line) => line.includes("◇ p1")) ?? "";
 		match(row, /no: 91 is 7 times 13/u);
 		doesNotMatch(row, /\{"verdict"/u);
 	});
@@ -4319,7 +4332,7 @@ describe("agent invocations", () => {
 		const plain = renderWorkerEntryLines(member, 160, { detail: transcriptDetail("standard"), siblings: [member] })
 			.map(stripTerminalSequences)
 			.join("\n");
-		match(plain, /p2 · dynamo\/qwen ✓ done/u, plain);
+		match(plain, /^ {2}✓ ◇ p2 · dynamo · qwen +yes: 97 is prime/mu, plain);
 		doesNotMatch(plain, /no tools|no check ran/u, plain);
 	});
 
@@ -4385,7 +4398,11 @@ describe("agent invocations", () => {
 			const late = member("s2", "Skeptic", 2, "", true);
 			panel.applyWorkerState(late);
 			deepStrictEqual(headers(), [plain(1), plain(2)], "whole answers and a running member need no hint");
-			match(plainRender(panel, 80), /Architect · dynamo\/qwen +✓ done .*Yes\./u, "each member's row shows its answer");
+			match(
+				plainRender(panel, 80),
+				/! ◇ Architect · dynamo · qwen +unverified · Yes\./u,
+				"each member's row shows its answer",
+			);
 			// One line of 36 columns, wider than what the aligned row leaves for it at 80 columns.
 			settle(late, "Keep the retry clock inside retry().");
 			deepStrictEqual(headers(), [plain(1), hinted(2)], "the round whose row was cut says so, and only that round");
@@ -4419,8 +4436,8 @@ describe("agent invocations", () => {
 			});
 			const head = renderWorkerEntryLines(sealed, 160, { detail: transcriptDetail("standard") })
 				.map(stripTerminalSequences)
-				.find((row) => row.startsWith("  council"));
-			match(head ?? "", /^ {2}council of 2 /u, synthesis.kind);
+				.find((row) => row.includes("◇ council of"));
+			match(head ?? "", /^ {2}\S ◇ council of 2 /u, synthesis.kind);
 			doesNotMatch(head ?? "", /dynamo\/qwen/u, `${synthesis.kind}: ${head}`);
 		}
 	});
@@ -4442,12 +4459,12 @@ describe("agent invocations", () => {
 		});
 		const head = renderWorkerEntryLines(synthesis, 160, { detail: transcriptDetail("standard") })
 			.map(stripTerminalSequences)
-			.find((row) => row.startsWith("  council"));
-		match(head ?? "", /council of 2 .*! partial/u);
+			.find((row) => row.includes("◇ council of"));
+		match(head ?? "", /^ {2}✗ ◇ council of 2 +partial: 1 member gave no answer/u);
 		doesNotMatch(head ?? "", /✓/u);
 	});
 
-	it("names a failover's attempt in the card header as well as on its rail row", () => {
+	it("names a failover's attempt on its rail row and, at detailed, on the route row", () => {
 		const entry = card({
 			assignmentId: "b1",
 			agentId: "benchmarker",
@@ -4457,10 +4474,17 @@ describe("agent invocations", () => {
 			],
 		});
 		const rows = renderWorkerEntryLines(entry, 120, { detail: transcriptDetail("standard") }).map(stripTerminalSequences);
-		match(rows[0] ?? "", /dynamo\/qwen · attempt 2 ✓ done/u);
+		match(rows[0] ?? "", /^! ◆ benchmarker/u);
 		ok(
 			rows.some((row) => row.includes("↻ failed over → attempt 2 on dynamo/qwen")),
 			rows.join("\n"),
+		);
+		const detailed = renderWorkerEntryLines(entry, 120, { detail: transcriptDetail("detailed") }).map(
+			stripTerminalSequences,
+		);
+		ok(
+			detailed.some((row) => /│ dynamo · qwen · run b1-r1 · attempt 2 · record:/u.test(row)),
+			detailed.join("\n"),
 		);
 	});
 });

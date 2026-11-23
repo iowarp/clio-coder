@@ -1302,18 +1302,18 @@ test("a permission_hold frame round-trips at its version and a worker's backstop
 test("a worker's wait states when it ends, what happens then, and that it is held", () => {
 	const fold = createWorkerProgressFold();
 	fold.observe({ type: "clio_coder_permission_escalated", payload: { requestId: "ask", tool: "bash" } });
-	strictEqual(workerActivityWords(fold.snapshot()), "waiting for your approval", "no window, no claimed end");
+	strictEqual(workerActivityWords(fold.snapshot()), "needs approval", "no window, no claimed end");
 	fold.observe({
 		type: "clio_coder_permission_window",
 		payload: { requestId: "ask", held: false, expiresAt: 119_000, fallback: "deny" },
 	});
-	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "waiting for your approval · denied in 1:59");
+	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "needs approval · denied in 1:59");
 	strictEqual(workerActivityWords(fold.snapshot(), { now: 0, room: 30 }), "your approval · denied in 1:59");
 	fold.observe({
 		type: "clio_coder_permission_window",
 		payload: { requestId: "ask", held: true, expiresAt: 822_000, fallback: "fail" },
 	});
-	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "waiting for your approval · held · run fails in 13:42");
+	strictEqual(workerActivityWords(fold.snapshot(), { now: 0 }), "needs approval · held · run fails in 13:42");
 	fold.observe({ type: "clio_coder_permission_resolved", payload: { requestId: "ask", tool: "bash" } });
 	strictEqual(fold.snapshot().approvalWindow, undefined);
 	strictEqual(fold.snapshot().awaitingApproval, undefined);
@@ -1582,8 +1582,8 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 			},
 			width,
 		);
-	match(facts(100) ?? "", /^coder waiting for your approval · denied in 1:59/u);
-	match(facts(40) ?? "", /^coder your approval · denied in 1:59/u);
+	match(facts(100) ?? "", /^coder needs approval · denied in 1:59/u);
+	match(facts(40) ?? "", /^coder needs approval · denied in 1:59/u);
 	// A session that does not hold the ask cannot answer it (bt-11 l): the worker reads as running and the ask as its holder's.
 	Object.assign(progress, { approvalWindow: { ...progress.approvalWindow, owner: "session-p" } });
 	match(facts(100) ?? "", /^coder running · approval held by session session-p · denied in 1:59/u);
@@ -1913,8 +1913,8 @@ test("a wait names who it is on and keeps its time left as the room shrinks", ()
 			{ approvalWindow: { expiresAt: 119_000, held, fallback, decider } },
 			{ now: 0, ...(room === undefined ? {} : { room }) },
 		);
-	strictEqual(words("operator"), "waiting for your approval · run fails in 1:59");
-	strictEqual(words("operator", 34), "your approval · run fails in 1:59");
+	strictEqual(words("operator"), "needs approval · run fails in 1:59");
+	strictEqual(words("operator", 34), "needs approval · run fails in 1:59");
 	strictEqual(words("operator", 26), "asks you · fails in 1:59");
 	strictEqual(words("operator", 13), "fails in 1:59");
 	strictEqual(words("operator", 20, true), "held · fails in 1:59");

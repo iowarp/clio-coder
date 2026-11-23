@@ -29,6 +29,7 @@ import type { OverlayState } from "./overlay-key-routing.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
 import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
 import { createPermissionSettleWindow } from "./permission-settle.js";
+import { bindDockedWorkerApproval } from "./worker-activity.js";
 
 // Runtime lifecycle construction lives beside the pure modal key router so the
 // application composition root no longer owns the mutable overlay state.
@@ -436,6 +437,11 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			}),
 		...(deps.onOperatorParked ? { onOperatorParked: deps.onOperatorParked } : {}),
 		getUnattendedWindowMs: () => unattendedWindowMs(deps.app.getSettings?.().safety.unattendedAfterSeconds),
+	});
+	// A worker row names `[Enter] on the card` only for the run whose approval card is docked here.
+	bindDockedWorkerApproval(() => {
+		const origin = overlayPermission?.cardOnScreen()?.origin;
+		return origin?.kind === "worker" ? origin.runId : null;
 	});
 
 	// When a question window last lapsed with nobody at the keyboard; a keystroke after it ends the latch.
