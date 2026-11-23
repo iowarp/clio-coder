@@ -62,7 +62,7 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 			status: { label: string };
 			tip: string;
 		};
-		ok(Object.values(output.glyphs).every((glyph) => /^[\x20-\x7e]+$/u.test(glyph)));
+		ok(Object.values(output.glyphs).every((glyph) => /^[\x20-\x7e]*$/u.test(glyph)));
 		strictEqual(new Set([output.glyphs.ok, output.glyphs.error, output.glyphs.cancelled]).size, 3);
 		ok(output.lines.every((line) => visibleWidth(line) === 40));
 		ok(output.lines.map(stripTerminalSequences).every((line) => /^[\x20-\x7e]+$/u.test(line)));
@@ -83,6 +83,49 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 	strictEqual(motionEnabled(env), false);
 	strictEqual(nerdFontEnabled(env), false);
 	strictEqual(asciiOnly({ TERM: "xterm-256color", NO_COLOR: "1" }), false);
+});
+
+test("W0-3 glyph table: ASCII values are ASCII bytes, blocked differs from warning, operator paths stay byte for byte", () => {
+	const path = "src/日本語/é≥.py";
+	const probe = `
+		import { GLYPH } from "./src/core/glyphs.ts";
+		import { visibleWidth } from "./src/engine/tui.ts";
+		import { renderToolPreview } from "./src/interactive/renderers/tool-execution.ts";
+		import { transcriptDetail } from "./src/interactive/transcript-detail.ts";
+		const call = { toolName: "read", toolCallId: "r1", args: { path: ${JSON.stringify(path)} }, result: "contents", isError: false };
+		const rows = [];
+		for (const tier of ["compact", "standard", "detailed"]) {
+			for (const width of [33, 48, 65, 80]) {
+				const lines = renderToolPreview(call, width, transcriptDetail(tier));
+				rows.push({ width, lines, widest: Math.max(...lines.map((line) => visibleWidth(line))) });
+			}
+		}
+		console.log(JSON.stringify({ glyphs: GLYPH, rows }));
+	`;
+	for (const ascii of [true, false]) {
+		const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", probe], {
+			env: { ...process.env, TERM: "xterm-256color", CLIO_CODER_ASCII: ascii ? "1" : "0" },
+			encoding: "utf8",
+			timeout: 20_000,
+		});
+		strictEqual(result.status, 0, result.stderr);
+		const output = JSON.parse(result.stdout) as {
+			glyphs: Record<string, string>;
+			rows: { width: number; lines: string[]; widest: number }[];
+		};
+		if (ascii) {
+			ok(Object.values(output.glyphs).every((glyph) => /^[\x20-\x7e]*$/u.test(glyph)));
+			strictEqual(output.glyphs.phaseBlocked, "=");
+			strictEqual(output.glyphs.warn, "!");
+		}
+		for (const row of output.rows) {
+			ok(
+				row.lines.map(stripTerminalSequences).some((line) => line.includes(path)),
+				`${row.width}: ${row.lines}`,
+			);
+			ok(row.widest <= row.width, `${row.width}: ${row.widest}`);
+		}
+	}
 });
 
 test("demo-off skips welcome-only readers and live toggles restore the full welcome", () => {

@@ -239,7 +239,7 @@ test("a parked row drops the facts its docked card already shows, and keeps them
 	};
 	match(park(false), /held this call for you/u);
 	const docked = park(true);
-	match(docked, /git restore \.` ⏸ awaiting approval/u);
+	match(docked, /git restore \.` ‖ awaiting approval/u);
 	doesNotMatch(docked, /held this call for you/u);
 	match(park(false), /held this call for you/u);
 });

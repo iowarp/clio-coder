@@ -175,7 +175,7 @@ for (const width of widths) {
 		// Slice T 1b keeps current work inline and omits unknown telemetry.
 		assert.equal(rows.length, 2);
 		assert.equal(rows[0], renderWorkerEntryLines(entry, width, { detail: transcriptDetail("compact") })[0]);
-		assert.match(plain(rows), /\n {2}│ blade-gateway .*⚙ current-研究/u);
+		assert.match(plain(rows), /\n {2}│ blade-gateway .*▹ current-研究/u);
 		assert.doesNotMatch(plain(rows), /state |tools |tokens|last:|newest|\?/u);
 		assert.deepEqual(entry, original);
 		entry.result = { outcome: "succeeded", durationMs: 1000 };
@@ -185,7 +185,7 @@ for (const width of widths) {
 		bounded(rows, width);
 		assert.match(plain(rows), /needs input/u);
 		assert.match(plain(rows), /dataset should I inspect\?/u);
-		assert.doesNotMatch(plain(rows), /⚙ current/u);
+		assert.doesNotMatch(plain(rows), /▹ current/u);
 	});
 }
 

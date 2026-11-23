@@ -913,7 +913,7 @@ test("an operator /run resumes with its command above its card, the spend its li
 	style = "detailed";
 	live.invalidate();
 	replayed.invalidate();
-	assert.match(plain(replayed), /│ ⚙ read docs\/retry\.md\n {2}│ ⚙ searched retry\|opt…/u);
+	assert.match(plain(replayed), /│ ▹ read docs\/retry\.md\n {2}│ ▹ searched retry\|opt…/u);
 	assert.equal(plain(replayed), plain(live));
 	// The echo is a display record: the model's replayed context never carries it.
 	assert.doesNotMatch(JSON.stringify(buildReplayAgentMessagesFromTurns(entries)), /document the retry options/u);
