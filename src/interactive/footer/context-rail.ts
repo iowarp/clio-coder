@@ -69,7 +69,7 @@ export function contextBreakdownForBar(context: ContextOccupancyFacts): ContextU
 }
 
 /** The share of the window `contextUsageText` states, in percent; null when either number is unknown. */
-export function contextUsagePercent(context: ContextOccupancyFacts): number | null {
+function contextUsagePercent(context: ContextOccupancyFacts): number | null {
 	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
 	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
 	return used === null || !window ? null : (used / window) * 100;
