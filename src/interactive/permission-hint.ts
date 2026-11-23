@@ -10,12 +10,16 @@ import type { HintEntry } from "./overlay-frame.js";
  */
 export const MUTATION_PREVIEW_KEY = "alt+v";
 
-/**
- * Whether this card has a mutation to read, and whether it is open.
- * `none` covers every ask with nothing local to inspect, including a worker
- * escalation, whose arguments never leave the worker.
- */
+/** Whether this card has a mutation to read, and whether it is open. */
 export type PermissionInspectionHint = "none" | "closed" | "open";
+
+/**
+ * Where the card's choice rows are, for the rail under the card view. `on-card`: every choice and its consequence is
+ * on screen, so the stop key may yield to Esc on a narrow rail. `below`: the choices are scrolled out of view, so
+ * Enter and the session grant do nothing and the rail says `[↓] read choices` in their place (7.4). Absent for an
+ * open view (terms, details) and for the composer rail.
+ */
+export type PermissionChoicesHint = "on-card" | "below";
 
 /** The key that folds and unfolds the standing approval terms on the card. */
 export const PERMISSION_TERMS_KEY = "alt+t";
@@ -73,11 +77,15 @@ export function permissionHintEntries(
 	terms?: PermissionTermsHint,
 	scrollable = false,
 	stopVerb = "stop turn",
+	choices?: PermissionChoicesHint,
 ): HintEntry[] {
+	const below = choices === "below";
 	return [
-		composerHasDraft
-			? { key: "Backspace", verb: "clear the draft to allow", short: "clear draft", critical: true }
-			: { key: "Enter", verb: "allow", short: "allow", critical: true },
+		below
+			? { key: "↓", verb: "read choices", critical: true }
+			: composerHasDraft
+				? { key: "Backspace", verb: "clear the draft to allow", short: "clear draft", critical: true }
+				: { key: "Enter", verb: "allow", short: "allow", critical: true },
 		// The terms key is the card's own and the most droppable entry: the folded
 		// card already states what the keys do in one row. It sits before the
 		// inspect key so the narrowing drops it first.
@@ -88,13 +96,20 @@ export function permissionHintEntries(
 			: [{ key: permissionKeyLabel(PERMISSION_TERMS_KEY), verb: "terms", short: "terms", critical: false }]),
 		// A card taller than its rows scrolls (BT-005). The open mutation names the
 		// same keys itself below.
-		...(scrollable && inspection !== "open" ? [{ key: "↑↓", verb: "scroll", critical: false }] : []),
+		...(scrollable && inspection !== "open" && !below ? [{ key: "↑↓", verb: "scroll", critical: false }] : []),
 		...(inspection === "none"
 			? []
 			: inspection === "open"
 				? [{ key: "↑↓", verb: "scroll", critical: false }]
 				: [{ key: permissionKeyLabel(MUTATION_PREVIEW_KEY), verb: "inspect details", short: "inspect", critical: false }]),
-		{ key: permissionKeyLabel(PERMISSION_STOP_KEY), verb: stopVerb, short: "stop", critical: true },
+		// On the card view the choice rows name stop with its consequence, so a narrow rail keeps Esc beside the answer
+		// instead; with a view open nothing else names it.
+		{
+			key: permissionKeyLabel(PERMISSION_STOP_KEY),
+			verb: stopVerb,
+			short: "stop",
+			critical: choices === undefined,
+		},
 		// With a draft, deny and stop are the only immediate answers, so Esc
 		// outranks the narrowing that would otherwise drop it first. With a view
 		// open, Esc closes it and the rail says so; deny is one more Esc.

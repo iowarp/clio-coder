@@ -11,6 +11,8 @@
  * Anything it cannot read leaves the card showing the plan text as before.
  */
 
+import { formatLimit } from "../core/format-time.js";
+
 export interface PlanMember {
 	/** The council label or role the plan gives the worker, when it has one. */
 	label: string | null;
@@ -22,6 +24,8 @@ export interface PlanMember {
 	limits: string | null;
 	/** The forecast lines the plan prints beside this worker's route, the one it runs on first; empty when it prints none. */
 	forecasts: string[];
+	/** Where the run writes, in the plan's own words (`none (read-only)`, `workspace`, `roots src`); null when unstated. */
+	writes: string | null;
 }
 
 export interface PlanSummary {
@@ -41,6 +45,7 @@ const TASK =
 const COUNCIL = /^\s+council label=(\S+)/u;
 const LIMITS = /^\s+limits: (.+)$/u;
 const FORECAST = /^\s+forecast: (.+)$/u;
+const WRITES = /^\s+writes: (.+)$/u;
 const COST = /^advisory session cost baseline: (.+)$/u;
 const DEADLINE = /^deadline: (.+)$/u;
 
@@ -78,6 +83,7 @@ export function readDispatchPlan(text: string): PlanSummary | null {
 				task: preview(task[5] ?? ""),
 				limits: null,
 				forecasts: [],
+				writes: null,
 			});
 			continue;
 		}
@@ -90,6 +96,11 @@ export function readDispatchPlan(text: string): PlanSummary | null {
 		const limits = LIMITS.exec(line);
 		if (limits && last) {
 			last.limits = limits[1] ?? null;
+			continue;
+		}
+		const writes = WRITES.exec(line);
+		if (writes?.[1] && last) {
+			last.writes = writes[1];
 			continue;
 		}
 		const forecast = FORECAST.exec(line);
@@ -111,7 +122,12 @@ export function readDispatchPlan(text: string): PlanSummary | null {
 		const deadlineLine = DEADLINE.exec(line);
 		if (deadlineLine) {
 			const value = deadlineLine[1] ?? "";
-			deadline = value.startsWith("none") ? null : value.replace(/ms whole-plan$/u, " ms for the whole plan");
+			const ms = /^(\d+)ms whole-plan$/u.exec(value)?.[1];
+			deadline = value.startsWith("none")
+				? null
+				: ms !== undefined
+					? `${formatLimit(Number(ms))} for the whole plan`
+					: value;
 		}
 	}
 	if (topology === null || members.length === 0 || members.some((member) => member.agent.length === 0)) return null;
@@ -158,10 +174,107 @@ function headlineNamesTask(summary: PlanSummary): boolean {
 	return summary.sharedTask !== null && (summary.topology === "council" || summary.topology === "compete");
 }
 
+/** The route one task runs on, `target · model`, or the empty string when the plan names neither. */
+export function planRoute(member: PlanMember): string {
+	return [member.target, member.model].filter((part): part is string => part !== null).join(" · ");
+}
+
+/** Where one task may write, read from its `writes:` line (`writeModeLine`). */
+type WriteBoundary = "read-only" | "workspace" | "outside" | "unstated";
+
+const OUTSIDE_ROOT = /^(?:\/|~|\.\.(?:\/|$)|[A-Za-z]:[\\/])/u;
+
+function writeBoundary(writes: string | null): WriteBoundary {
+	if (writes === null) return "unstated";
+	if (writes.startsWith("none")) return "read-only";
+	const roots = /^(?:roots |own worktree, merges back only )(.+)$/u.exec(writes)?.[1];
+	return roots?.split(", ").some((root) => OUTSIDE_ROOT.test(root.trim())) === true ? "outside" : "workspace";
+}
+
+const BOUNDARY_WORDS: Readonly<Record<WriteBoundary, string>> = {
+	"read-only": "read-only",
+	workspace: "writes in the workspace",
+	outside: "writes outside the workspace",
+	unstated: "write boundary not stated",
+};
+
+/** Whether one task's limits line prices its route: `cost …` is priced, `unpriced route: …` is not. */
+function pricing(limits: string | null): "priced" | "unpriced" | "unknown" {
+	if (limits === null) return "unknown";
+	if (limits.startsWith("unpriced route")) return "unpriced";
+	return limits.startsWith("cost ") ? "priced" : "unknown";
+}
+
+/** What a dispatch approval grants, built from every task and never from the first alone. */
+export interface PlanScope {
+	/** `read-only · unpriced route · copilot · gpt-6-luna`, `writes in the workspace · mixed pricing · 2 routes`. */
+	text: string;
+	/** A task writes outside the workspace, which the card states in the error role. */
+	outside: boolean;
+	/** Tasks run on different routes, so each plan row carries its own. */
+	routesDiffer: boolean;
+}
+
+export function planScope(summary: PlanSummary): PlanScope {
+	const boundaries = new Set(summary.members.map((member) => writeBoundary(member.writes)));
+	const boundary: WriteBoundary = boundaries.has("outside")
+		? "outside"
+		: boundaries.has("workspace")
+			? "workspace"
+			: boundaries.has("unstated")
+				? "unstated"
+				: "read-only";
+	const prices = new Set(summary.members.map((member) => pricing(member.limits)));
+	const price =
+		prices.size > 1
+			? "mixed pricing"
+			: prices.has("priced")
+				? "priced"
+				: prices.has("unpriced")
+					? "unpriced route"
+					: null;
+	const routes = [...new Set(summary.members.map(planRoute).filter((route) => route.length > 0))];
+	const route = routes.length === 0 ? null : routes.length === 1 ? (routes[0] ?? null) : `${routes.length} routes`;
+	return {
+		text: [BOUNDARY_WORDS[boundary], price, route].filter((part): part is string => part !== null).join(" · "),
+		outside: boundary === "outside",
+		routesDiffer: routes.length > 1,
+	};
+}
+
+/**
+ * One task's limits line as configured limits (`10m per response · 30m per run · about 18 tool calls`): the
+ * plan states them in milliseconds and seconds, which no card row shows.
+ */
+function limitUnits(limits: string): string[] {
+	const units: string[] = [];
+	const cost = /^cost (\S+) per model call/u.exec(limits)?.[1];
+	if (cost !== undefined) units.push(`${cost} per model call`);
+	const response = /each response stops at (\d+) s\b/u.exec(limits)?.[1];
+	if (response !== undefined) units.push(`${formatLimit(Number(response) * 1000)} per response`);
+	const wall =
+		/the run stops at its (\d+) ms wall clock/u.exec(limits)?.[1] ?? /stops the run within (\d+) ms/u.exec(limits)?.[1];
+	if (wall !== undefined) units.push(`${formatLimit(Number(wall))} per run`);
+	const planned = /planned for about (\d+) tool calls/u.exec(limits)?.[1];
+	const stop = /stops it at (\d+) tool calls/u.exec(limits)?.[1];
+	if (planned !== undefined) units.push(`about ${planned} tool calls`);
+	else if (stop !== undefined) units.push(`${stop} tool calls`);
+	else if (/cannot count/u.test(limits)) units.push("tool calls not counted");
+	return units;
+}
+
+/** The plan's limits row: one value when every task shares it, else one per task in plan order. */
+export function planLimits(summary: PlanSummary): { shared: string | null; perTask: Array<string | null> } {
+	const perTask = summary.members.map((member) =>
+		member.limits === null ? null : limitUnits(member.limits).join(" · ") || null,
+	);
+	const first = perTask[0] ?? null;
+	return { shared: first !== null && perTask.every((value) => value === first) ? first : null, perTask };
+}
+
 /** Label and value pairs for the card's plan section, member by member. */
 export function planFacts(summary: PlanSummary): Array<{ label: string; value: string }> {
-	const route = (member: PlanMember): string =>
-		[member.target, member.model].filter((part): part is string => part !== null).join(" · ");
+	const route = planRoute;
 	// Bounds every worker shares are stated once under the members; differing ones follow their worker.
 	const firstLimits = summary.members[0]?.limits ?? null;
 	const sharedLimits =

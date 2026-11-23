@@ -243,7 +243,10 @@ test("the footer names the terms key and drops it before any answer key", () => 
 	const narrow = permissionOverlayHint(36, false, "closed", "closed");
 	doesNotMatch(narrow, /terms/u);
 	match(narrow, /allow/u);
-	match(narrow, /stop/u);
+	// On the card view the choice rows name stop with its consequence, so the narrow rail keeps Esc (7.4).
+	strictEqual(narrow, "[Enter] allow · [Esc] deny");
+	// With the terms open nothing else names stop, so the rail keeps it.
+	match(permissionOverlayHint(36, false, "closed", "open"), /stop/u);
 	// The composer rail asks without a terms state and stays as it was.
 	ok(!permissionHintEntries(false, "closed").some((entry) => entry.key === "alt+t"));
 });

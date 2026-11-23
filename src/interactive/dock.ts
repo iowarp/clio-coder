@@ -138,6 +138,14 @@ export function dockBodyRows(tui: object): number {
 export const DOCK_COMPACT_ROWS = 6;
 
 /**
+ * Body rows a docked decision (an approval) may spend: every row the two rails, the footer and a sliver of transcript
+ * leave, with no shared ceiling, so a long plan never pushes the choices out of the window (7.4).
+ */
+export function decisionRows(tui: object): number {
+	return Math.max(DOCK_BODY_ROWS_MIN, terminalRows(tui) - DOCK_RESERVED_ROWS - (footerHeights.get(tui) ?? 2));
+}
+
+/**
  * The most rows an adaptive surface may take: half the terminal when that is
  * more than the shared budget, never more than the terminal can hold, and never
  * less than what every other menu already gets. A decision the operator has to
@@ -148,7 +156,7 @@ export const DOCK_COMPACT_ROWS = 6;
 export function dockGrowthRows(tui: object, fill = false): number {
 	const rows = terminalRows(tui);
 	const shared = dockBodyRows(tui);
-	const available = Math.max(DOCK_BODY_ROWS_MIN, rows - DOCK_RESERVED_ROWS - (footerHeights.get(tui) ?? 2));
+	const available = decisionRows(tui);
 	return Math.max(shared, fill ? available : Math.min(Math.floor(rows / 2), available));
 }
 

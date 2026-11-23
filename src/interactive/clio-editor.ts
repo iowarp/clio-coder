@@ -10,7 +10,7 @@ import {
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
 import type { TurnPreparationPhase } from "../session-control/turn-state.js";
-import { type DockEntry, dockAdaptiveRows, dockBodyRows, dockGrowthRows, dockTop } from "./dock.js";
+import { type DockEntry, decisionRows, dockAdaptiveRows, dockBodyRows, dockGrowthRows, dockTop } from "./dock.js";
 import { guardPastedEditorOperator } from "./editor-bash.js";
 import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
 import { steerDraftToken } from "./editor-steer.js";
@@ -193,6 +193,8 @@ interface RuleUnit {
  * space and `━` on each side of the right units. Without right units the title keeps `━ `, its space and one fill cell.
  */
 const OVERLAY_RULE_CHROME = 7;
+/** Draft rows a decision card leaves visible under itself. */
+const APPROVAL_DRAFT_ROWS = 2;
 const OVERLAY_RULE_BARE = 4;
 
 /**
@@ -1076,11 +1078,11 @@ export class ClioEditor extends Editor {
 	}
 
 	/**
-	 * A permission card inside the editor's own rails. It used to be a second,
-	 * boxed frame above a composer that repeated its keys; now the rails take the
-	 * attention tone, the top one names the decision and the bottom one carries
-	 * the card's keys once. The operator's draft, when there is one, stays
-	 * editable under the card because Enter is inert while it exists (#186).
+	 * A permission card inside the editor's own rails, decisions first (7.4). The top rule is titled `Approval` and its
+	 * right end says what waits and its clock (`‖ needs approval · 3:32 · <actor>`); the bottom rail carries the card's
+	 * keys once. The card gets every row the rails, the footer and a sliver of transcript leave, with no shared ceiling.
+	 * The operator's draft stays editable under it, at most 2 rows and its divider, because Enter is inert while it
+	 * exists (#186).
 	 */
 	private renderApproval(
 		entry: DockEntry,
@@ -1095,35 +1097,48 @@ export class ClioEditor extends Editor {
 		const room = this.approvalLabelRoom(width);
 		const route = this.chrome.getModelLabel();
 		const cue = GLYPH.phaseBlocked;
-		const up = draft.hiddenAbove > 0 ? `${GLYPH.up}${draft.hiddenAbove}` : "";
 		const tone = entry.frame.dockTone() ?? "decisionCue";
 		const actor = modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId);
-		// The decision's mark leads its title; draft rows hidden above the card are its own position, kept before the run.
-		const label = {
-			plain: (titleRoom: number) =>
-				`${cue} ${entry.frame.dockTitle({ room: Math.max(1, titleRoom - visibleWidth(cue) - 1), actor })}`,
-			paint: (text: string) =>
-				`${theme.fg("attentionRail", cue)} ${theme.style(tone, text.slice(cue.length + 1), { bold: true })}`,
-		};
-		const position: RuleUnit | null = up ? { text: up, paint: (text) => theme.fg("positionCount", text) } : null;
-		// The draft's rows and its divider come out of the card's budget, so the whole surface keeps the dock's height.
+		// The draft's rows and its divider come out of the card's budget, so the whole surface keeps its height.
 		const draftRows = draft.rows.length > 0 ? draft.rows.length + 1 : 0;
 		const down = draft.hiddenBelow > 0 ? theme.fg("positionCount", `${GLYPH.down}${draft.hiddenBelow}`) : "";
 		entry.frame.setRailRoom?.(room - (down ? visibleWidth(down) + 3 : 0));
-		const rendered = entry.frame.renderDockBody(contentWidth, Math.max(1, dockBodyRows(this.dockHost) - draftRows));
+		// The body renders before the rule reads its title, so the rule states the clock this frame draws.
+		const rendered = entry.frame.renderDockBody(contentWidth, Math.max(1, decisionRows(this.dockHost) - draftRows));
 		// The frame pads every body to its budget; a card owes no blank rows above its keys.
 		let bodyEnd = rendered.length;
 		while (bodyEnd > 1 && stripTerminalSequences(rendered[bodyEnd - 1] ?? "").trim() === "") bodyEnd -= 1;
+		const title = "Approval";
+		const label = {
+			plain: (titleRoom: number) =>
+				visibleWidth(title) <= titleRoom ? title : truncateToWidth(title, titleRoom, GLYPH.ellipsis, false),
+			paint: (text: string) => theme.style(tone, text, { bold: true }),
+		};
+		// The decision keeps its unit on the rule: it shortens to the clock alone before the title gives way.
+		const decisionRoom = Math.max(1, width - OVERLAY_RULE_CHROME - visibleWidth(title) - visibleWidth(cue) - 1);
+		const decision = entry.frame.dockTitle({ room: decisionRoom, actor });
+		const pending: RuleUnit = {
+			text: `${cue} ${decision}`,
+			paint: (text) =>
+				`${theme.fg("attentionRail", cue)} ${theme.style(tone, text.slice(cue.length + 1), { bold: true })}`,
+		};
 		const hint = entry.frame.dockHint(room - (down ? visibleWidth(down) + 3 : 0) + 4);
 		const keys = [down, hint?.trim().length ? theme.fg("decisionKey", hint) : ""]
 			.filter(Boolean)
 			.join(theme.fg("separator", ` ${GLYPH.dot} `));
+		// Draft rows hidden above the two shown are the divider's own position.
+		const up = draft.hiddenAbove > 0 ? `${GLYPH.up}${draft.hiddenAbove}` : "";
 		return {
 			card: [
-				this.overlayRule(width, theme, rail, label, position),
+				this.overlayRule(width, theme, rail, label, pending),
 				...rendered.slice(0, bodyEnd).map((row) => padAnsi(`${pad}${row}${pad}`, width)),
 				...(draft.rows.length > 0
-					? [padAnsi(`${pad}${rule(theme, contentWidth, { left: "Your draft", leftToken: "annotation" })}`, width)]
+					? [
+							padAnsi(
+								`${pad}${rule(theme, contentWidth, { left: "Your draft", leftToken: "annotation", ...(up ? { right: up } : {}) })}`,
+								width,
+							),
+						]
 					: []),
 			],
 			composer: [...draft.rows, this.bottomRail(width, theme, rail, keys, room)],
@@ -1318,7 +1333,8 @@ export class ClioEditor extends Editor {
 				0,
 				input.findIndex((line) => line.includes(FAKE_CURSOR_START)),
 			);
-			const [start, end] = centeredWindow(input.length, cursor, Math.max(1, dockBodyRows(this.dockHost) - 3));
+			// The draft under a decision card shows at most 2 rows (7.4); the rest is counted on its divider and rail.
+			const [start, end] = centeredWindow(input.length, cursor, APPROVAL_DRAFT_ROWS);
 			// An empty composer has nothing to show under the card; its draft returns with the normal rails.
 			const { card, composer } = this.renderApproval(docked, safeWidth, theme, {
 				rows: text.length > 0 ? input.slice(start, end) : [],
