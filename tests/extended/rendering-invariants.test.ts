@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS, type OutputStyle } from "../../src/core/defaults.js";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
@@ -2662,27 +2663,41 @@ describe("transcript block grammar", () => {
 		});
 	}
 
-	it("marks every transcript notice in the gutter by level and hangs its wrapped rows", () => {
-		const panel = createChatPanel({ now: () => 1_000 });
-		const notice = (level: "info" | "success" | "warning" | "error", text: string) =>
-			panel.applyEvent({ type: "notice", level, surface: "transcript", text } as never);
-		notice("info", "[CLIO Coder] interrupt refused: a dispatch is attached. Queued for the next slot instead.");
-		notice("warning", "[/context compact] auto-compaction failed: the summary exceeded its budget");
-		notice("error", "[CLIO Coder] context overflow persisted after compaction");
-		notice("success", "session saved");
-		// A footer notice is the footer's; the transcript never shows it.
-		panel.applyEvent({ type: "notice", level: "info", surface: "footer", text: "cache may be cold" } as never);
-		const rows = panel.render(40).map(stripTerminalSequences);
+	it("marks every transcript notice in the gutter by level, one row each, with its subsystem tag at detailed", () => {
+		const transcript = (tier: OutputStyle): string[] => {
+			setPresentationTier(tier);
+			try {
+				const panel = createChatPanel({ now: () => 1_000 });
+				const notice = (level: "info" | "success" | "warning" | "error", text: string) =>
+					panel.applyEvent({ type: "notice", level, surface: "transcript", text } as never);
+				notice("info", "[CLIO Coder] interrupt refused: a dispatch is attached. Queued for the next slot instead.");
+				notice("warning", "[/context compact] auto-compaction failed: the summary exceeded its budget");
+				notice("error", "[CLIO Coder] context overflow persisted after compaction");
+				notice("success", "session saved");
+				// A footer notice is the footer's; the transcript never shows it.
+				panel.applyEvent({ type: "notice", level: "info", surface: "footer", text: "cache may be cold" } as never);
+				return panel.render(40).map(stripTerminalSequences);
+			} finally {
+				setPresentationTier("standard");
+			}
+		};
+		const rows = transcript("standard");
 		const plain = rows.join("\n");
 		doesNotMatch(plain, /\[CLIO Coder\]|cache may be cold/u);
 		match(plain, /^i interrupt refused: a dispatch is/mu);
-		match(plain, /^! \[\/context compact\] auto-compaction/mu, "a subsystem tag stays");
+		match(plain, /^! auto-compaction failed: the summary/mu, "standard drops the subsystem tag");
 		match(plain, /^✗ context overflow persisted after/mu);
 		match(plain, /^✓ session saved$/mu);
-		for (const row of rows.filter((line) => line.length > 0 && !/^[i!✗✓] /u.test(line))) {
-			ok(row.startsWith("  "), `a wrapped notice row left the content column: ${row}`);
+		for (const row of rows.filter((line) => line.length > 0)) {
+			ok(/^[i!✗✓] /u.test(row), `a notice took a second row: ${row}`);
+			if (visibleWidth(row) === 40) ok(row.endsWith(GLYPH.ellipsis), `a cut notice ends in an ellipsis: ${row}`);
 		}
 		for (const row of rows) ok(visibleWidth(row) <= 40, row);
+		match(transcript("detailed").join("\n"), /^! \[\/context compact\] auto-compaction/mu, "detailed keeps the tag");
+		const compact = transcript("compact").join("\n");
+		doesNotMatch(compact, /^[i✓] /mu, "compact suppresses info and success");
+		match(compact, /^! auto-compaction failed/mu);
+		match(compact, /^✗ context overflow/mu);
 	});
 
 	it("hangs a wrapped command reply in the content column beside its mark", () => {
@@ -2747,7 +2762,7 @@ describe("transcript block grammar", () => {
 			);
 			for (const width of [40, 60, 120]) {
 				const rows = (blocks[0]?.(width) ?? []).map(stripTerminalSequences);
-				match(rows[0] ?? "", new RegExp(`^ {2}┌─ [!✗] ${title} ─+┐$`, "u"), rows.join("\n"));
+				match(rows[0] ?? "", new RegExp(`^[!✗] ${title} ─+$`, "u"), rows.join("\n"));
 				doesNotMatch(rows.join("\n"), /\[(approval|budget|safety-net|middleware)\]/u);
 				for (const row of rows) ok(visibleWidth(row) <= width, row);
 			}
@@ -2763,11 +2778,11 @@ describe("transcript block grammar", () => {
 			{ appendReplayBlock: (block) => budgetBlocks.push(block), requestRender() {} },
 			budget.source,
 		);
-		match((budgetBlocks[0]?.(80) ?? []).map(stripTerminalSequences).join("\n"), /│ Session priced spend/u);
+		match((budgetBlocks[0]?.(80) ?? []).map(stripTerminalSequences).join("\n"), /^ {2}Session priced spend/mu);
 		// A reminder that opens with a command keeps it verbatim; only a memory note is capitalized on display.
 		for (const [source, text, shown] of [
 			["reminder", "npm run test before claiming done.", "Reminder to the model · npm run test before"],
-			["memory", "Memory: you already tried the retry.", "│ You already tried"],
+			["memory", "Memory: you already tried the retry.", "  You already tried"],
 		] as const) {
 			const commandBlocks: Array<(width: number) => string[]> = [];
 			appendNotice("warn", text, { appendReplayBlock: (block) => commandBlocks.push(block), requestRender() {} }, source);
@@ -2778,7 +2793,7 @@ describe("transcript block grammar", () => {
 			appendReplayBlock: (block) => event.push(block),
 			requestRender() {},
 		});
-		doesNotMatch((event[0]?.(60) ?? []).map(stripTerminalSequences).join("\n"), /┌─/u);
+		doesNotMatch((event[0]?.(60) ?? []).map(stripTerminalSequences).join("\n"), /─/u);
 	});
 
 	it("states guidance middleware attached for the model as one note, never as tool output", () => {

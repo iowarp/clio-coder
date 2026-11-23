@@ -71,9 +71,8 @@ import type { ChatPanel, ReplayedRunFacts } from "./chat-panel.js";
 import { OPERATOR_COMMAND_ENTRY, renderOperatorCommandRows, TURN_HUMAN_WAIT_ENTRY } from "./command-output.js";
 import { showsContextResult } from "./context-operation-view.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
-import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
 import { renderContextOperationResult } from "./renderers/context-operation.js";
-import { type NoticeMark, renderNoticeRow } from "./renderers/notice.js";
+import { type NoticeMark, renderNoticeRow, renderTranscriptNotice } from "./renderers/notice.js";
 import { renderRetryStatus } from "./renderers/retry-status.js";
 import { renderSkillSurfaceRow } from "./renderers/skill-rows.js";
 import { renderBashTranscriptExecution, renderToolResultOnly } from "./renderers/tool-execution.js";
@@ -514,7 +513,9 @@ function replayResultSummary(result: ReplayToolResult): Record<string, unknown> 
 
 /** A replayed system line (`[checkpoint]`, `[continuity]`, `system:`) as the info notice it is. */
 function appendReplayNotice(chatPanel: ChatPanel, text: string): void {
-	chatPanel.appendReplayBlock((width) => renderNoticeRow(truncateReplayText(text), "info", width));
+	chatPanel.appendReplayBlock((width, _detail, unbounded) =>
+		renderTranscriptNotice(truncateReplayText(text), "info", width, undefined, unbounded === true),
+	);
 }
 
 /** Middleware reminder severities as notice marks: advice informs, a warning or a hard stop warns. */
@@ -693,7 +694,7 @@ function renderReminderMessageEntry(entry: CustomEntry, width: number, full: boo
 		: message.startsWith("Memory:")
 			? "memory"
 			: "reminder";
-	return renderNoticeRow(message, reminderMark(data?.severity), width, source, full);
+	return renderTranscriptNotice(message, reminderMark(data?.severity), width, source, full);
 }
 
 function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[] {
@@ -1098,12 +1099,9 @@ function replayEntries(
 					);
 				}
 				break;
+			// The summary is the model's checkpoint; the context operation entry beside it redraws the card the live
+			// session showed, so a resume reads the same rows.
 			case "compactionSummary":
-				if (entry.summary.trim().length > 0) {
-					chatPanel.appendReplayBlock((width) =>
-						renderCompactionSummaryEntry({ ...entry, summary: truncateReplayText(entry.summary) }, width),
-					);
-				}
 				break;
 			case "sessionInfo":
 				if (entry.name || entry.label) chatPanel.appendReplayBlock((width) => renderSessionInfoEntry(entry, width));

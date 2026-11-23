@@ -46,15 +46,13 @@ for (const audience of ["internal", "shadow"] as const)
 			notices,
 			audience === "internal"
 				? []
-				: [
-						"CLIO Coder's Context-bootstrap helper is working",
-						"CLIO Coder's Context-bootstrap helper failed; your turn is not affected · /fleet shows why",
-					],
+				: // The helper's card says it is working; only its failure reaches the footer.
+					["CLIO Coder's Context-bootstrap helper failed; your turn is not affected · /fleet shows why"],
 		);
 		strictEqual(islands, audience === "internal" ? 0 : 2);
 		subscriptions.dispose();
 		bus.emit("run.started", { ...identity, pid: null, assignmentId: "helper-1", attempt: 0 });
-		strictEqual(notices.length, audience === "internal" ? 0 : 2);
+		strictEqual(notices.length, audience === "internal" ? 0 : 1);
 	});
 
 test("S3-01: live hook trust diagnostics reach the footer notice area and unsubscribe on disposal", () => {

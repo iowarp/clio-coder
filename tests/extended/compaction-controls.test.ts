@@ -55,7 +55,6 @@ import {
 } from "../../src/interactive/application-controller.js";
 import { tokenRow } from "../../src/interactive/context-operation-view.js";
 import {
-	renderCompactionSummaryEntry,
 	renderCompactionSummaryLine,
 	renderEvictionSkipLine,
 } from "../../src/interactive/renderers/compaction-summary.js";
@@ -2796,9 +2795,16 @@ describe("production compaction controls", () => {
 				tokensAfter: event.tokensAfter,
 			});
 			ok(notices.includes(liveLine));
-			const figures = liveLine.match(/compacted (.+? tokens)/u)?.[1];
-			ok(figures);
-			ok(renderCompactionSummaryEntry(checkpoint, 200).join("\n").includes(figures));
+			// A resumed session redraws the card from the settled operation, which keeps the line the live session raised.
+			const settled = f
+				.entries()
+				.flatMap((entry) =>
+					entry.kind === "custom" && entry.customType === CONTEXT_OPERATION_CUSTOM_TYPE
+						? [readContextOperation(entry.data)]
+						: [],
+				)
+				.find((operation) => operation?.outcome !== undefined);
+			strictEqual(settled?.notice, liveLine);
 		});
 	}
 	it("keeps successful compaction usage solely on its checkpoint", async () => {
