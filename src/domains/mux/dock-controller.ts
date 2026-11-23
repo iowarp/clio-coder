@@ -4,8 +4,8 @@
  * A dock is a pane in a fixed position relative to Clio's anchor pane with a
  * target share of the anchor's axis, a minimum size in cells, and a managed
  * lifecycle. Four slots exist: `workers` to the right of the anchor, and
- * `files`, `music` and `extension` below it. Ad-hoc utility panes are not docks and are never touched
- * here.
+ * `files`, `music` and `extension` below it. Ad-hoc utility panes are not docks: only their placement
+ * ({@link planUtilityPlacement}) is decided here, against the anchor's width and the dock column.
  *
  * The controller owns geometry only. Ownership stays in the pane registry,
  * error swallowing stays in the contract's `attempt` wrapper: every method
@@ -208,6 +208,30 @@ export function planDockOpen(
 	return { direction: spec.direction, ratio: ratioForDockShare(share), share };
 }
 
+/** CLIO Coder never lets a pane it opens leave its own pane narrower than this. */
+const TUI_MIN_COLUMNS = 60;
+
+export type UtilityPanePlacement = { direction: "right" | "down"; targetPaneId: string } | { refused: string };
+
+/**
+ * Where a utility pane that opens beside the anchor goes. A plain split hands the new pane half the anchor's width, so
+ * it splits the anchor to the right only when the anchor keeps at least {@link TUI_MIN_COLUMNS}. Otherwise it stacks
+ * under the dock column, which leaves the anchor's width alone, and with no dock column it is refused before any split
+ * reaches the wire, naming the columns it is short.
+ */
+export function planUtilityPlacement(
+	anchor: { paneId: string; width: number },
+	dockColumnPaneId: string | null,
+	label: string,
+): UtilityPanePlacement {
+	const kept = Math.floor(anchor.width / 2);
+	if (kept >= TUI_MIN_COLUMNS) return { direction: "right", targetPaneId: anchor.paneId };
+	if (dockColumnPaneId !== null) return { direction: "down", targetPaneId: dockColumnPaneId };
+	return {
+		refused: `${label} needs ${TUI_MIN_COLUMNS - kept} more columns: opening it would leave CLIO Coder ${kept} columns, and it keeps at least ${TUI_MIN_COLUMNS}.`,
+	};
+}
+
 export interface DockControllerOptions {
 	client: MuxClient;
 	anchorPaneId: string;
@@ -224,6 +248,8 @@ export interface DockController {
 	/** Live dock states, for status output. */
 	states(): ReadonlyArray<DockState>;
 	stateFor(slot: DockSlot): DockState | null;
+	/** The pane of a visible dock that forms a column beside the anchor in `geometry`'s tab, or null. */
+	columnPaneId(geometry: MuxTabGeometry): string | null;
 	/**
 	 * Splits the anchor for a dock and converges it to its cell floor. Returns
 	 * the new pane, or null when the anchor is too small. Throws MuxError on
@@ -444,6 +470,14 @@ export function createDockController(options: DockControllerOptions): DockContro
 		stateFor(slot: DockSlot): DockState | null {
 			const state = bySlot.get(slot);
 			return state ? { ...state } : null;
+		},
+
+		columnPaneId(geometry: MuxTabGeometry): string | null {
+			for (const state of bySlot.values()) {
+				if (state.hidden || DOCK_SPECS[state.slot].direction !== "right") continue;
+				if (geometry.panes.some((pane) => pane.paneId === state.paneId)) return state.paneId;
+			}
+			return null;
 		},
 
 		async open(slot, openOptions = {}): Promise<MuxPaneRef | null> {

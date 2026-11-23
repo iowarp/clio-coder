@@ -27,6 +27,7 @@ import {
 	type DockSlot,
 	type DockState,
 	PARKING_TAB_LABEL,
+	planUtilityPlacement,
 } from "./dock-controller.js";
 import { createPaneRegistry, type MuxPaneRegistry, paneRecord } from "./pane-registry.js";
 import { muxSupportsMethod } from "./protocol.js";
@@ -77,7 +78,13 @@ export interface MuxOpenUtilityPaneRequest {
 	purpose?: MuxPanePurpose;
 	/** Opaque file identity (at most 80 characters), persisted for dock adoption. */
 	dockKey?: string;
+	/**
+	 * `right` (the default) splits the anchor only while CLIO Coder keeps 60 columns, else stacks the pane under the
+	 * dock column, else refuses through `onRefused`; `down` takes rows, never columns, and always splits the anchor.
+	 */
 	direction?: "right" | "down";
+	/** A placement refusal, said to the operator: the pane would leave CLIO Coder under its column floor. */
+	onRefused?: (reason: string) => void;
 	env?: Readonly<Record<string, string>>;
 	/**
 	 * Free text appended as the last argument. It travels in the pane's
@@ -497,9 +504,37 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						ref = placed;
 					} else {
 						const anchor = anchorPaneId ?? (await live.paneCurrent()).paneId;
-						const pane = await live.paneSplit({
+						let split: { direction: "right" | "down"; targetPaneId: string } = {
 							direction: request.direction ?? "right",
 							targetPaneId: anchor,
+						};
+						if (split.direction === "right") {
+							// The 60-column floor sits beside the dock's own anchor-size refusal: decided from live geometry,
+							// before any split reaches the wire. No anchor rect means no width to judge, so the split goes ahead.
+							const geometry = await live.paneLayout(anchor);
+							const anchorRect = geometry.panes.find((pane) => pane.paneId === anchor)?.rect;
+							if (anchorRect) {
+								const placed = planUtilityPlacement(
+									{ paneId: anchor, width: anchorRect.width },
+									docks?.columnPaneId(geometry) ?? null,
+									request.label,
+								);
+								if ("refused" in placed) {
+									log("info", `mux ${request.label} pane refused: ${placed.refused}`);
+									report({ source: "local", message: placed.refused });
+									try {
+										request.onRefused?.(placed.refused);
+									} catch {
+										// The refusal is the answer; a throwing listener does not turn it into a failure.
+									}
+									return null;
+								}
+								split = placed;
+							}
+						}
+						const pane = await live.paneSplit({
+							direction: split.direction,
+							targetPaneId: split.targetPaneId,
 							cwd: request.cwd,
 							focus: false,
 							...(env ? { env } : {}),
