@@ -71,6 +71,11 @@ export type MiddlewareEffect =
 			 * advisory footer. Never sent to the model, and not declarable from a hooks file.
 			 */
 			failedChecks?: ReadonlyArray<string>;
+			/**
+			 * Host-only: passes a later change retired and that change, as operator-safe labels, for the finish advisory
+			 * footer (FX-5). Never sent to the model, and not declarable from a hooks file.
+			 */
+			retired?: { checks: ReadonlyArray<string>; change: string };
 	  }
 	| { kind: "annotate_tool_result"; message: string; severity?: MiddlewareAnnotationSeverity }
 	| {

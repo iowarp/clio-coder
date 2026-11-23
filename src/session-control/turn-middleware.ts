@@ -34,6 +34,7 @@ import {
 	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_RAN_CHANGED_PREFIX,
 	FINISH_CONTRACT_RUN_CHECKS_PREFIX,
+	retiredChecksNote,
 } from "../domains/safety/finish-contract.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type {
@@ -412,6 +413,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		modelOnly = false,
 		firingId?: string,
 		failedChecks: ReadonlyArray<string> = [],
+		retired?: { checks: ReadonlyArray<string>; change: string },
 	): boolean => {
 		if (modelOnly && severity !== "hard-block") {
 			// Advice for the model rides the next request and stays in the ledger
@@ -449,9 +451,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				"warning",
 				failedChecks.length > 0
 					? `CLIO Coder changed files and ran ${failedChecks[0]}${more(failedChecks)} after the edit; ${failedChecks.length > 1 ? "they" : "it"} failed${hint}`
-					: ran.length > 0
-						? `CLIO Coder changed files and ran ${ran[0]}${more(ran)} afterwards, but no recognized check covered the change${hint}`
-						: `CLIO Coder changed files but ran no check on them afterwards${hint}`,
+					: retired !== undefined
+						? `CLIO Coder changed files; ${retiredChecksNote(retired)}${hint}`
+						: ran.length > 0
+							? `CLIO Coder changed files and ran ${ran[0]}${more(ran)} afterwards, but no recognized check covered the change${hint}`
+							: `CLIO Coder changed files but ran no check on them afterwards${hint}`,
 				"finish.unverified",
 			);
 			return false;
@@ -517,6 +521,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		const noteOf = (fact: CompletionFact): string => {
 			for (const effect of effects)
 				if (effect.kind === "request_continuation" && effect.fact === fact && effect.note) return effect.note;
+			for (const effect of effects)
+				if (effect.kind === "inject_reminder" && effect.fact === fact && effect.retired)
+					return retiredChecksNote(effect.retired);
 			return COMPLETION_FACT_NOTES[fact];
 		};
 		const open = [...new Set(sealed.facts.map(noteOf))].join("; ");
@@ -906,6 +913,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 						effect.audience === "model",
 						firings.get(effect),
 						effect.failedChecks,
+						effect.retired,
 					);
 					enter(effect, carried);
 					continue;

@@ -35,6 +35,7 @@ import { checkOutputReader, gitRunsConfiguredHelpers } from "./run-effects.js";
  */
 
 interface TrackedCall {
+	tool: string;
 	name: string | null;
 	check?: string;
 	reading: CallClassification;
@@ -122,6 +123,7 @@ function trackCall(
 			? validationCheckId(reading.check)
 			: undefined;
 	return {
+		tool,
 		name: reading.name,
 		...(check ? { check } : {}),
 		reading,
@@ -306,6 +308,12 @@ export interface RunCheckFacts {
 	 * is not one the change met (CLI-P54).
 	 */
 	failedAfterChange: ReadonlyArray<string>;
+	/**
+	 * When no pass stands: the passes the last retiring change cleared and that change, read as the command or the
+	 * tool and path, so the finish notice can say checks ran before it rather than that none ran (FX-5). Raw text; the
+	 * caller makes it operator-safe.
+	 */
+	retired?: { checks: ReadonlyArray<string>; change: string };
 }
 
 export function runCheckFacts(
@@ -313,7 +321,7 @@ export function runCheckFacts(
 	workspaceRoot: string,
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
 ): RunCheckFacts {
-	const { passCalls, sealed, freshRed } = foldStanding(
+	const { passCalls, sealed, freshRed, retired } = foldStanding(
 		entries,
 		workspaceRoot,
 		[],
@@ -322,7 +330,12 @@ export function runCheckFacts(
 		pathStartedAt(entries),
 	);
 	const failing = [...sealed].flatMap(([name, passed]) => (passed ? [] : [name]));
-	return { passCalls, failing, failedAfterChange: failing.filter((name) => freshRed.has(name)) };
+	return {
+		passCalls,
+		failing,
+		failedAfterChange: failing.filter((name) => freshRed.has(name)),
+		...(retired !== null && passCalls.size === 0 ? { retired } : {}),
+	};
 }
 
 function foldStanding(
@@ -338,6 +351,7 @@ function foldStanding(
 	sealed: Map<string, boolean>;
 	freshRed: Set<string>;
 	dispatchRuns: Set<string>;
+	retired: { checks: string[]; change: string } | null;
 } {
 	const root = path.resolve(workspaceRoot);
 	const gitHelpers = cache?.gitHelpers ?? gitRunsConfiguredHelpers(root);
@@ -352,12 +366,15 @@ function foldStanding(
 	// The check each standing name ran, so a later run of it under another spelling re-files it, as the recorder does (SF-2).
 	const identities = new Map<string, string>();
 	const dispatchRuns = new Set<string>();
+	let retired: { checks: string[]; change: string } | null = null;
 	let revision = 0;
 	const settle = (call: TrackedCall, failed: boolean, at: string, key: string): void => {
 		const settlement = settleCheckCall(call.reading, failed, failed ? "error" : "ok", call.revision === revision);
 		if (settlement.mutation) {
 			outputTarget.changed(call.reading.changedPaths);
 			revision += 1;
+			const cleared = [...standing.values()].flatMap((item) => (item.passed ? [item.check ?? item.name] : []));
+			if (cleared.length > 0) retired = { checks: [...new Set(cleared)], change: changeLabel(call, root) };
 			for (const [name, item] of standing) if (item.passed) standing.delete(name);
 			sealed.clear();
 			freshRed.clear();
@@ -440,5 +457,12 @@ function foldStanding(
 			return key === undefined ? [] : [[key, item] as const];
 		}),
 	);
-	return { checks, passCalls, sealed, freshRed, dispatchRuns };
+	return { checks, passCalls, sealed, freshRed, dispatchRuns, retired };
+}
+
+/** A change as the operator would name it: its command, or the tool and the first path it changed. */
+function changeLabel(call: TrackedCall, root: string): string {
+	if (call.reading.shellCommand !== null) return call.reading.shellCommand;
+	const target = call.reading.changedPaths[0] ?? call.reading.paths[0];
+	return target === undefined ? call.tool : `${call.tool} ${path.relative(root, target) || target}`;
 }

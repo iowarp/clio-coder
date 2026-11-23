@@ -15,6 +15,7 @@ import {
 	FINISH_CONTRACT_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
+	FINISH_CONTRACT_RETIRED_SUFFIX,
 	standingFailedCheck,
 } from "../../src/domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
@@ -738,7 +739,6 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		deepStrictEqual(sealed("git diff --check", [{ id: "diff-check", command: "git diff --check" }]), ["diff-check"]);
 		for (const unproven of [
 			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, true),
-			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, false, true),
 			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5' | tee log`),
 			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5' || true`),
 			assess(`python3 -c 'import calc; assert calc.add(2, 3)'`),
@@ -751,6 +751,13 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 				`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: calc. Run checks: run-acceptance.`,
 			);
 		}
+		// A pass the later edit retired is no evidence either, and the advisory says a check ran before the change (FX-5).
+		const retired = assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, false, true);
+		strictEqual(retired.reason, "unvalidated_mutation");
+		strictEqual(
+			retired.kind === "engage" ? retired.message : "",
+			`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: calc. Run checks: run-acceptance.${FINISH_CONTRACT_RETIRED_SUFFIX}`,
+		);
 	});
 
 	it("credits every declared check a chain runs, unless an earlier segment can skip or move it or a later one edits", (t) => {
@@ -957,6 +964,42 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		);
 		deepStrictEqual(facts.failing, []);
 		strictEqual(assess([...edit, ...dispatched], "high").reason, "unvalidated_mutation");
+	});
+
+	it("names the passes a later commit retired instead of saying no check ran (FX-5)", () => {
+		const committed = [
+			...checkedWindow("npm test"),
+			toolCall("bash-2", ToolNames.Bash, { command: 'git commit -q -m "feat: thing"' }),
+			toolResult("bash-2", ToolNames.Bash, false),
+			assistantMessage("assistant-1", "Done."),
+		];
+		const assessment = assessFinishContract({
+			sessionEntries: committed,
+			assistantTurnId: "assistant-1",
+			workspaceRoot: process.cwd(),
+		});
+		strictEqual(assessment.reason, "unvalidated_mutation");
+		deepStrictEqual(assessment.kind === "engage" ? assessment.retiredBy : null, {
+			checks: ["test"],
+			change: 'git commit -q -m "feat: thing"',
+		});
+		const continuation = highRigorGate(committed, "Done.").find((effect) => effect.kind === "request_continuation");
+		strictEqual(
+			continuation?.kind === "request_continuation" ? continuation.note : null,
+			'test passed before git commit -q -m "feat: thing", and no check ran after it',
+		);
+		// A check run after the commit stands, and nothing is reported retired.
+		const rechecked = assessFinishContract({
+			sessionEntries: [
+				...committed.slice(0, -1),
+				toolCall("bash-3", ToolNames.Bash, { command: "npm test" }),
+				toolResult("bash-3", ToolNames.Bash, false),
+				assistantMessage("assistant-1", "Done."),
+			],
+			assistantTurnId: "assistant-1",
+			workspaceRoot: process.cwd(),
+		});
+		strictEqual(rechecked.reason, "validation_evidence");
 	});
 
 	it("a verify call that could not run is no failed check; one that ran red is (L10)", (t) => {
