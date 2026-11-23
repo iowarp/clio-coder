@@ -1,3 +1,4 @@
+import type { PickerDetail } from "../../core/presentation-tier.js";
 import { isRoutingPath } from "../../core/session-routing.js";
 import { settingControl } from "../../core/settings-controls.js";
 import type { SettingsOrigin } from "../../core/settings-layers.js";
@@ -183,11 +184,20 @@ export function effectTiming(item: SettingsCenterItem): string | null {
 	if (item.presentationKind === "group-header" || item.id === "targets" || isTargetsCta(item)) return null;
 	if (item.id.startsWith("maintenance.")) return null;
 	if (item.scope === "restart") return "after restart";
-	if (item.id.startsWith("targets.")) return "chat now · workers next dispatch";
+	if (item.id.startsWith("targets.")) return `chat now ${GLYPH.sep} workers next dispatch`;
 	if (item.id.startsWith("workers.") || item.configPath.startsWith("fleet.")) return "next dispatch";
 	if (item.readOnly) return null;
 	if (settingsChangeKind(item.configPath) === "nextTurn" && !isRoutingPath(item.configPath)) return "next request";
 	return "now";
+}
+
+/**
+ * Where a change to this row may be saved, in the scope card's order. A row
+ * the scope card never sees (an action, a fact, a connection) has no scope.
+ */
+function changeScope(item: SettingsCenterItem): string | null {
+	if (item.presentationKind !== "setting" || item.readOnly || item.id.startsWith("targets.")) return null;
+	return item.scope === "restart" ? "project, global" : "session, project, global";
 }
 
 /** The short form beside a value: which layer set it, or `default` when none did. */
@@ -223,7 +233,7 @@ function originPhrase(origin: SettingValueOrigin | null | undefined): string | n
 		case "cli":
 			return "a command-line flag";
 		case "built-in":
-			return "default · not set in any file";
+			return `default ${GLYPH.sep} not set in any file`;
 		default:
 			return null;
 	}
@@ -460,7 +470,7 @@ export function renderLaneTitle(
 	const { label, active, meta, tabReaches = false } = options;
 	const width = Math.max(1, options.width);
 	if (!active) {
-		const both = [tabReaches ? "[Tab]" : "", meta ?? ""].filter(Boolean).join(" · ");
+		const both = [tabReaches ? "[Tab]" : "", meta ?? ""].filter(Boolean).join(` ${GLYPH.sep} `);
 		// A short lane keeps the key that reaches it over the note about its rows.
 		const facts = visibleWidth(label) + 4 + visibleWidth(both) <= width || !tabReaches ? both : "[Tab]";
 		return titleRow(theme, `  ${label}`, width, { token: "annotation", ...(facts ? { meta: facts } : {}) });
@@ -516,6 +526,14 @@ export interface InspectorContext {
 	rowKeysLive: boolean;
 	/** The row's home section, shown only from Recent & Pinned. */
 	homeLabel?: string;
+	/**
+	 * The tier's `pickerDetail`: `status` keeps the description alone, `facts`
+	 * adds where the value came from and what it means, `pane` adds the file,
+	 * the scope a change may be saved to and when it takes effect.
+	 */
+	detail: PickerDetail;
+	/** The file that holds the value, home collapsed; read only at `pane`. */
+	file?: string;
 }
 
 function markCut(lines: ReadonlyArray<string>, kept: number): string[] {
@@ -539,7 +557,7 @@ function itemFacts(theme: ClioTheme, context: InspectorContext, item: SettingsCe
 	if (item.id.startsWith("maintenance.")) facts.push(chip(theme, `Enter ${item.currentValue}`, "muted"));
 	else if (item.id === "targets.add-cta") facts.push(chip(theme, "Enter opens the guided setup", "muted"));
 	else if (item.id === "targets.url-cta") facts.push(chip(theme, "Enter asks for the endpoint URL", "muted"));
-	else if (item.readOnly) facts.push(chip(theme, `read-only here · ${item.affordance}`, "muted"));
+	else if (item.readOnly) facts.push(chip(theme, `read-only here ${GLYPH.sep} ${item.affordance}`, "muted"));
 	else if (item.presentationKind === "status" || item.presentationKind === "action")
 		facts.push(chip(theme, item.affordance, "muted"));
 	if (!item.readOnly && item.defaultValue !== undefined) {
@@ -547,7 +565,9 @@ function itemFacts(theme: ClioTheme, context: InspectorContext, item: SettingsCe
 		facts.push(chip(theme, isModified(item) ? `default was ${shown}` : `default ${shown}`, "muted"));
 	}
 	const origin = originFact(context.origin);
-	if (!item.readOnly && origin !== null) {
+	// At the detailed tier the provenance row names the file itself, which says more than the layer's name.
+	const fileSaysIt = context.detail === "pane" && context.file !== undefined;
+	if (!item.readOnly && origin !== null && !fileSaysIt) {
 		// Beside `default Off` the file fact alone says the rest.
 		const unset = context.origin === "built-in" && item.defaultValue !== undefined && !isModified(item);
 		facts.push(chip(theme, unset ? "not set in any file" : origin, context.origin === "session" ? "accent" : "muted"));
@@ -557,10 +577,23 @@ function itemFacts(theme: ClioTheme, context: InspectorContext, item: SettingsCe
 	if (context.homeLabel !== undefined) facts.push(chip(theme, `in ${context.homeLabel}`, "muted"));
 	if (context.pinnable && context.pinned)
 		facts.push(
-			chip(theme, context.rowKeysLive ? `${GLYPH.favorite} pinned · * unpins` : `${GLYPH.favorite} pinned`, "muted"),
+			chip(
+				theme,
+				context.rowKeysLive ? `${GLYPH.favorite} pinned ${GLYPH.sep} * unpins` : `${GLYPH.favorite} pinned`,
+				"muted",
+			),
 		);
 	else if (context.pinnable && context.rowKeysLive) facts.push(chip(theme, "* pins", "muted"));
 	return facts;
+}
+
+/** The provenance a detailed pane adds: the file that holds the value and where a change may be saved. */
+function provenanceFacts(theme: ClioTheme, context: InspectorContext, item: SettingsCenterItem): Array<string | null> {
+	const scope = changeScope(item);
+	return [
+		context.file === undefined ? null : chip(theme, context.file, "muted"),
+		scope === null ? null : chip(theme, `saves to ${scope}`, "muted"),
+	];
 }
 
 /**
@@ -573,24 +606,23 @@ export function renderInspector(theme: ClioTheme, context: InspectorContext, wid
 	if (budget <= 0) return [];
 	const safe = Math.max(1, width);
 	const item = context.item;
+	const pane = context.detail === "pane";
+	// When a change lands is provenance: the rule states it at the detailed tier only.
+	const timing = item === null || !pane ? null : effectTiming(item);
 	const rule =
 		item === null
 			? sectionRule(theme, safe, context.sectionLabel, { meta: context.position })
-			: sectionRule(theme, safe, item.label, {
-					meta: ((): string => {
-						const timing = effectTiming(item);
-						return timing === null ? context.position : `applies ${timing}`;
-					})(),
-				});
+			: sectionRule(theme, safe, item.label, timing === null ? {} : { meta: `applies ${timing}` });
 	const description = wrapTextWithAnsi(
 		theme.fg("body", item === null ? context.sectionDescription : item.description),
 		safe,
 	);
-	const facts = chipRow(
-		theme,
-		item === null ? sectionFacts(theme, context.counts) : itemFacts(theme, context, item),
-		safe,
-	);
+	// Compact says what the row is and nothing about how its value came about.
+	const facts =
+		context.detail === "status"
+			? ""
+			: chipRow(theme, item === null ? sectionFacts(theme, context.counts) : itemFacts(theme, context, item), safe);
+	const provenance = item === null || !pane ? "" : chipRow(theme, provenanceFacts(theme, context, item), safe);
 	// A cut value outranks the description: the row already said what the
 	// setting is called, and the one thing the lane could not say is its value.
 	const value =
@@ -599,9 +631,11 @@ export function renderInspector(theme: ClioTheme, context: InspectorContext, wid
 			: factRows(theme, [{ label: "Value", value: context.fullValue, tone: "neutral" }], safe, { stack: "never" });
 	if (budget === 1) return [rule];
 	if (budget === 2) return [rule, value[0] ?? (facts.length > 0 ? facts : (description[0] ?? ""))];
-	const prose = Math.max(0, budget - 2 - value.length);
+	// The provenance row is the first to go: it takes a row only once the description and facts have theirs.
+	const prose = Math.max(0, budget - 1 - (facts.length > 0 ? 1 : 0) - value.length);
 	const lines = [rule, ...value, ...markCut(description, Math.min(2, prose))];
 	if (facts.length > 0) lines.push(facts);
+	if (provenance.length > 0) lines.push(provenance);
 	return lines.slice(0, budget);
 }
 
@@ -627,31 +661,59 @@ export function renderNarrowInspector(
 export function renderDetailLane(theme: ClioTheme, context: InspectorContext, width: number, height: number): string[] {
 	const safe = Math.max(1, width);
 	const item = context.item;
+	const compact = context.detail === "status";
+	const pane = context.detail === "pane";
 	if (item === null) {
 		const rows = [
 			titleRow(theme, context.sectionLabel, safe, { meta: context.position }),
 			"",
 			...wrapTextWithAnsi(theme.fg("body", context.sectionDescription), safe),
-			"",
-			chipRow(theme, sectionFacts(theme, context.counts), safe),
+			...(compact ? [] : ["", chipRow(theme, sectionFacts(theme, context.counts), safe)]),
 		];
-		const note = wrapTextWithAnsi(theme.fg("annotation", "Tab or → opens its settings"), safe);
+		const note = compact ? [] : wrapTextWithAnsi(theme.fg("annotation", "Tab or → opens its settings"), safe);
 		return pinNote(rows, note, safe, height);
 	}
-	const timing = effectTiming(item);
+	// When a change lands is provenance: the title states it at the detailed tier only.
+	const timing = pane ? effectTiming(item) : null;
+	// The title holds the timing while both fit; a long label moves it to a fact row instead of losing it.
+	const timingInTitle = timing !== null && visibleWidth(item.label) + 2 + visibleWidth(`applies ${timing}`) <= safe;
+	const provenance: Fact[] = [];
+	const scope = pane ? changeScope(item) : null;
+	if (scope !== null) provenance.push({ label: "Scope", value: scope, tone: "muted" });
+	if (timing !== null && !timingInTitle) provenance.push({ label: "Applies", value: timing, tone: "muted" });
 	const body: string[] = [
-		titleRow(theme, item.label, safe, timing === null ? {} : { meta: `applies ${timing}` }),
+		titleRow(theme, item.label, safe, timingInTitle ? { meta: `applies ${timing}` } : {}),
 		"",
 		...wrapTextWithAnsi(theme.fg("body", item.description), safe),
 	];
-	if (item.help) body.push("", ...wrapTextWithAnsi(theme.fg("help", item.help), safe));
+	if (item.help && !compact) body.push("", ...wrapTextWithAnsi(theme.fg("help", item.help), safe));
 	const facts: Fact[] = [];
+	// A value the rows lane cut is the list's own fact, so it is said whole at every tier.
 	if (context.fullValue !== undefined) facts.push({ label: "Value", value: context.fullValue });
+	if (!compact) facts.push(...sourceFacts(context, item, provenance));
+	// Facts keep label and value on one row at every lane width: the lane is
+	// never under thirty cells, and a stacked `From` cost two rows and a blank.
+	if (facts.length > 0) body.push("", ...factRows(theme, facts, safe, { stack: "never" }));
+	// Compact keeps the note only where it is the way to act: a read-only row says where it is changed.
+	const noteText = compact && !item.readOnly ? null : scopeNote(item, context);
+	const note = noteText === null ? [] : wrapTextWithAnsi(theme.fg("annotation", noteText), safe);
+	return pinNote(body, note, safe, height);
+}
+
+/**
+ * The pane's facts: the default, which layer set the value, what it means, the
+ * choices and its home. At the detailed tier `From` names the file path instead
+ * of the layer, and the provenance (the scope a change may be saved to, and
+ * when a change lands if the title had no room for it) follows it.
+ */
+function sourceFacts(context: InspectorContext, item: SettingsCenterItem, provenance: ReadonlyArray<Fact>): Fact[] {
+	const facts: Fact[] = [];
 	if (!item.readOnly && item.defaultValue !== undefined)
 		facts.push({ label: "Default", value: formatSettingsValue(item.configPath, item.defaultValue), tone: "muted" });
-	const origin = originPhrase(context.origin);
+	const origin = context.detail === "pane" && context.file !== undefined ? context.file : originPhrase(context.origin);
 	if (!item.readOnly && origin !== null)
 		facts.push({ label: "From", value: origin, tone: context.origin === "session" ? "accent" : "neutral" });
+	facts.push(...provenance);
 	const meaning = item.valueHelp?.[item.currentValue];
 	if (!item.readOnly && meaning) facts.push({ label: "Means", value: meaning });
 	if (!item.readOnly && item.values && item.values.length > 0)
@@ -661,11 +723,7 @@ export function renderDetailLane(theme: ClioTheme, context: InspectorContext, wi
 			tone: "muted",
 		});
 	if (context.homeLabel !== undefined) facts.push({ label: "In", value: context.homeLabel, tone: "muted" });
-	// Facts keep label and value on one row at every lane width: the lane is
-	// never under thirty cells, and a stacked `From` cost two rows and a blank.
-	if (facts.length > 0) body.push("", ...factRows(theme, facts, safe, { stack: "never" }));
-	const note = wrapTextWithAnsi(theme.fg("annotation", scopeNote(item, context)), safe);
-	return pinNote(body, note, safe, height);
+	return facts;
 }
 
 /**
@@ -673,35 +731,43 @@ export function renderDetailLane(theme: ClioTheme, context: InspectorContext, wi
  * that also said `Enter edits` told the truth only while the rows held the
  * keyboard, and was wrong the moment the filter took it.
  */
-function scopeNote(item: SettingsCenterItem, context: InspectorContext): string {
-	const pin = !context.pinnable
+function scopeNote(item: SettingsCenterItem, context: InspectorContext): string | null {
+	const pinWords = !context.pinnable
 		? ""
 		: context.pinned
 			? context.rowKeysLive
-				? ` · ${GLYPH.favorite} pinned, * unpins`
-				: ` · ${GLYPH.favorite} pinned`
+				? `${GLYPH.favorite} pinned, * unpins`
+				: `${GLYPH.favorite} pinned`
 			: context.rowKeysLive
-				? " · * pins"
+				? "* pins"
 				: "";
+	const pin = pinWords.length > 0 ? ` ${GLYPH.sep} ${pinWords}` : "";
 	if (item.id.startsWith("maintenance.")) return `Enter ${item.currentValue}`;
 	if (item.id === "targets.add-cta")
 		return "Opens the guided setup for a new connection; its last step saves it to your global settings";
 	if (item.id === "targets.url-cta")
 		return "Saves the connection to your global settings and uses the chosen model for chat";
 	if (item.submenu && (item.presentationKind === "status" || item.presentationKind === "action"))
-		return `${item.affordance} · nothing changes until an action is confirmed`;
-	if (item.readOnly) return `Read-only here · ${item.affordance}`;
+		return `${item.affordance} ${GLYPH.sep} nothing changes until an action is confirmed`;
+	if (item.readOnly) return `Read-only here ${GLYPH.sep} ${item.affordance}`;
+	// The detailed pane's Scope and Applies rows already say where a restart-only change is saved and when it lands.
+	if (item.scope === "restart" && context.detail === "pane") return pinWords.length > 0 ? pinWords : null;
 	if (item.scope === "restart") return `Saved to settings.yaml and applied after a restart${pin}`;
 	return `Nothing changes until you choose where it applies${pin}`;
 }
 
-/** Keep the note on the last rows; cut the body above it with a marker when the column is short. */
+/**
+ * Keep the note on the last rows. A column too short for everything gives up
+ * its blank rows first, then cuts the body above the note with a marker.
+ */
 function pinNote(body: ReadonlyArray<string>, note: ReadonlyArray<string>, width: number, height: number): string[] {
 	const noteKept = note.slice(0, Math.max(1, height - 1));
-	const bodyBudget = Math.max(0, height - noteKept.length - 1);
-	const kept = body.slice(0, bodyBudget);
+	const gap = noteKept.length > 0 ? 1 : 0;
+	const rows = body.length + noteKept.length + gap > height ? body.filter((row) => row.trim().length > 0) : [...body];
+	const bodyBudget = Math.max(0, height - noteKept.length - (rows.length + noteKept.length + gap <= height ? gap : 0));
+	const kept = rows.slice(0, bodyBudget);
 	while (kept.length > 0 && (kept.at(-1) ?? "").trim().length === 0) kept.pop();
-	const marked = markCut(body, kept.length);
+	const marked = markCut(rows, kept.length);
 	const filler = Array.from({ length: Math.max(0, height - marked.length - noteKept.length) }, () => "");
 	return fitRows([...marked, ...filler, ...noteKept], width, height);
 }
