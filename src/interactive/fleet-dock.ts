@@ -34,6 +34,11 @@ import {
 
 export interface FleetDockDeps {
 	getRows: () => ReadonlyArray<DispatchBoardRow>;
+	/**
+	 * Every run this session, settled ones included. A failed run is no longer live, yet the dock keeps it until the
+	 * operator acknowledges it by opening Fleet Runs: a failure is never hidden (6.4).
+	 */
+	getSettledRows?: () => ReadonlyArray<DispatchBoardRow>;
 	/** Bound to TaskBoardStore.cachedSnapshot; a repaint must never fold the session ledger. */
 	getTaskBoard?: () => TaskBoardSnapshot | null;
 	/** The expanded footer carries the board's own rows, so the tasks strip steps aside. */
@@ -89,6 +94,12 @@ function taskBoardStrip(board: TaskBoardSnapshot, width: number, titled: boolean
 
 function isTerminal(row: DispatchBoardRow): boolean {
 	return row.status === "completed" || row.status === "failed" || row.status === "aborted" || row.status === "dead";
+}
+
+/** A settled run whose state is `✗`: it failed, or it exited with a failed check or a compromised record (2.7). */
+function settledFailure(row: DispatchBoardRow): boolean {
+	if (row.status === "failed" || row.status === "dead") return true;
+	return row.status === "completed" && (validationOf(row) === "failed" || integrityOf(row) === "compromised");
 }
 
 /**
@@ -334,6 +345,17 @@ export type FleetDock = VariantRail;
  * runs carries the strip.
  */
 export function createFleetDock(deps: FleetDockDeps): FleetDock {
+	/** Failed runs the operator has seen on Fleet Runs; the dock stops carrying them. */
+	const acknowledged = new Set<string>();
+	/** The live runs, then every failed run this session the operator has not acknowledged. */
+	const dockFeed = (boardOpen: boolean): ReadonlyArray<DispatchBoardRow> => {
+		const live = deps.getRows();
+		const failed = (deps.getSettledRows?.() ?? []).filter(settledFailure);
+		if (boardOpen) for (const row of failed) acknowledged.add(row.runId);
+		const listed = new Set(live.map((row) => row.runId));
+		const kept = failed.filter((row) => !acknowledged.has(row.runId) && !listed.has(row.runId));
+		return kept.length === 0 ? live : [...live, ...kept];
+	};
 	const variants = (width: number): string[][] => {
 		const safe = Math.max(1, Math.floor(width));
 		const terminalRows = deps.getTerminalRows?.() ?? 40;
@@ -342,11 +364,12 @@ export function createFleetDock(deps: FleetDockDeps): FleetDock {
 		const strip =
 			board && terminalRows >= DOCK_SUMMARY_MIN_ROWS ? taskBoardStrip(board, safe, policy.dockRuns > 0) : null;
 		const withStrip = (lines: string[]): string[] => (strip === null ? lines : [...lines, strip]);
-		const rows = dockRuns(deps.getRows());
+		const boardOpen = deps.isFleetBoardOpen?.() === true;
+		const rows = dockRuns(dockFeed(boardOpen));
 		const modelOnly = rows.every((row) => row.requestOrigin === "agent");
 		const hidden =
 			rows.length === 0 ||
-			deps.isFleetBoardOpen?.() === true ||
+			boardOpen ||
 			(modelOnly && deps.isMainTurnLive?.() === true) ||
 			terminalRows < DOCK_SUMMARY_MIN_ROWS;
 		if (hidden) return strip === null ? [[]] : [[strip], []];

@@ -1337,6 +1337,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			pending,
 			fleet: createFleetDock({
 				getRows: () => dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows(),
+				getSettledRows: () => dispatchBoardStore.workerRows?.() ?? [],
 				...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 				isFooterExpanded: () => footer.isExpanded(),
 				isFleetBoardOpen: () => deps.getOverlayState?.() === "dispatch-board",
