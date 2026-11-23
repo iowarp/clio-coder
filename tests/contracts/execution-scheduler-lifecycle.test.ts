@@ -2,6 +2,7 @@ import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:a
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runPlaybookGraph } from "../../src/cli/playbook-graph.js";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import { parsePlaybook, renderPlaybookPrompt } from "../../src/domains/agents/playbook.js";
 import { readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import type { ExecutionPlanAgentStep } from "../../src/domains/dispatch/execution-plan.js";
@@ -527,16 +528,27 @@ describe("execution scheduler lifecycle", () => {
 			})),
 			budget: { playbookUsd: null, ceilingUsd: 0, currentUsd: 0 },
 		} as unknown as FleetRunPreview;
+		// Each step's scope and write boundary are provenance the card shows at detailed.
+		setPresentationTier("detailed");
 		const card = formatFleetRunApprovalBody({ ok: true, preview }, 200, 0, 400).map(stripTerminalSequences);
+		setPresentationTier("standard");
 		match(
 			card.join(" ").replace(/\s+/g, " "),
 			/one task worktree cut from HEAD on clio-coder\/task\/<root>, kept after the run; this checkout does not change until clio-coder fleet land <root> lands it/,
 		);
+		// Each step's row is followed by its route and scope rows.
+		const factsOf = (id: string): string[] => {
+			const at = card.findIndex((line) => new RegExp(`^w\\d+\\s+${id.replace(/\./g, "\\.")}\\s`).test(line));
+			return at < 0 ? [] : card.slice(at, at + 4);
+		};
 		ok(
-			card.some((line) => line.includes("build") && line.includes("worktree ·")),
+			factsOf("build").some((line) => line.includes("worktree ·")),
 			card.join("\n"),
 		);
-		ok(card.some((line) => line.includes("review.check.1") && line.includes("readonly ·")));
+		ok(
+			factsOf("review.check.1").some((line) => line.includes("readonly ·")),
+			card.join("\n"),
+		);
 		// `playbook graph` says the same: plan isolation, and the writing steps' scope.
 		const printed: string[] = [];
 		const write = process.stdout.write;
