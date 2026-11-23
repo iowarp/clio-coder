@@ -27,6 +27,16 @@ export const CLOSED_ACTION_ORDER = [
 	"clio-coder.queue.open",
 ] as const satisfies ReadonlyArray<ClioKeybinding>;
 
+/**
+ * Actions no focused surface may swallow: they route ahead of every card, overlay and the search box, so a card's
+ * own key handler never sees them (FX-13). The tier cycle changes only presentation, and each surface keys its memo
+ * on the tier, so the open card redraws at the new tier.
+ */
+export const SURFACE_ACTION_ORDER = [
+	"clio-coder.suspend",
+	"clio-coder.output.cycle",
+] as const satisfies ReadonlyArray<ClioKeybinding>;
+
 export const GLOBAL_ACTION_ORDER = [
 	"clio-coder.suspend",
 	"clio-coder.status.toggle",
@@ -460,16 +470,14 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		}
 		if (deps.leaderKeys.isPending() && deps.leaderKeys.route(data)) return { consume: true };
 		if (deps.leaderKeys.route(data)) return { consume: true };
-		// Suspend escapes every modal owner before it routes the key (#413). The
-		// side-question, context view, permission card and dispatch board consume
-		// every key they see, and transcript search forwards everything to its box,
-		// so checking after them left Ctrl-Z swallowed with the process running.
-		if (
-			(deps.isSearchFocused?.() || overlayOwnsInput(deps.getOverlayState())) &&
-			deps.matchesAction(data, "clio-coder.suspend") &&
-			deps.dispatchAction("clio-coder.suspend")
-		)
-			return { consume: true };
+		// Suspend (#413) and the tier cycle (FX-13) escape every modal owner before it routes the key. The
+		// side-question, context view, cards and dispatch board consume every key they see, and transcript search
+		// forwards everything to its box, so checking after them swallowed the key.
+		if (deps.isSearchFocused?.() || overlayOwnsInput(deps.getOverlayState())) {
+			for (const id of SURFACE_ACTION_ORDER) {
+				if (deps.matchesAction(data, id) && deps.dispatchAction(id)) return { consume: true };
+			}
+		}
 		if (deps.isSearchFocused?.()) {
 			deps.forwardFocusedInput?.(data);
 			return { consume: true };

@@ -136,13 +136,13 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 	let requested = "";
 	/** The session this controller last wrote into the file, so `/new` and `/resume` keep owning it. */
 	let wroteSession: string | null = null;
-	const keyHandlers = new Set<(key: "hide" | "key") => void>();
+	const keyHandlers = new Set<(key: "hide" | "key" | "tier") => void>();
 
 	let taps: TapFileWatcher | null = null;
 	if (tapPath !== null) {
 		try {
 			taps = watchTapFile(tapPath, (line) => {
-				if (line !== "hide" && line !== "key") return;
+				if (line !== "hide" && line !== "key" && line !== "tier") return;
 				for (const handler of keyHandlers) handler(line);
 			});
 		} catch {
@@ -366,7 +366,7 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 			return record() !== null;
 		},
 
-		onDockKey(handler: (key: "hide" | "key") => void): () => void {
+		onDockKey(handler: (key: "hide" | "key" | "tier") => void): () => void {
 			keyHandlers.add(handler);
 			return () => {
 				keyHandlers.delete(handler);

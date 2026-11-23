@@ -2023,7 +2023,22 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			},
 		});
 	};
+	// Alt+O from the composer, a focused card, and the workers dock pane: one tier cycle (FX-13).
+	const cycleOutputStyle = (): void => {
+		const settings = deps.getSettings?.();
+		if (!settings || !deps.commitSetting) return;
+		presentation.changeOutputStyle(() => {
+			const next = structuredClone(settings) as ClioSettings;
+			next.interface.outputDetail = nextOutputStyle(next.interface.outputDetail);
+			settingActions.commitSetting?.("interface.outputDetail", next, "session", "keybinding");
+		});
+		footer.refresh();
+	};
 	const detachWorkersDockKey = watchPane?.onDockKey((key) => {
+		if (key === "tier") {
+			cycleOutputStyle();
+			return;
+		}
 		if (key === "key") {
 			pressWorkersKey("dock");
 			return;
@@ -2298,16 +2313,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			},
 			recordFeature,
 			openQueueNavigator: () => overlayLifecycle.openQueueNavigatorState(),
-			cycleOutputStyle: () => {
-				const settings = deps.getSettings?.();
-				if (!settings || !deps.commitSetting) return;
-				presentation.changeOutputStyle(() => {
-					const next = structuredClone(settings) as ClioSettings;
-					next.interface.outputDetail = nextOutputStyle(next.interface.outputDetail);
-					settingActions.commitSetting?.("interface.outputDetail", next, "session", "keybinding");
-				});
-				footer.refresh();
-			},
+			cycleOutputStyle,
 			toggleAutonomy: () => {
 				const settings = deps.getSettings?.();
 				if (!settings || !settingActions.commitSetting) return;
