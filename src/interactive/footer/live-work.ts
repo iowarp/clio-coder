@@ -13,6 +13,7 @@ import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
 import type { BackgroundCall } from "../background-calls.js";
+import type { OverlayRunState } from "../clio-editor.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { AgentStatus } from "../status/index.js";
 import type { ClioTheme } from "../theme/index.js";
@@ -192,6 +193,93 @@ export function besideCardDetail(
 	const workers = free.length === 0 ? null : workerSummary({ ...facts, workers: free }, room);
 	const both = main !== null && workers !== null ? `${main} · ${workers}` : null;
 	return [both, workers, main].find((text) => text !== null && visibleWidth(text) <= room) ?? null;
+}
+
+/** The longest command or path an overlay rule quotes after its state word; a longer one leaves the shorter form. */
+const OVERLAY_OBJECT_MAX = 24;
+
+/**
+ * The main agent's own phase in the overlay rule's shortest words, or null where the main agent is waiting: on the
+ * operator (the focused surface says so as its own pending state) or on workers (the rule counts them instead).
+ */
+function ownPhaseWords(status: AgentStatus): string | null {
+	if (status.tool?.toolName === ToolNames.AskUser || status.tool?.toolName === ToolNames.Dispatch) return null;
+	switch (status.phase) {
+		case "preparing":
+			return "preparing";
+		case "waiting_model":
+			return "waiting";
+		case "thinking":
+			return "thinking";
+		case "writing":
+			return "writing";
+		case "tool_running":
+			return status.tool?.judging === true ? "checking" : "running";
+		case "retrying":
+			return "retrying";
+		case "compacting":
+			return "compacting";
+		case "stuck":
+			return "no output";
+		case "cancelling":
+			return "stopping";
+		default:
+			return null;
+	}
+}
+
+/**
+ * What an overlay's top rule says about the live run (unit 3 of its fit contract): the state in the rail's shortest
+ * words and its elapsed time, fullest form first, and the actor that may follow (unit 4). It stands in for the strip
+ * under a dock and the text beside a card. Null when nothing runs. It never carries the run's Esc: while a surface is
+ * focused, Esc is that surface's key.
+ */
+export function overlayRunState(facts: LiveWorkFacts, room: number): OverlayRunState | null {
+	const { status } = facts;
+	const clockOf = (ms: number): string | null => (ms < 1000 ? null : formatWaitClock(ms));
+	const timed = (words: string, clock: string | null): string =>
+		clock === null ? words : `${words} ${GLYPH.sep} ${clock}`;
+	const own = isMainActive(status) ? ownPhaseWords(status) : null;
+	if (own !== null) {
+		const clock = clockOf(phaseElapsedMs(status, facts.now));
+		const subject = status.phase === "tool_running" ? sanitizeCallTargetText(status.tool?.toolSubject?.trim() ?? "") : "";
+		const quoted = timed(`${own} \`${subject}\``, clock);
+		const stopping = status.phase === "cancelling";
+		return {
+			forms: [
+				...(subject.length > 0 && visibleWidth(subject) <= Math.min(OVERLAY_OBJECT_MAX, room) ? [quoted] : []),
+				timed(own, clock),
+			],
+			live: !stopping,
+			glyph: stopping ? GLYPH.cancelled : GLYPH.running,
+			token: stopping ? "counter" : "harnessAction",
+			actor: facts.actor.length > 0 && status.tool?.operatorShell !== true ? facts.actor : null,
+		};
+	}
+	if (facts.workers.length > 0) {
+		const count = `${facts.workers.length} ${facts.workers.length === 1 ? "worker" : "workers"}`;
+		const stopping = facts.workers.every((row) => row.status === "cancelling" || row.plan?.state === "cancelling");
+		// A turn waiting on its dispatch is timed by that wait, as the rail times it; a run the operator started by its own.
+		const awaits = status.phase === "dispatching" || status.tool?.toolName === ToolNames.Dispatch;
+		const first = foregroundWorker(facts);
+		const clock = awaits ? clockOf(phaseElapsedMs(status, facts.now)) : first === undefined ? null : workerElapsed(first);
+		return {
+			forms: [timed(stopping ? `${count} stopping` : count, clock)],
+			live: !stopping,
+			glyph: stopping ? GLYPH.cancelled : GLYPH.running,
+			token: stopping ? "counter" : "activity",
+			actor: null,
+		};
+	}
+	const call = facts.background[0];
+	if (call === undefined) return null;
+	return {
+		forms: [timed(call.purpose, clockOf(Math.max(0, facts.now - call.startedAt)))],
+		live: true,
+		glyph: GLYPH.running,
+		token: "activity",
+		actor: null,
+	};
 }
 
 /**
