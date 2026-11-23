@@ -229,7 +229,7 @@ test("thinking rail uses ordinary marks unless Nerd Font coverage is explicitly 
 	strictEqual(nerdFontEnabled(), false);
 });
 
-test("three-column welcome aligns field values, command descriptions, and bound key descriptions", () => {
+test("the wide detailed welcome aligns its fact values and its start column of commands and keys", () => {
 	const stats = {
 		outputStyle: "detailed" as const,
 		cwd: "/tmp/welcome-test",
@@ -251,7 +251,8 @@ test("three-column welcome aligns field values, command descriptions, and bound 
 			"clio-coder.model.select": "Alt+M",
 			"clio-coder.editor.external": "Alt+G",
 		})[action] ?? null;
-	for (const width of [160, 200, 240]) {
+	// From 160 columns `start` joins wherever the facts keep their natural width beside it.
+	for (const width of [200, 240]) {
 		const lines = buildWelcomeDashboardLines(stats, "0.5.7", width, "launchpad", keyLabel).map(stripTerminalSequences);
 		ok(lines.every((line) => visibleWidth(line) <= width));
 		const column = (text: string) => {
@@ -259,20 +260,13 @@ test("three-column welcome aligns field values, command descriptions, and bound 
 			ok(row, `missing ${text} at ${width} columns`);
 			return row.indexOf(text);
 		};
-		strictEqual(column("/tmp/welcome-test"), column("Up to date"));
-		strictEqual(column("Claude"), column("Up to date"));
-		strictEqual(column("Choose a model"), column("Browse plugins"));
-		strictEqual(column("Explore commands"), column("Browse plugins"));
-		strictEqual(column("Every action by letter"), column("Model picker"));
-		strictEqual(column("Write in your own"), column("Model picker"));
-		const local = lines.find((line) => line.includes("Local"));
-		if (!local) {
-			match(lines.join("\n"), /… \/usage/u);
-			continue;
-		}
-		const valueColumn = column("Up to date");
-		// Wrapped subscription continuations start on the same value axis.
-		ok(!local.slice(0, valueColumn).includes("Local"));
+		strictEqual(column("/tmp/welcome-test"), column("up to date"));
+		strictEqual(column("local · test-model"), column("up to date"));
+		strictEqual(column("/help"), column("/context "));
+		strictEqual(column("Ctrl+G"), column("/help"));
+		strictEqual(column("every command and key"), column("every action by letter"));
+		strictEqual(column("switch the model"), column("every action by letter"));
+		ok(column("/help") > column("up to date"), "the start column sits right of the facts");
 	}
 });
 
@@ -302,7 +296,7 @@ test("welcome height and usage placement stay fixed from Stage 0 through quota h
 		for (const width of [8, 20, 40, 60, 76, 80, 100, 160, 200, 240]) {
 			const initial = boot.render(width);
 			ok(initial.length <= 24, "artwork remains bounded on narrow terminals");
-			const usageRow = initial.map(stripTerminalSequences).findIndex((line) => line.includes("AI usage"));
+			const usageRow = initial.map(stripTerminalSequences).findIndex((line) => / usage {6}/u.test(line));
 			for (const reading of [
 				null,
 				"Local $0.00",
@@ -315,17 +309,17 @@ test("welcome height and usage placement stay fixed from Stage 0 through quota h
 				ok(lines.every((line) => visibleWidth(line) <= width));
 				if (usageRow !== -1)
 					strictEqual(
-						lines.map(stripTerminalSequences).findIndex((line) => line.includes("AI usage")),
+						lines.map(stripTerminalSequences).findIndex((line) => / usage {6}/u.test(line)),
 						usageRow,
 					);
 			}
 		}
 		const overflow = hydrated.render(200).map(stripTerminalSequences).join("\n");
-		match(overflow, /… \/usage/u);
+		match(overflow, /Account quota summary.*…/u);
 		quota = null;
 		const cleared = hydrated.render(200).map(stripTerminalSequences).join("\n");
 		ok(!cleared.includes("Account quota"));
-		ok(cleared.includes("/usage for limits"));
+		ok(cleared.includes("no subscription window reported"));
 		settings.interface.demo = false;
 		quota = "Account quota summary ".repeat(100);
 		strictEqual(hydrated.render(200).length, 1);
@@ -357,12 +351,12 @@ test("welcome centers the artwork and gives contextual project guidance without 
 		const text = rows.join("\n");
 		ok(!/describe a task|Permissions|configured|recipes|Systems engineering/u.test(text));
 		match(text, /local · model/u);
-		match(text, /YOLO · contained · never waits/u);
+		match(text, /yolo · contained · never waits/u);
 		match(text, /\/context init/u);
 		const stale = buildWelcomeDashboardLines({ ...stats, projectContext: "stale" }, "0.5.7", width, "launchpad")
 			.map(stripTerminalSequences)
 			.join("\n");
-		match(stale, /Stale project awareness: \/context refresh/u);
+		match(stale, /\/context refresh updates project awareness/u);
 		ok(!stale.includes("/context init"));
 	}
 });
@@ -387,15 +381,15 @@ test("the default banner claims only automatic edits on a host whose shell runs 
 			const lines = live.render(width);
 			ok(lines.every((line) => visibleWidth(line) <= width));
 			const text = lines.map(stripTerminalSequences).join("\n");
-			match(text, /Default · auto edits · no OS sandbox/u);
+			match(text, /default · auto edits · no OS sandbox/u);
 			ok(!text.includes("auto in workspace"), text);
 		}
 		contained = null;
 		const unchecked = live.render(120).map(stripTerminalSequences).join("\n");
-		match(unchecked, /Default · auto edits\s*│/u);
+		match(unchecked, /default · auto edits$/mu);
 		ok(!unchecked.includes("auto in workspace") && !unchecked.includes("no OS sandbox"), unchecked);
 		contained = true;
-		match(live.render(120).map(stripTerminalSequences).join("\n"), /Default · auto in workspace/u);
+		match(live.render(120).map(stripTerminalSequences).join("\n"), /default · auto in workspace/u);
 	} finally {
 		live.dispose();
 	}
@@ -424,14 +418,20 @@ test("startup and live tier changes share one bounded welcome policy", () => {
 						const text = lines.map(stripTerminalSequences).join("\n");
 						ok(lines.every((line) => visibleWidth(line) <= width));
 						match(text, /test-model/u);
-						if (!demo || style === "compact") {
+						if (!demo) {
 							strictEqual(lines.length, 1);
-							ok(!/██|\/help|Awareness/u.test(text));
+							ok(!/██|\/help|awareness/u.test(text));
+						} else if (style === "compact") {
+							// The header and the blocker it cannot hide: this route is not usable.
+							const facts = lines.map(stripTerminalSequences).filter((line) => !line.includes("██"));
+							strictEqual(facts.length, 2, text);
+							ok(facts[1]?.startsWith("‖ /config"), text);
+							ok(!/\/help|awareness/u.test(text));
 						} else if (style === "standard") {
-							ok(lines.length <= 8);
-							match(text, /Default · auto edits\s*(?:│|$)/mu);
-							ok(!text.includes("██"));
-						} else ok(text.includes("██"));
+							ok(lines.length <= 11);
+							match(text, /default · auto edits$/mu);
+							ok(!text.includes("awareness"));
+						} else ok(text.includes("██") && text.includes("awareness"));
 					}
 				}
 			}
@@ -442,7 +442,7 @@ test("startup and live tier changes share one bounded welcome policy", () => {
 		settings.safety.autonomy = "yolo";
 		const after = live.render(120);
 		ok(after !== before, "autonomy invalidates the welcome cache");
-		match(after.map(stripTerminalSequences).join("\n"), /YOLO · contained · never waits/u);
+		match(after.map(stripTerminalSequences).join("\n"), /yolo · contained · never waits/u);
 	} finally {
 		live.dispose();
 	}

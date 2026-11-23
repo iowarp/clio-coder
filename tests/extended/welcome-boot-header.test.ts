@@ -31,7 +31,6 @@ import {
 	createWelcomeDashboard,
 	WELCOME_PROJECT_CONTEXT_RETRY_MS,
 	WELCOME_PROJECT_CONTEXT_TTL_MS,
-	WELCOME_TAGLINES,
 	type WelcomeDashboardDeps,
 } from "../../src/interactive/welcome-dashboard.js";
 
@@ -137,8 +136,14 @@ function rows(component: ReturnType<typeof banner>, width: number): string[] {
 	return component.render(width).map((line) => stripTerminalSequences(line));
 }
 
+/** The launchpad's `next` fact, without its label; a stacked W1 label puts the value on the row below. */
 function actionLine(lines: readonly string[]): string {
-	return lines.at(-2)?.trim() ?? "";
+	for (const [index, line] of lines.entries()) {
+		if (line.trim() === "next") return lines[index + 1]?.trim() ?? "";
+		const found = /(?:^|\s)next {2,}(.*)$/u.exec(line);
+		if (found) return found[1]?.trim() ?? "";
+	}
+	return "";
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +159,7 @@ test("the session header shows the active route without a latency number", () =>
 	ok(!lines.join("\n").includes("healthy"), "the session header does not claim readiness");
 });
 
-test("a failing route names the repair surface without spilling provider diagnostics into the welcome", () => {
+test("a failing route names the repair surface and states the fault on the model row", () => {
 	const lines = rows(
 		banner({
 			statuses: [
@@ -163,8 +168,11 @@ test("a failing route names the repair surface without spilling provider diagnos
 		}),
 		80,
 	);
-	ok(actionLine(lines).includes("route unavailable · /settings models"), actionLine(lines));
-	ok(!lines.join("\n").includes("ECONNREFUSED"), "raw provider error should not crowd the welcome");
+	ok(actionLine(lines).includes("/config repairs the route"), actionLine(lines));
+	ok(
+		lines.some((line) => /model {2,}dynamo · qwen3\.8-27b · ✗ unavailable · ECONNREFUSED/u.test(line)),
+		lines.join("\n"),
+	);
 });
 
 test("the route repair action fits at 60 columns", () => {
@@ -174,18 +182,21 @@ test("the route repair action fits at 60 columns", () => {
 		}),
 		60,
 	);
-	ok(actionLine(lines).includes("route unavailable · /settings models"), actionLine(lines));
+	ok(actionLine(lines).includes("/config repairs the route"), actionLine(lines));
 });
 
-test("at 32 columns the route fault remains visible and its cut is marked", () => {
+test("at 32 columns the route fault remains visible and nothing overflows", () => {
 	const lines = rows(
 		banner({
 			statuses: [status({ available: false, reason: "refused", health: health("down", "ECONNREFUSED 127.0.0.1:1234") })],
 		}),
 		32,
 	);
-	ok(actionLine(lines).includes("route unavailable"), actionLine(lines));
-	ok(actionLine(lines).includes("…"), "a cut must be marked");
+	ok(actionLine(lines).includes("/config repairs the route"), actionLine(lines));
+	ok(
+		lines.every((line) => visibleWidth(line) <= 32),
+		lines.join("\n"),
+	);
 });
 
 test("a configured but unprobed target is neither ready nor unavailable", () => {
@@ -206,13 +217,13 @@ test("a target with no model and no default is unset, not ready", () => {
 		}),
 		80,
 	);
-	ok(actionLine(lines).includes("no model selected · /model"), actionLine(lines));
+	ok(actionLine(lines).includes("/config connects a model"), actionLine(lines));
 	ok(!lines.join("\n").includes("✓"), "a route with no model must not read as ready");
 });
 
 test("no target and no model names the route, not the context", () => {
 	const lines = rows(banner({ statuses: [], target: undefined, model: undefined, clioMd: "none" }), 80);
-	ok(actionLine(lines).includes("no route selected · /model"), actionLine(lines));
+	ok(actionLine(lines).includes("/config connects a model"), actionLine(lines));
 	ok(!actionLine(lines).includes("/context init"), "route faults outrank context guidance");
 });
 
@@ -221,13 +232,13 @@ test("a target id absent from the list directs the operator to route settings", 
 		banner({ statuses: [status({ target: { id: "other", defaultModel: "m", runtime: "lmstudio", wireModels: [] } })] }),
 		80,
 	);
-	ok(actionLine(lines).includes("route unavailable · /settings models"), actionLine(lines));
+	ok(actionLine(lines).includes("/config repairs the route"), actionLine(lines));
 });
 
 test("project configuration that is not applied leads the action row and stays on the session header", () => {
 	const reminder = "Project configuration not active · /trust";
 	const launchpad = banner({ clioMd: "none", projectConfig: reminder });
-	ok(actionLine(rows(launchpad, 120)).startsWith(reminder), "the reminder outranks the context guidance");
+	ok(actionLine(rows(launchpad, 120)).startsWith(`‖ ${reminder}`), "the reminder outranks the context guidance");
 	launchpad.collapseToSessionHeader();
 	const header = rows(launchpad, 120)[0] ?? "";
 	ok(header.includes("dynamo · qwen3.8-27b") && header.includes(reminder), header);
@@ -238,27 +249,27 @@ test("project configuration that is not applied leads the action row and stays o
 
 test("a malformed CLIO-CODER.md points at the read-only view, never at a regenerating command", () => {
 	const lines = rows(banner({ clioMd: "malformed" }), 80);
-	ok(actionLine(lines).includes("CLIO-CODER.md malformed · /context to inspect"), actionLine(lines));
+	ok(actionLine(lines).includes("/context shows what CLIO-CODER.md needs"), actionLine(lines));
 	const all = lines.join("\n");
 	ok(!all.includes("/context init"), "init would overwrite the file the operator must repair");
 	ok(!all.includes("/context refresh"), "refresh regenerates; it is not a repair for malformed content");
 });
 
-test("missing project context is guidance that keeps the invitation to work", () => {
+test("missing project context is optional guidance, not a blocker", () => {
 	const lines = rows(banner({ clioMd: "none" }), 80);
-	ok(actionLine(lines).includes("/context init to index this repo"), actionLine(lines));
-	ok(WELCOME_TAGLINES.some((tagline) => lines.join("\n").includes(tagline)));
+	ok(actionLine(lines).includes("/context init indexes this repo"), actionLine(lines));
+	ok(actionLine(lines).endsWith("optional") && !actionLine(lines).includes("‖"), actionLine(lines));
 });
 
 test("stale project context offers refresh", () => {
 	const lines = rows(banner({ clioMd: "stale" }), 80);
-	ok(actionLine(lines).includes("Stale project awareness: /context refresh to fix."), actionLine(lines));
+	ok(actionLine(lines).includes("/context refresh updates project awareness"), actionLine(lines));
 });
 
 test("the welcome action never advertises a submit binding", () => {
 	const actions = ["Enter", "Ctrl+S", null].map((submitKey) => actionLine(rows(banner({ submitKey }), 80)));
 	strictEqual(new Set(actions).size, 1);
-	ok(actions[0]?.endsWith(`v${readClioVersion()}${isDevVersion(readClioVersion()) ? " · source" : ""}`));
+	ok(rows(banner({ submitKey: null }), 80).some((line) => line.startsWith(`>C_ CLIO Coder ${readClioVersion()}`)));
 	ok(!actions[0]?.includes("to send"), actions[0]);
 });
 
@@ -270,7 +281,7 @@ test("route faults outrank project-context guidance", () => {
 		}),
 		80,
 	);
-	ok(actionLine(lines).includes("route unavailable · /settings models"), actionLine(lines));
+	ok(actionLine(lines).includes("/config repairs the route"), actionLine(lines));
 	ok(!actionLine(lines).includes("/context init"), actionLine(lines));
 });
 
@@ -310,8 +321,11 @@ test("a hostile provider reason cannot style, clear, or retitle the terminal", (
 	ok(!raw.includes("PWNED"), "OSC payload text survived");
 	const visible = lines.map((line) => stripTerminalSequences(line));
 	ok(controlFreeLines(visible), `control byte survived: ${JSON.stringify(visible)}`);
-	ok(actionLine(visible).includes("route unavailable · /settings models"), actionLine(visible));
-	ok(!visible.join("\n").includes("upstream 502"), "provider diagnostics should stay out of the welcome");
+	ok(actionLine(visible).includes("/config repairs the route"), actionLine(visible));
+	ok(
+		visible.some((line) => line.includes("✗ unavailable")),
+		"the model row states the fault",
+	);
 });
 
 test("escape sequences in the cwd and branch are neutralized too", () => {
@@ -378,7 +392,7 @@ test("the launchpad keeps a bounded footprint and the session header one row", (
 		for (const width of WIDTHS) {
 			const launchpad = banner(options);
 			const height = rows(launchpad, width).length;
-			ok(height >= 4 && height <= 25, `${label}@${width} launchpad rows: ${height}`);
+			ok(height >= 3 && height <= 25, `${label}@${width} launchpad rows: ${height}`);
 			const session = banner(options);
 			session.collapseToSessionHeader();
 			strictEqual(rows(session, width).length, 1, `${label}@${width} session rows`);
@@ -445,7 +459,7 @@ test("render never calls the context reader on its own call stack", () => {
 	const component = banner({ countContextReads: reads, scheduleRefresh: (run) => deferred.push(run) });
 	const first = component.render(80).map(stripTerminalSequences);
 	strictEqual(reads.value, 0, "the reader ran inside render");
-	ok(actionLine(first).includes("Checking project awareness…"), actionLine(first));
+	ok(actionLine(first).includes("? keys · / commands"), actionLine(first));
 	ok(deferred.length === 1, "a refresh should be scheduled exactly once");
 	for (const run of deferred.splice(0)) run();
 	strictEqual(reads.value, 1);
@@ -465,13 +479,13 @@ test("a scheduled refresh asks for a frame when it lands", () => {
 	strictEqual(frames, 0);
 	for (const run of deferred.splice(0)) run();
 	strictEqual(frames, 1);
-	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("/context init to index this repo"));
+	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("/context init indexes this repo"));
 });
 
 test("a reader that throws never becomes ok or none", () => {
 	const component = banner({ contextThrows: true });
 	const lines = rows(component, 80);
-	ok(actionLine(lines).includes("Checking project awareness…"), actionLine(lines));
+	ok(actionLine(lines).includes("? keys · / commands"), actionLine(lines));
 	ok(!actionLine(lines).includes("/context"), "a failed read must not suggest a context command");
 });
 
@@ -494,23 +508,23 @@ test("a failure never renews the trust window, and a stale value stops being ass
 		component.render(80);
 		return actionLine(component.render(80).map(stripTerminalSequences));
 	};
-	ok(action().includes("/context init to index this repo"));
+	ok(action().includes("/context init indexes this repo"));
 
 	// Reads start failing. The last good value stands in while retries are paced…
 	fail = true;
 	clock += WELCOME_PROJECT_CONTEXT_TTL_MS + 1;
-	ok(action().includes("/context init to index this repo"));
+	ok(action().includes("/context init indexes this repo"));
 	clock += WELCOME_PROJECT_CONTEXT_RETRY_MS + 1;
-	ok(action().includes("/context init to index this repo"));
+	ok(action().includes("/context init indexes this repo"));
 
 	// …but once the failure streak outlives the trust window it stops being asserted.
 	clock += WELCOME_PROJECT_CONTEXT_TTL_MS + 1;
-	ok(action().includes("Checking project awareness…"));
+	ok(action().includes("? keys · / commands"));
 
 	// A successful read restores a real answer.
 	fail = false;
 	clock += WELCOME_PROJECT_CONTEXT_RETRY_MS + 1;
-	ok(action().includes("/context init to index this repo"));
+	ok(action().includes("/context init indexes this repo"));
 });
 
 test("a reading is never served for a different directory", () => {
@@ -528,10 +542,10 @@ test("a reading is never served for a different directory", () => {
 		scheduleRefresh: (run) => run(),
 	});
 	component.render(80);
-	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("/context init to index this repo"));
+	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("/context init indexes this repo"));
 	cwd = "/tmp/work/second";
-	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("Checking project awareness…"));
-	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("Next: type a task, then press Enter"));
+	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("? keys · / commands"));
+	ok(actionLine(component.render(80).map(stripTerminalSequences)).includes("? keys · / commands"));
 	deepStrictEqual(seen, ["/tmp/work/first", "/tmp/work/second"]);
 });
 
@@ -707,7 +721,7 @@ test("demo and output-tier changes do not override the configured stream pacer",
 
 test("the presentation opens on the launchpad and collapses on first submit", async () => {
 	const { presentation: built } = presentation();
-	strictEqual(headerRows(built).length, 7);
+	strictEqual(headerRows(built).length, 5);
 
 	// Drive the collapse through the real submit controller, the way a typed
 	// prompt reaches it, rather than by calling the banner directly.
@@ -926,7 +940,7 @@ test("a session reset restores the launchpad and clears tool telemetry, includin
 			strictEqual(loopRow(), "", "session navigation clears the old loop projection");
 			emit(job);
 			strictEqual(loopRow(), "", "late old-session updates cannot restore its row");
-			strictEqual(headerRows(built).length, 7);
+			strictEqual(headerRows(built).length, 5);
 			built.collapseWelcomeDashboard();
 			strictEqual(headerRows(built).length, 1);
 			built.recordToolEnd({ toolCallId: "pending-call", isError: true, truncated: true });
@@ -976,7 +990,7 @@ test("disposing the presentation disposes the header", () => {
 	const { presentation: built } = presentation();
 	built.dispose();
 	// A disposed banner schedules nothing further; rendering must still be safe.
-	strictEqual(headerRows(built).length, 7);
+	strictEqual(headerRows(built).length, 5);
 });
 
 for (const width of [40, 44, 60, 92, 120]) {
@@ -1076,9 +1090,8 @@ test("the welcome keeps a quiet launchpad and the session header names the full 
 	const component = banner({ model, preload });
 	const wide = rows(component, 120);
 	ok(wide.join("\n").includes("████"));
-	for (const label of ["Model", "Project", "Also", "Instructions", "lines 129-180 left out", "24,000-character"])
-		ok(wide.join("\n").includes(label));
-	ok(actionLine(wide).endsWith(`v${readClioVersion()}${isDevVersion(readClioVersion()) ? " · source" : ""}`));
+	for (const label of ["model", "project", "rules", "CLIO-CODER.md"]) ok(wide.join("\n").includes(label), label);
+	ok(wide.some((line) => line.includes(`>C_ CLIO Coder ${readClioVersion()}`)));
 	component.collapseToSessionHeader();
 	strictEqual(rows(component, 120).length, 1);
 	ok(rows(component, 120)[0]?.includes(model));
@@ -1094,32 +1107,26 @@ test("the instant shell uses the finished welcome footprint without hydration co
 	const boot = createBootWelcome(settings, "Ctrl+S");
 	for (const width of WIDTHS) {
 		const lines = boot.render(width).map(stripTerminalSequences);
-		ok(lines.length >= 4 && lines.length <= 8);
+		ok(lines.length >= 3 && lines.length <= 11, `${width}: ${lines.length} rows`);
 		for (const line of lines) ok(visibleWidth(line) <= width);
 		ok(!lines.join("\n").includes("Starting Clio"));
 		ok(!lines.join("\n").includes("✓"));
 	}
 	const wide = boot.render(120).map(stripTerminalSequences).join("\n");
-	ok(wide.includes("YOLO · contained · never waits"));
-	ok(wide.includes("Checking project awareness"));
-	match(wide, /v\d+\.\d+\.\d+/u);
+	ok(wide.includes("yolo · contained · never waits"));
+	ok(wide.includes("? keys · / commands"));
+	match(wide, /CLIO Coder \d+\.\d+\.\d+/u);
 	ok(boot.render(120).map(stripTerminalSequences)[0]?.includes("CLIO Coder"));
 });
 
-test("the welcome box closes at the viewport edge on narrow and wide terminals", () => {
+test("the launchpad draws no box at any width and never cuts its art", () => {
 	const component = banner();
 	for (const width of [60, 80, 100, 160, 240]) {
 		const lines = component.render(width).map(stripAnsi);
-		const edge = width - 1;
-		strictEqual(lines[0]?.[0], "┌");
-		strictEqual(lines[0]?.[edge], "┐");
-		strictEqual(lines.at(-1)?.[edge], "┘");
-		for (const line of lines.slice(1, -1)) strictEqual(line[edge], "│", line);
+		ok(!lines.some((line) => /[┌┐└┘│]/u.test(line)), lines.join("\n"));
+		for (const line of lines) ok(visibleWidth(line) <= width, line);
 		ok(
-			!lines
-				.slice(1, 6)
-				.filter((line) => line.includes("██"))
-				.some((line) => line.includes("…")),
+			!lines.filter((line) => line.includes("██")).some((line) => line.includes("…") && line.indexOf("…") < 53),
 			"art must resize rather than truncate",
 		);
 	}
@@ -1139,43 +1146,73 @@ test("account usage hydrates without moving the welcome frame or passing through
 	});
 	component.render(120);
 	let lines = component.render(120).map(stripAnsi);
-	strictEqual(lines.length, 18);
-	ok(lines.join("\n").includes("/context") && !lines.join("\n").includes("No usage data"));
+	strictEqual(lines.length, 8);
+	ok(lines.join("\n").includes("usage      no subscription window reported"));
 	quota = "Claude 5h 23% used";
 	lines = component.render(120).map(stripAnsi);
-	strictEqual(lines.length, 18);
-	ok(lines.join("\n").includes("Accounts") && lines.join("\n").includes("Claude 5h 23%"));
+	strictEqual(lines.length, 8);
+	ok(
+		lines.some((line) => /usage {6}.* Claude 5h 23%/u.test(line)),
+		lines.join("\n"),
+	);
 	quota = `Claude ${ESC}]0;PWNED${BEL}5h 23% used`;
 	const raw = component.render(120).join("\n");
 	ok(!raw.includes(`${ESC}]`) && !raw.includes(BEL) && !raw.includes("PWNED"), raw);
 	component.dispose();
 });
 
-test("the wordmark stacks CLIO over CODER with details beside both words and no separate emblem", () => {
-	for (const width of [80, 100, 120]) {
-		const lines = banner().render(width).map(stripAnsi);
-		for (const index of [2, 3, 4, 5, 6, 8, 9, 10, 11, 12]) ok(lines[index]?.includes("██"));
-		ok(lines[2]?.includes("Model"));
-		ok(lines[10]?.includes("Also"));
-		ok(!lines.join("\n").includes(">_C"));
-		ok(!lines.slice(1, 12).some((line) => line.includes("…") && line.indexOf("…") < 30));
+test("first boot stacks CLIO over CODER beside the facts at every tier, with no separate emblem", () => {
+	for (const outputStyle of ["compact", "standard", "detailed"] as const) {
+		for (const width of [80, 100, 120]) {
+			const lines = buildWelcomeDashboardLines(
+				{
+					outputStyle,
+					firstBoot: true,
+					cwd: "/tmp/work/clio-coder",
+					workspace: workspace() as never,
+					targetLabel: "dynamo",
+					modelLabel: "qwen3.8-27b",
+					route: "ready",
+					routeReason: null,
+					projectContext: "ok",
+					submitKeyLabel: null,
+					autonomy: "default",
+					targets: "",
+					fleet: "",
+					quota: null,
+				},
+				"0.9.0",
+				width,
+				"launchpad",
+				undefined,
+				undefined,
+				24,
+			).map(stripAnsi);
+			strictEqual(lines.length, 11, `${outputStyle}@${width}`);
+			for (const index of [0, 1, 2, 3, 4, 6, 7, 8, 9, 10]) ok(lines[index]?.includes("██"), `${outputStyle}@${width}`);
+			ok(
+				lines.some((line) => /██.* {3}>C_ CLIO Coder 0\.9\.0/u.test(line)),
+				lines.join("\n"),
+			);
+			ok(!lines.join("\n").includes(">_C"));
+			ok(!lines.some((line) => line.includes("…") && line.indexOf("…") < 40));
+		}
 	}
 });
 
-test("the narrow launchpad sets the compact letters on one band, or the brand in the title", () => {
+test("the narrow launchpad sets the compact letters on one band above the facts, or only the mark", () => {
 	for (const width of [36, 40, 48, 56, 57, 60, 70, 75]) {
 		const lines = rows(banner(), width);
 		for (const line of lines) ok(visibleWidth(line) <= width, `${width}: ${line}`);
 		if (width < 57) {
-			ok(lines[0]?.includes("CLIO Coder"), `${width}: ${lines[0]}`);
-			ok(lines[0]?.includes(`v${readClioVersion()}`));
-			ok(!lines.at(-2)?.includes(`v${readClioVersion()}`));
+			ok(lines[0]?.startsWith(">C_ CLIO Coder"), `${width}: ${lines[0]}`);
+			ok(!lines.some((line) => line.includes("██")), `${width}: ${lines.join("\n")}`);
 		} else {
 			// CLIO and CODER share each art row, so the band is five rows, not eleven.
-			ok(lines[1]?.includes(" ████ ██░   ███  ███     ████  ███  ████  █████ ████"), `${width}: ${lines[1]}`);
-			ok(lines[5]?.includes(" ████ █████ ███  ███     ████  ███  ████  █████ ██░██"), `${width}: ${lines[5]}`);
-			ok(lines[7]?.includes("Model"));
-			ok(lines.at(-2)?.includes(`v${readClioVersion()}`));
+			ok(lines[0]?.includes(" ████ ██░   ███  ███     ████  ███  ████  █████ ████"), `${width}: ${lines[0]}`);
+			ok(lines[4]?.includes(" ████ █████ ███  ███     ████  ███  ████  █████ ██░██"), `${width}: ${lines[4]}`);
+			ok(lines[5]?.startsWith(`>C_ CLIO Coder ${readClioVersion()}`), `${width}: ${lines[5]}`);
+			ok(lines[6]?.trim().startsWith("model"));
 		}
 	}
 });
@@ -1256,7 +1293,7 @@ test("the launchpad's hints hold one page however long the welcome stays up (TUI
 	let clock = 1_000;
 	const component = banner({ now: () => clock });
 	const first = rows(component, 200).join("\n");
-	ok(first.includes("Make CLIO Coder yours"), first);
+	match(first, /start {6}\/help {2,}every command and key/u);
 	ok(!/\b\d\/\d\b/u.test(first), "no page counter");
 	for (const minutes of [1, 5, 60]) {
 		clock += minutes * 60_000;
