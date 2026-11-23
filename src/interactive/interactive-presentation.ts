@@ -836,7 +836,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		const out = status.phase === "preparing" ? undefined : status.modelRequest?.modelId;
 		return modelNickname(out ?? deps.getSettings?.().chat?.model);
 	};
-	const currentLiveWork = (): LiveWorkFacts => {
+	/** The live run's facts; `workersOf` picks the runs counted, the operator-fleet summary unless a caller needs more. */
+	const currentLiveWork = (workersOf: typeof summaryFleetRuns = summaryFleetRuns): LiveWorkFacts => {
 		const status = footerDeps.getAgentStatus?.() ?? statusController.current();
 		return {
 			// The strip over a dock reads the phase with the rail's own name and compaction facts, so the two cannot disagree (F2).
@@ -845,7 +846,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			status,
 			compaction: runningCompaction(),
 			// A running plan is work too: with only the workers counted the rail read ready while a plan step ran (HS10).
-			workers: summaryFleetRuns(dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()),
+			workers: workersOf(dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()),
 			background: backgroundCalls.active(),
 			workerActivity: (row, room) =>
 				row.plan !== undefined
@@ -967,7 +968,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				(readiness.glyph === GLYPH.queued || readiness.glyph === GLYPH.ok) && target.health.status === "healthy";
 			return { ...readiness, ...(quiet ? { label: "is idle", glyph: GLYPH.queued } : {}), detail };
 		},
-		getBesideCard: (room) => overlayRunState(currentLiveWork(), room),
+		// The overlay rule counts the runs the rail's dispatch wait counts, shadow scouts included; the summary alone left the
+		// rule bare while the footer read `2 workers` (FX-11).
+		getBesideCard: (room) => overlayRunState(currentLiveWork(dispatchWaitRuns), room),
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
 			: {}),
