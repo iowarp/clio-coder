@@ -15,6 +15,7 @@
 
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import type { ColorDepth } from "../../core/terminal-preferences.js";
 import type { ClioDirs } from "../../core/xdg.js";
 
 /** Built CLI entry point, matching the `bin` field in `package.json`. */
@@ -31,11 +32,20 @@ export interface ViewerCommandOptions {
 	dirs?: Readonly<ClioDirs>;
 	/** The file the dashboard reports `q` and Alt+W to; absent, `q` quits it. */
 	tapPath?: string;
+	/**
+	 * The launching Clio's color depth. A pane inherits the multiplexer's environment, not Clio's, so `NO_COLOR` and
+	 * the terminal's depth reach the dashboard only on argv.
+	 */
+	colorDepth?: ColorDepth;
 }
 
 /** The argv the workers dock executes: the dashboard, following a selection file. */
 export function watchViewerCommand(selectionPath: string, options: ViewerCommandOptions = {}): ReadonlyArray<string> {
-	return viewerCommand("fleet", ["--watch", selectionPath], options);
+	return viewerCommand(
+		"fleet",
+		["--watch", selectionPath, ...(options.colorDepth === undefined ? [] : ["--color-depth", options.colorDepth])],
+		options,
+	);
 }
 
 /** The argv the logs pane executes: one run's events, one clipped row each, at the pane's width. */

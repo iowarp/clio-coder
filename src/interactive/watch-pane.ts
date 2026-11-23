@@ -28,6 +28,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { OutputStyle } from "../core/defaults.js";
 import { onPresentationTierChange, presentationTier } from "../core/presentation-tier.js";
+import { colorDepth } from "../core/terminal-preferences.js";
 import { type ClioDirs, clioCacheDir, clioConfigDir, clioDataDir, clioStateDir } from "../core/xdg.js";
 import type { MuxContract, MuxPaneOpenFailure, MuxPaneRecord, MuxPaneRef } from "../domains/mux/index.js";
 import type { PanesWatchController, PanesWatchResult, PanesWorkersResult } from "../domains/mux/operations.js";
@@ -123,7 +124,8 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 		});
 	const command =
 		deps.command ??
-		((path, layout, taps) => watchViewerCommand(path, { dirs: layout, ...(taps ? { tapPath: taps } : {}) }));
+		((path, layout, taps) =>
+			watchViewerCommand(path, { dirs: layout, colorDepth: colorDepth(), ...(taps ? { tapPath: taps } : {}) }));
 	const write = deps.writeFile ?? atomicWrite;
 	const now = deps.now ?? Date.now;
 	// The board lists this session's workers; one with no session stamp counts

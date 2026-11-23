@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { OutputStyle } from "../../src/core/defaults.js";
+import { colorDepth } from "../../src/core/terminal-preferences.js";
 import { createMuxRuntime, type MuxPaneOpenFailure } from "../../src/domains/mux/contract.js";
 import { createMuxClient, type MuxClient } from "../../src/domains/mux/socket-client.js";
 import { MuxError } from "../../src/domains/mux/types.js";
+import { watchViewerCommand } from "../../src/domains/mux/viewer-command.js";
 import { createWatchPaneController, workersDockHiddenNotice } from "../../src/interactive/watch-pane.js";
 
 function fixture() {
@@ -429,4 +431,20 @@ it("a hidden workers dock names the workers still running and none once they fin
 	strictEqual(workersDockHiddenNotice(0), "workers dock hidden; the key shows it again, twice quickly closes it");
 	match(workersDockHiddenNotice(1), /^workers dock hidden, 1 worker still running;/u);
 	match(workersDockHiddenNotice(2), /^workers dock hidden, 2 workers still running;/u);
+});
+
+it("pins the launching Clio's color depth on the dock argv, since the pane inherits the host's env (FX-14)", () => {
+	const argv = (env: NodeJS.ProcessEnv) =>
+		watchViewerCommand("/state/watch-selection", {
+			entryPath: "/clio/dist/cli/index.js",
+			execPath: "node",
+			colorDepth: colorDepth(env),
+			tapPath: "/state/watch-dock-taps",
+		}).join(" ");
+	strictEqual(
+		argv({ NO_COLOR: "1", COLORTERM: "truecolor" }),
+		"node /clio/dist/cli/index.js fleet view --watch /state/watch-selection --color-depth none --dock-taps /state/watch-dock-taps",
+	);
+	match(argv({ TERM: "linux" }), / --color-depth 16 /u);
+	match(argv({ TERM: "xterm-256color", COLORTERM: "truecolor" }), / --color-depth truecolor /u);
 });

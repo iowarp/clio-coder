@@ -169,15 +169,29 @@ function keyUnit(paint: BoardPaint, key: string, word: string): string {
 	return `${paint.fg("keyboardHint", `[${key}]`)} ${paint.fg("annotation", word)}`;
 }
 
-/** The key row: as many key units as fit, from the left. */
+/**
+ * The key row, fitted as SPEC 2.5 fits a rail: words drop before keys. Every unit whole; then the words go from the
+ * left, where the guessable navigation keys sit, keeping the last unit's word (the way out); then whole units go from
+ * the left, so `[q] hide` and `[Esc] back` are the last thing standing.
+ */
 function keyRow(paint: BoardPaint, keys: ReadonlyArray<readonly [string, string]>, width: number): string {
-	const shown: string[] = [];
-	for (const [key, word] of keys) {
-		const next = [...shown, keyUnit(paint, key, word)];
-		if (1 + visibleWidth(next.join(sep(paint))) > width) break;
-		shown.push(keyUnit(paint, key, word));
+	const units = (bare: number, from: number): string[] =>
+		keys
+			.slice(from)
+			.map(([key, word], index) =>
+				from + index < bare ? paint.fg("keyboardHint", `[${key}]`) : keyUnit(paint, key, word),
+			);
+	const row = (shown: readonly string[]): string => ` ${shown.join(sep(paint))}`;
+	const last = Math.max(0, keys.length - 1);
+	for (let bare = 0; bare <= last; bare += 1) {
+		const fitted = row(units(bare, 0));
+		if (visibleWidth(fitted) <= width) return fitted;
 	}
-	return ` ${shown.join(sep(paint))}`;
+	for (let from = 1; from < last; from += 1) {
+		const fitted = row(units(last, from));
+		if (visibleWidth(fitted) <= width) return fitted;
+	}
+	return cut(row(units(last, last)), width);
 }
 
 const UP_DOWN = `${GLYPH.up}${GLYPH.down}`;
@@ -469,7 +483,7 @@ const EMPTY_BOARD = [
 ];
 
 /** The whole board screen, exactly `height` rows (fewer only when the terminal is tiny). */
-function renderBoard(
+export function renderBoard(
 	paint: BoardPaint,
 	cards: readonly WorkerCard[],
 	view: BoardView,
@@ -944,7 +958,7 @@ function detailBody(
 }
 
 /** Run detail: the pinned identity row, the one scroll region, the key row. */
-function renderTakeover(
+export function renderTakeover(
 	paint: BoardPaint,
 	model: TakeoverModel | null,
 	view: TakeoverView,
@@ -976,10 +990,11 @@ function renderTakeover(
 	const footer = [rule, keys];
 	const bodyHeight = Math.max(1, height - header.length - footer.length);
 	const { lines, answerStart } = detailBody(paint, model, view, columns);
-	// A change above the answer (the task folding, the tier) never moves what the answer shows.
+	// A change above the answer (the task folding, the tier) never moves the answer on screen: while its first row is
+	// on screen or above it, the window moves with it. Only an answer still below the window lets the change show.
 	if (view.scrollTop !== null && view.answerStart >= 0 && answerStart !== view.answerStart) {
 		view.scrollTop =
-			view.scrollTop >= view.answerStart
+			view.answerStart < view.scrollTop + view.bodyHeight
 				? view.scrollTop + (answerStart - view.answerStart)
 				: Math.min(view.scrollTop, answerStart);
 	}
@@ -1008,6 +1023,8 @@ export interface WorkersDashboardOptions {
 	tapPath: string | null;
 	scope: ReturnType<typeof fleetInspectionScope>;
 	source?: BoardSource;
+	/** The launching Clio's color depth, pinned on argv: a pane inherits the multiplexer's environment, not Clio's. */
+	colorDepth?: ColorDepth;
 }
 
 /** The interactive dashboard; resolves when the operator closes it. */
@@ -1021,7 +1038,7 @@ export async function runWorkersDashboard(options: WorkersDashboardOptions): Pro
 				.then(({ copyToSystemClipboard }) => copyToSystemClipboard(text, (sequence) => terminal.write(sequence)))
 				.catch(() => "Copy failed: clipboard module did not load"),
 	});
-	const paint = createBoardPaint();
+	const paint = createBoardPaint(options.colorDepth);
 	const source = options.source ?? createBoardSource();
 
 	let request: WatchRequest | null = readWatchRequest(options.selectionPath);
