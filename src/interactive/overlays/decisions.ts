@@ -318,7 +318,8 @@ class DecisionsOverlayBody implements Component {
 			tail.push(
 				fitUnits(
 					theme,
-					`${theme.fg("selectedOption", GLYPH.cursor)} `,
+					// The selection's row carries the cursor; its status row sits under that row's text without a second one.
+					"  ",
 					[
 						theme.fg("annotation", `chosen by ${decisionSource(decision)}`),
 						...(decision.source_question ? [theme.fg("menuDescription", decision.source_question)] : []),

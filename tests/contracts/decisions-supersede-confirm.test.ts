@@ -1,11 +1,13 @@
 import { deepStrictEqual, match } from "node:assert/strict";
 import { test } from "node:test";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { DecisionLedgerEntry } from "../../src/domains/session/entries.js";
 import type { Component, TUI } from "../../src/engine/tui.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import type { DockFrame } from "../../src/interactive/dock.js";
 import { DOCK_BODY_ROWS_MAX, dockTop } from "../../src/interactive/dock.js";
 import { openDecisionsOverlay } from "../../src/interactive/overlays/decisions.js";
+import { GLYPH } from "../../src/interactive/theme/index.js";
 
 const ENTRY: DecisionLedgerEntry = {
 	kind: "decisionLedger",
@@ -88,5 +90,45 @@ test("End, Home and PgDn move the decision selection; Tab opens detail like Ente
 	match(superseded[0] ?? "", /c_key/u);
 	match(superseded[1] ?? "", /a_key/u);
 	match(superseded[2] ?? "", /c_key/u);
+	handle.hide();
+});
+
+test("compact states the selected decision in a status row that carries no second cursor (FX-17)", (t) => {
+	t.after(() => setPresentationTier("standard"));
+	setPresentationTier("compact");
+	const tui = {
+		terminal: { rows: 24, setTitle: () => {} },
+		requestRender: () => {},
+		showOverlay: () => ({ hide: () => {} }),
+	} as unknown as TUI;
+	const asked: DecisionLedgerEntry = {
+		...ENTRY,
+		decisions: [
+			{
+				key: "cache_key",
+				value: "Full path",
+				status: "active",
+				decidedAt: "2026-11-10T00:01:00.000Z",
+				source_question: "Which cache key?",
+			},
+		],
+	};
+	const handle = openDecisionsOverlay(tui, () => [asked], {
+		onSupersede: () => {},
+		onCorrection: () => {},
+		onClose: () => {},
+	});
+	const frame = dockTop(tui)?.frame as unknown as DockFrame & Component;
+	const rows = frame.renderDockBody(80, DOCK_BODY_ROWS_MAX).map(stripTerminalSequences);
+	deepStrictEqual(
+		rows.filter((row) => row.startsWith(`${GLYPH.cursor} `)).length,
+		1,
+		`only the selected row carries the cursor:\n${rows.join("\n")}`,
+	);
+	match(
+		rows.join("\n"),
+		/^ {2}chosen by .* · Which cache key\?/mu,
+		"the status row names who chose it and the question",
+	);
 	handle.hide();
 });
