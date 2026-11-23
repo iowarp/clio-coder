@@ -425,8 +425,9 @@ function recordedRoute({ run, enqueued }: RecordedWorkerRun): string {
 
 /**
  * Board rows first, in the board's order; recorded runs the board does not hold follow in the order given. The board's
- * runs are the Fleet Runs table (6.5) exactly as `runTableRows` returns it, header and dropped-column note included,
- * so this tab's columns and tier behaviour are the board's at the same measured width.
+ * runs, an earlier session's included, are the Fleet Runs table (6.5) exactly as `runTableRows` returns it, header,
+ * earlier-sessions rule and dropped-column note included, so this tab's columns, state words and tier behaviour are
+ * the board's at the same measured width.
  */
 export function renderWorkerUsage(
 	rows: ReadonlyArray<DispatchBoardRow>,
