@@ -578,13 +578,13 @@ export class ClioEditor extends Editor {
 	private suggestionPanel(item: SlashCompletionItem, width: number, theme: ClioTheme): string[] {
 		const gutter = `${theme.fg("border", GLYPH.rail)} `;
 		const room = Math.max(1, width - 4 - visibleWidth(gutter));
-		const parts = item.path?.split(" › ") ?? [];
+		const parts = item.path?.split(` ${GLYPH.crumb} `) ?? [];
 		const crumb = parts
 			.map((part, index) => {
 				const last = index === parts.length - 1;
 				return theme.style(last ? "selectedOption" : "commandHint", part, { bold: last });
 			})
-			.join(theme.fg("border", " › "));
+			.join(theme.fg("border", ` ${GLYPH.crumb} `));
 		const unavailable = item.disabledReason ? theme.fg("emptyState", "  unavailable") : "";
 		const rows = [`${gutter}${truncateToWidth(`${crumb}${unavailable}`, room, GLYPH.ellipsis, false)}`];
 		// A sentence that outgrows the rows under the breadcrumb ends in an ellipsis rather than a silent cut.

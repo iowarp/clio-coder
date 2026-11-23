@@ -47,6 +47,26 @@ const UNICODE_GLYPHS = {
 	scoped: "*",
 	up: "↑",
 	down: "↓",
+	right: "→",
+	// Arrow key pairs as a hint names them: list movement and tab switching.
+	upDown: "↑↓",
+	leftRight: "←→",
+	// Between the steps of a breadcrumb (`/fleet › run`, a settings trail). One entry, so a split matches its join.
+	crumb: "›",
+	// A slash command whose verbs open a submenu.
+	submenu: "▸",
+	// An empty mark: an unselected choice, a node that is down or not ready, an inner tree node.
+	hollow: "○",
+	// A route or node that answers but is degraded, probing or recovering.
+	degraded: "◐",
+	// A cell with no value.
+	none: "—",
+	quoteOpen: "“",
+	quoteClose: "”",
+	// A tree row that opens a branch with more siblings below it; the last one takes bottomLeft.
+	branch: "├",
+	// A session forked from another.
+	forked: "↰",
 	rail: "│",
 	rule: "─",
 	topLeft: "┌",
@@ -151,6 +171,18 @@ const ASCII_GLYPHS: { readonly [K in keyof typeof UNICODE_GLYPHS]: string } = {
 	scoped: "*",
 	up: "^",
 	down: "v",
+	right: ">",
+	upDown: "^v",
+	leftRight: "<>",
+	crumb: ">",
+	submenu: ">",
+	hollow: "o",
+	degraded: "~",
+	none: "-",
+	quoteOpen: '"',
+	quoteClose: '"',
+	branch: "+",
+	forked: "<",
 	rail: "|",
 	rule: "-",
 	topLeft: "+",

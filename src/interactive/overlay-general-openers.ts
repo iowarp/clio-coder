@@ -262,7 +262,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		const systemOne = deps.systemOne?.();
 		const systemOneControl = deps.systemOneControl?.();
 		deps.transitions.handle = openUsageOverlayFactory(deps.tui, deps.telemetry, {
-			getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 			...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
 			getChanges: () => changes,
 			sessionStartedAt: deps.getSessionMeta()?.createdAt ?? null,

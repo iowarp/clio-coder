@@ -1,4 +1,3 @@
-import type { OutputStyle } from "../core/defaults.js";
 import { tierPolicy, type UsageSections } from "../core/presentation-tier.js";
 import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
@@ -525,8 +524,6 @@ interface SessionEconomy {
 }
 
 export interface OpenUsageOverlayOptions {
-	/** Ignored: `/usage` reads the tier from `tierPolicy()` like every surface (3.1). The sweep row removes it. */
-	getOutputStyle?: () => OutputStyle;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
 	/** Session ledger, read on every render so newly settled and branched calls appear. */
 	getSessionEntries?: () => ReadonlyArray<SessionEntry>;

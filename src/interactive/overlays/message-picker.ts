@@ -104,7 +104,9 @@ function formatTimestampForRow(timestamp: string): string {
 function rowsToItems(rows: ReadonlyArray<MessagePickerRow>, describe: boolean): ChoiceItem[] {
 	return rows.map((row) => ({
 		value: row.turnId,
-		label: row.asked ? `after “${row.asked.replaceAll("**", "")}”` : row.preview.replaceAll("**", ""),
+		label: row.asked
+			? `after ${GLYPH.quoteOpen}${row.asked.replaceAll("**", "")}${GLYPH.quoteClose}`
+			: row.preview.replaceAll("**", ""),
 		...(row.asked && describe ? { description: replyLine(row) } : {}),
 		meta: formatTimestampForRow(row.at),
 	}));
