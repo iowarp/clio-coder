@@ -181,9 +181,7 @@ test("footer keeps unassociated accounts out of compact rows and the dashboard",
 		footer.refresh();
 		match(plain(footer.view.render(160)), /Connection lost/);
 		footer.toggleExpanded();
-		const pages = [footer.view.render(160)];
-		for (let page = 0; page < 20 && footer.scroll(8); page++) pages.push(footer.view.render(160));
-		const glance = plain(pages.flat());
+		const glance = plain(footer.view.render(160));
 		// Account limits live in /usage; the one-page dashboard names it for detail.
 		doesNotMatch(glance, /Codex · Weekly|not reported by provider|\/cost/);
 		match(glance, /\/usage/);

@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { Quantity } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { renderCompactCount } from "../../src/core/telemetry/render.js";
@@ -165,6 +166,8 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 			compactionThreshold: 0.9,
 			compactionAuto: true,
 		});
+	// Prompt cache rows are provenance: `/context` shows them at detailed only.
+	setPresentationTier("detailed");
 	const context = openContextOverlay(tui, ledger, { telemetry });
 	try {
 		const text = stripTerminalSequences(dockTop(tui)?.frame.renderDockBody(200, 60).join("\n") ?? "");
@@ -174,6 +177,7 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 		ok(text.includes(`uncached prefill ${newest.cache.uncachedPrefill.display}`), text);
 	} finally {
 		context.hide();
+		setPresentationTier("standard");
 	}
 });
 

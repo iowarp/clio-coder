@@ -12,7 +12,6 @@ import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import { formatStatedWait } from "../../domains/session/retry.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { taskBoardCounts, unverifiedTaskChecks } from "../../domains/session/task-board.js";
-import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { ModelRequestSlots, RetryOverlay } from "../../session-control/status-types.js";
 import { finiteNonNegative } from "../context-bar.js";
@@ -20,13 +19,7 @@ import type { DispatchBoardRow } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
 import { providerFailureRailFacts } from "../renderers/provider-error.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
-import {
-	computeWatchdogTier,
-	formatReasoningChip,
-	type ReasoningUsageView,
-	retryCountLabel,
-	spinnerFrame,
-} from "../status/index.js";
+import { computeWatchdogTier, retryCountLabel, spinnerFrame } from "../status/index.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
 import {
 	FUNCTION_ROLES,
@@ -39,7 +32,6 @@ import {
 } from "../theme/index.js";
 import { formatWaitClock, modelNickname } from "../theme/labels.js";
 import { contextReadingQualifier } from "./context-rail.js";
-import type { FooterTelemetry } from "./spend.js";
 
 export interface ToolTallySnapshot {
 	tools: Readonly<Record<string, number>>;
@@ -213,115 +205,10 @@ function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; to
 	return { glyph: GLYPH.ok, token: "success" };
 }
 
-/** The streaming turn's live rate, or else the newest settled main call's rate and TTFT from the read model (#434). */
-export function formattedThroughput(
-	theme: ClioTheme,
-	throughput: TokenThroughputSnapshot | null | undefined,
-	telemetry: FooterTelemetry | undefined,
-): string | null {
-	const settled = throughput ? null : telemetry?.kind === "ready" ? telemetry.speed : null;
-	const tps = finiteNonNegative(throughput ? throughput.tokensPerSecond : settled?.tokensPerSecond);
-	const estimated = throughput ? throughput.estimated === true : settled?.estimated === true;
-	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
-	const parts = [
-		tps > 0
-			? `${theme.fg("metricValue", `${GLYPH.speed}${estimated ? GLYPH.estimate : ""}${rounded}`)} ${theme.fg("metricUnit", "tok/s")}`
-			: null,
-		settled?.ttft ? `${theme.fg("fieldName", "ttft")} ${theme.fg("counter", settled.ttft)}` : null,
-	];
-	const joined = joinChips(theme, parts);
-	return joined.length > 0 ? joined : null;
-}
-
-/**
- * The streaming run's live chip: output as it streams, and the prompt it sent, from the context meter or else the
- * read model's newest turn, never a tally of the run's own messages (#434 §11.3).
- */
-export function liveTokenValue(
-	theme: ClioTheme,
-	throughput: TokenThroughputSnapshot | null | undefined,
-	telemetry: FooterTelemetry | undefined,
-	contextUsed: number | null | undefined,
-): string | null {
-	const output = finiteNonNegative(throughput?.outputTokens);
-	const context = finiteNonNegative(contextUsed);
-	const turnPrompt = telemetry?.kind === "ready" ? (telemetry.turn?.prompt ?? null) : null;
-	// The whole prompt, cached reads included, so it is labelled `prompt`: `in` is the uncached input everywhere (bt-11).
-	const prompt = context > 0 ? formatFooterTokens(context) : turnPrompt;
-	const parts = [
-		output > 0
-			? theme.fg("counter", `out ${throughput?.estimated ? GLYPH.estimate : ""}${formatFooterTokens(output)}`)
-			: null,
-		prompt !== null ? theme.fg("counter", `prompt ${prompt}`) : null,
-	];
-	const joined = joinChips(theme, parts);
-	return joined.length > 0 ? joined : null;
-}
-
-/**
- * The newest turn's reasoning chip, or null when the turn spent none. Every
- * surface that shows reasoning reads the turn's journaled reasoning through the
- * same projection, so the transcript, this footer, and the receipt cannot
- * disagree about the count or whether it is provider-attested.
- */
-function reasoningChip(theme: ClioTheme, reasoning: ReasoningUsageView): string | null {
-	const chip = formatReasoningChip(reasoning, formatFooterTokens);
-	return chip === null ? null : theme.fg("counter", chip);
-}
-
 export function lastTurnOutcome(theme: ClioTheme, lastTurn: TurnSummary): string {
 	const stop = stopReasonStyle(lastTurn.stopReason);
 	const work = Math.max(0, lastTurn.elapsedMs - (lastTurn.humanWaitMs ?? 0));
 	return `${theme.fg(stop.token, stop.glyph)} ${theme.fg("counter", formatElapsed(work))}`;
-}
-
-/** Tokens are the journal's for the whole turn, workers included; timing and tools are the turn's own status. */
-export function lastTurnDetails(
-	theme: ClioTheme,
-	lastTurn: TurnSummary,
-	telemetry: FooterTelemetry | undefined,
-): string {
-	const turn = telemetry?.kind === "ready" ? telemetry.turn : null;
-	const measured = turn
-		? [
-				// Label first, as the receipt and the exit card write tokens (U5).
-				turn.input === null ? null : `in ${turn.input}`,
-				turn.output === null ? null : `out ${turn.output}`,
-			]
-				.filter(Boolean)
-				.join(` ${GLYPH.dot} `)
-		: "";
-	const cache = turn
-		? [
-				// No call this turn reported its cache read: say so, since `cache read ?` read as a cache that missed.
-				turn.cacheRead === null || turn.cacheRead === "0"
-					? null
-					: turn.cacheRead === "?"
-						? "cache read not reported"
-						: `cache read ${turn.cacheRead}`,
-				turn.cacheWrite === null || turn.cacheWrite === "0" ? null : `write ${turn.cacheWrite}`,
-			]
-				.filter(Boolean)
-				.join(` ${GLYPH.dot} `)
-		: "";
-	const parts: Array<string | null> = [
-		turn ? (measured ? theme.fg("counter", measured) : theme.fg("annotation", "usage not measured (/usage)")) : null,
-		turn ? reasoningChip(theme, turn.reasoning) : null,
-		cache ? theme.fg("annotation", cache) : null,
-	];
-	if (lastTurn.toolCount > 0) {
-		const label = `${lastTurn.toolCount} tool${lastTurn.toolCount === 1 ? "" : "s"}`;
-		const errors = lastTurn.toolErrorCount > 0 ? theme.fg("error", ` ${lastTurn.toolErrorCount}${GLYPH.error}`) : "";
-		parts.push(`${theme.fg("counter", label)}${errors}`);
-	}
-	if (lastTurn.watchdogPeak >= 2) parts.push(theme.fg("warning", "slow"));
-	if (lastTurn.truncated) parts.push(theme.fg("warning", "trunc"));
-	return joinChips(theme, parts);
-}
-
-export function meaningfulToolTally(value: string): string | null {
-	const text = value.trim();
-	return text === "none" || text === `none ${GLYPH.dot} 0${GLYPH.error}` || text === `0${GLYPH.error}` ? null : value;
 }
 
 /** Task-board progress chips: `2/5 done`, with a warning chip when tasks are blocked. */
@@ -331,22 +218,6 @@ export function taskBoardValue(theme: ClioTheme, board: TaskBoardSnapshot): stri
 	const blocked = counts.blocked > 0 ? theme.fg("warning", `${counts.blocked} blocked`) : null;
 	const unverified = board.tasks.filter((task) => unverifiedTaskChecks(task) !== null).length;
 	return joinChips(theme, [progress, blocked, unverified > 0 ? theme.fg("warning", `${unverified} unverified`) : null]);
-}
-
-/** The board's current focus: the single active task, glyph-led like a worker row. */
-export function activeTaskLine(theme: ClioTheme, board: TaskBoardSnapshot): string | null {
-	const active = board.tasks.find((task) => task.status === "active");
-	if (!active) return null;
-	return `${theme.fg("activity", GLYPH.running)} ${theme.fg("annotation", active.id)} ${theme.fg("counter", active.title)}`;
-}
-
-/** What stands in the board's way: the first blocked task and its reason, on one row. */
-export function blockedTaskLines(theme: ClioTheme, board: TaskBoardSnapshot, width: number): string[] {
-	const blocked = board.tasks.find((task) => task.status === "blocked");
-	if (!blocked) return [];
-	const reason = blocked.reason ? `: ${sanitizeCallTargetText(blocked.reason)}` : "";
-	const row = `${theme.fg("warning", GLYPH.phaseBlocked)} ${theme.fg("annotation", blocked.id)} ${theme.fg("counter", `${sanitizeCallTargetText(blocked.title)}${reason}`)}`;
-	return [truncateToWidth(row, width, GLYPH.ellipsis, false)];
 }
 
 /** The active task on the composer rail: its id and as much of its title as the leftover room holds. */
