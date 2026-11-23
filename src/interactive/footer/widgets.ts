@@ -16,7 +16,6 @@ import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { ModelRequestSlots, RetryOverlay } from "../../session-control/status-types.js";
 import { finiteNonNegative } from "../context-bar.js";
-import { contextPercentRole } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
 import { providerFailureRailFacts } from "../renderers/provider-error.js";
@@ -31,7 +30,6 @@ import {
 import type { ClioTheme, ClioToken } from "../theme/index.js";
 import {
 	FUNCTION_ROLES,
-	formatContextPercent,
 	formatElapsed,
 	GLYPH,
 	joinChips,
@@ -40,7 +38,7 @@ import {
 	toolFunction,
 } from "../theme/index.js";
 import { formatWaitClock, modelNickname } from "../theme/labels.js";
-import { type ContextOccupancyFacts, contextReadingQualifier, contextUsagePercent } from "./context-rail.js";
+import { contextReadingQualifier } from "./context-rail.js";
 import type { FooterTelemetry } from "./spend.js";
 
 export interface ToolTallySnapshot {
@@ -205,33 +203,6 @@ export function contextUsageText(context: ContextEngineFacts): string {
 	const qualifier = contextReadingQualifier({ ...(context.budget ? { budget: context.budget } : {}), used });
 	const source = qualifier === "" ? "" : qualifier === GLYPH.estimate ? qualifier : `${qualifier} `;
 	return `${source}${used === null ? "?" : formatFooterTokens(used)} / ${window ? formatFooterTokens(window) : "unknown"}`;
-}
-
-/** Compact counts and occupancy; source details remain in the expanded dashboard. */
-export function compactContextUsage(
-	context: ContextOccupancyFacts,
-	theme: ClioTheme,
-	room = Number.POSITIVE_INFINITY,
-): string {
-	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
-	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
-	// Before the first measured turn only the window is known; question marks
-	// read as a fault, so the row names the window alone.
-	if (used === null && window) return theme.fg("counter", `${formatFooterTokens(window).toUpperCase()} ctx`);
-	// Neither figure is known yet (the first seconds after launch): show nothing
-	// rather than `?/unknown`.
-	if (used === null) return "";
-	// With no window known the count stands alone in words: `12.9K/unknown` read as a fraction of nothing (F1).
-	if (!window) return theme.fg("counter", `${formatFooterTokens(used).toUpperCase()} in context`);
-	const counts = `${formatFooterTokens(used).toUpperCase()}/${formatFooterTokens(window).toUpperCase()}`;
-	const percent = contextUsagePercent(context);
-	const full = `${theme.fg("counter", counts)} ${theme.fg(contextPercentRole(percent), `(${formatContextPercent(percent)})`)}`;
-	if (visibleWidth(full) <= room) return full;
-	// A narrow row keeps the counts and drops the percent, then states the percent
-	// whole rather than cut either mid-figure.
-	return visibleWidth(counts) <= room
-		? theme.fg("counter", counts)
-		: `${theme.fg("counter", "ctx")} ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`;
 }
 
 function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; token: ClioToken } {
