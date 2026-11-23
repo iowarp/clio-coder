@@ -4,7 +4,7 @@ import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { dashboardPageViewport, machineBlock, renderCompactDashboard } from "../../src/interactive/footer/pages.js";
 import { footerState } from "../harness/footer-fixture.js";
 
-test("the narrow footer gives workspace and branch a readable row with context at the right edge", () => {
+test("the narrow footer leads with the mark, keeps the model id at the right edge and leaves context to the rail", () => {
 	const state = footerState();
 	state.agent.statusText = "Ready";
 	state.dispatchRows = [];
@@ -13,38 +13,46 @@ test("the narrow footer gives workspace and branch a readable row with context a
 	state.context = { ...state.context, ledger: null, used: null };
 	for (const width of [40, 59, 60, 61, 80, 120]) {
 		const rows = renderCompactDashboard(state, width).map(stripTerminalSequences);
-		strictEqual(rows.length, width <= 60 ? 1 : 2);
+		// Standard is two rows; a W1 width keeps the status line alone.
+		strictEqual(rows.length, width < 44 ? 1 : 2);
 		for (const row of rows) ok(visibleWidth(row) <= width);
-		match(rows[0] ?? "", /v050/);
-		match(rows[0] ?? "", /262\.1K ctx$/);
+		match(rows[0] ?? "", /^>C_ /);
+		match(rows[0] ?? "", /q4_k_m$/);
+		if (width >= 59) match(rows[0] ?? "", /v050/);
 		strictEqual(visibleWidth(rows[0] ?? ""), width);
-		doesNotMatch(rows[0] ?? "", /Ready|blade|▰|▱/);
+		doesNotMatch(rows[0] ?? "", /Ready|ctx|262|%|▰|▱/);
 	}
 });
 
-test("narrow context reports unknown, estimated and saved occupancy without inventing measurements", () => {
+test("the status line states no context occupancy in any measurement state, because the rail owns it", () => {
 	const state = footerState();
 	state.context.budget = { revision: "1", historical: false, inputSource: "estimated" };
 	state.context.used = 50_000;
 	state.context.contextWindow = 100_000;
-	for (const width of [40, 60]) {
+	const noContext = (width: number): void => {
 		const row = stripTerminalSequences(renderCompactDashboard(state, width)[0] ?? "");
-		match(row, /50K\/100K \(50\.0%\)$/);
+		doesNotMatch(row, /100K|ctx|%/);
 		ok(visibleWidth(row) <= width);
-	}
+	};
+	for (const width of [40, 60]) noContext(width);
 	state.context.budget = { revision: "2", historical: true, inputSource: "historical" };
-	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /50K\/100K \(50\.0%\)$/);
+	noContext(60);
 	state.context.used = null;
 	state.context.budget = { revision: "3", historical: false, inputSource: "unknown" };
-	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /100K ctx$/);
+	noContext(60);
 	state.context.used = 0;
 	state.context.budget = { revision: "4", historical: false, inputSource: "estimated" };
-	match(stripTerminalSequences(renderCompactDashboard(state, 60)[0] ?? ""), /0\/100K \(0\.0%\)$/);
+	noContext(60);
 });
 
-test("compact throughput keeps the estimate marker and omits unavailable rates", () => {
+test("the detailed session row keeps the estimate marker and omits unavailable rates", () => {
 	const state = footerState();
 	state.context.used = null;
+	state.outputStyle = "standard";
+	state.throughput = { tokensPerSecond: 12.3, outputTokens: 123, durationMs: 10000, estimated: true };
+	// The rate is telemetry: standard's status line has no slot for it.
+	doesNotMatch(renderCompactDashboard(state, 120).map(stripTerminalSequences).join("\n"), /tok\/s/);
+	state.outputStyle = "detailed";
 	state.throughput = { tokensPerSecond: 12.3, outputTokens: 123, durationMs: 10000, estimated: true };
 	const plain = () => renderCompactDashboard(state, 120).map(stripTerminalSequences).join("\n");
 	match(plain(), /≈12\s*tok\/s/);
@@ -67,10 +75,9 @@ test("a narrow attention row preserves workspace and context with armed skill fa
 	];
 	for (const width of [40, 60]) {
 		const rows = renderCompactDashboard(state, width).map(stripTerminalSequences);
-		strictEqual(rows.length, 2);
-		match(rows[0] ?? "", /v050/);
-		match(rows[0] ?? "", /68\.5K\/262\.1K/);
-		if (width === 60) match(rows[1] ?? "", /skill tdd/);
+		// A W1 width keeps the status line and an error; standard at 60 adds its hint row.
+		strictEqual(rows.length, width < 44 ? 2 : 3);
+		match(rows[0] ?? "", /^>C_ /);
 		match(rows[1] ?? "", /✗ Provider unavailab(?:le|…)/);
 		doesNotMatch(rows.join("\n"), /Saved/);
 		for (const row of rows) ok(visibleWidth(row) <= width);
@@ -80,6 +87,8 @@ test("a narrow attention row preserves workspace and context with armed skill fa
 	}
 	state.notices = [];
 	strictEqual(renderCompactDashboard(state, 60).length, 2);
+	state.session.modelId = "gpt-6-luna";
+	match(stripTerminalSequences(renderCompactDashboard(state, 80)[0] ?? ""), /skill tdd/);
 	state.session.leaderArmed = true;
 	match(stripTerminalSequences(renderCompactDashboard(state, 60)[1] ?? ""), /choose key/i);
 });

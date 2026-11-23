@@ -287,7 +287,7 @@ test("tui: a chain is one row that lists each step with its status, capability a
 		durationMs: 3000,
 	};
 	const rows = plain(renderToolPreview(chain, 100, transcriptDetail("standard")));
-	assert.match(rows[0] ?? "", /chained 3 steps · 1 failed · 1 not run ✗ · 3\.0s$/u);
+	assert.match(rows[0] ?? "", /chained 3 steps · 1 failed · 1 not run · 3\.0s ✗ failed$/u);
 	// The chain's own cut of a step's output is a fact on that step's row.
 	assert.ok(rows.some((row) => row.includes("✓ grep `TODO` in src · truncated")));
 	assert.ok(rows.some((row) => row.includes("✗ bash `npm test` · exit 1")));
@@ -446,7 +446,12 @@ test("a refused unknown gateway capability keeps its requested name without a re
 	const title = stripTerminalSequences(toolRowTitle(refused));
 	assert.match(title, /refused shell/u);
 	assert.doesNotMatch(title, /\bread(?:ing)? shell/u);
-	assert.match(title, /command "npm test"/u);
+	// What it requested leaves the header; the refused row's body keeps it, since it is part of why it failed.
+	assert.doesNotMatch(title, /npm test/u);
+	assert.match(
+		stripTerminalSequences(renderToolPreview(refused, 100, transcriptDetail("standard")).join("\n")),
+		/command › npm test/u,
+	);
 	const admitted = {
 		...refused,
 		result: { ...(refused.result as object), details: { capability: "dynamic_read" } },

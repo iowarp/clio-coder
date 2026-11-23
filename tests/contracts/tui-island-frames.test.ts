@@ -104,15 +104,18 @@ const stats: WelcomeDashboardStats = {
 	quota: "Claude 5h 23% used · Codex wk 21% used",
 };
 
-test("the detailed launchpad is a standard island with a quiet border and version in its action row", () => {
+test("the detailed launchpad is open: no frame, the version on its header row, next as its last fact", () => {
 	for (const width of WIDTHS) {
 		const lines = buildWelcomeDashboardLines(stats, "0.5.6", width, "launchpad");
-		assertIsland(lines, width, null, new Set([...PALETTE_HEX, ...BRAND_RAMP_HEX, ...ROW_RAMP_HEX]));
+		assertFits(lines, width);
+		assertTokensOnly(lines, new Set([...PALETTE_HEX, ...BRAND_RAMP_HEX, ...ROW_RAMP_HEX]));
 		const plain = lines.map(stripTerminalSequences);
-		// The action row sits under an inner divider, as in every other island.
-		match(plain.at(-3) ?? "", new RegExp(`^│ ${GLYPH.innerDivider}+ │$`, "u"));
-		match(plain.at(-2) ?? "", /v0\.5\.6 │$/u);
-		ok(!plain.some((row) => /[╭╮╰╯├┤]/u.test(row)), "no bespoke corners or tees");
+		ok(!plain.some((row) => /[┌┐└┘│╭╮╰╯├┤]/u.test(row)), "no frame at any width");
+		ok(
+			plain.some((row) => row.includes(">C_ CLIO Coder 0.5.6")),
+			plain.join("\n"),
+		);
+		match(plain.at(-1) ?? "", /^\s*next\b|^\s*\? keys/u);
 	}
 });
 

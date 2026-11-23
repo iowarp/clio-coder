@@ -10,10 +10,9 @@
  */
 
 import { clioBuildLabel } from "../../core/build-info.js";
-import { outputStyleLabel } from "../../core/defaults.js";
-import { renderUsdLimit } from "../../core/telemetry/render.js";
+import { presentationTier, tierPolicy } from "../../core/presentation-tier.js";
+import { COST_NOT_MEASURED, renderUsdLimit } from "../../core/telemetry/render.js";
 import { autonomyModeReadout, autonomyWindowReadout } from "../../domains/safety/autonomy-readout.js";
-import type { AutonomyStatus } from "../../domains/safety/autonomy-window.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -34,11 +33,13 @@ import {
 import {
 	brandMark,
 	type ClioTheme,
+	type ClioToken,
 	chipRow,
 	chipRows,
 	clioTheme,
 	emptyState,
 	factRows,
+	fitSides,
 	formatContextPercent,
 	formatElapsed,
 	GLYPH,
@@ -47,6 +48,7 @@ import {
 	padAnsi,
 	positionRow,
 	rule,
+	type SideUnit,
 	sectionRule,
 	type Tone,
 } from "../theme/index.js";
@@ -61,13 +63,11 @@ import {
 	notificationToken,
 	topNotification,
 } from "./notifications.js";
-import type { FooterTelemetry } from "./spend.js";
 import type { LocalMachineMetrics } from "./system-metrics.js";
 import {
 	activeTaskLine,
 	blockedTaskLines,
 	buildHarnessStatePill,
-	compactContextUsage,
 	contextUsageText,
 	formattedThroughput,
 	lastTurnDetails,
@@ -400,27 +400,6 @@ function contextLine(state: FooterDashboardRenderState, width: number): string {
 	return `${renderContextMeterBar(ledger, barCells, theme)}  ${figure}`;
 }
 
-/** Whole-session spend across every branch (#434 §11.3, decision A). */
-function sessionSpendChips(telemetry: FooterTelemetry): string[] {
-	const theme = clioTheme();
-	if (telemetry.kind === "unavailable") return [theme.fg("unknownValue", "spend not available")];
-	if (telemetry.kind === "reading") return [theme.fg("unknownValue", "reading the call journal")];
-	return [
-		labelled(
-			"session",
-			telemetry.tokens !== null && telemetry.measuredTokens === null
-				? theme.fg("unknownValue", "usage not measured (/usage)")
-				: `${theme.fg("metricValue", telemetry.measuredTokens ?? "0")} ${theme.fg("metricUnit", "tokens")}`,
-		),
-		theme.fg("metricValue", telemetry.cost ?? "nothing charged yet"),
-		...(telemetry.neverSent ? [theme.fg("warning", telemetry.neverSent)] : []),
-		// The row already names the weekly window, so the receipt here starts at the extra cost.
-		...(telemetry.economy ? economyReceipt(telemetry.economy, null) : []).map((part) =>
-			theme.fg(part.unknown ? "unknownValue" : "metricValue", part.text),
-		),
-	];
-}
-
 /** The session cost ceiling beside the spend on the dashboard's session row; `/usage` has the rest. */
 function ceilingChip(state: FooterDashboardRenderState): string {
 	const theme = clioTheme();
@@ -539,48 +518,113 @@ function fitNames(prefix: string, names: readonly string[], room: number): strin
 	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), GLYPH.ellipsis);
 }
 
+/** Terminal rows under this are height class H1, where every tier keeps only the status line (4.2). */
+const FOOTER_H1_ROWS = 20;
+/** Measured cells under this are width class W1, where every tier keeps only the status line (4.2). */
+const FOOTER_W1_CELLS = 44;
+/** At or under this width the hint row offers no learning beside the keys that answer the moment. */
+const FOOTER_NARROW_CELLS = 60;
+/** The notice keeps at least this much of its row before the keys to read the rest ride beside it. */
+const NOTICE_MIN_CELLS = 24;
+/** A yolo window with less than this left is an alert on the notice row, whatever its meters say. */
+const WINDOW_ENDING_MS = 5 * 60_000;
+
 /**
- * The autonomous window beside the hints: `412/600 calls · 38/120 min · 1.9M/5M tok`, the nearest cap alone when
- * narrow, and the way back once it has paused.
+ * The status line's reduction order (4.2), first to go first. Facts beyond the row's own (session name, memory,
+ * skills, the weekly and yolo windows while neither is an alert, extension facts) go first. The cwd elides its leading
+ * directories (`~/…/proj/x`), session cost goes, then the cwd shortens to its project and its basename, the target
+ * goes, the queued count, the word `default`, the branch, the cwd and the workers count. Contained yolo then shortens
+ * to `YOLO`. The mark and a non-default autonomy never drop. The model id never drops either; its form is chosen
+ * before the fit (`footerStatusLine`). `default` goes before the branch because default autonomy is implied by its
+ * absence, while the branch is a fact the row has nowhere else.
  */
-function autonomyWindowFact(theme: ClioTheme, status: AutonomyStatus, narrow: boolean): string {
-	const readout = autonomyWindowReadout(status, { narrow, dot: GLYPH.dot, resumeHint: "Enter continues" });
-	if (readout === null) return "";
-	return theme.fg(readout.tone === "neutral" ? "counter" : "warning", readout.text);
+const STATUS_RANK = {
+	aux: 0,
+	auxShort: 0.25,
+	/** The yolo window's meters outlast the other extra facts: they bound what runs unattended. */
+	windowDrop: 0.4,
+	cwdElide: 0.5,
+	cost: 1,
+	cwdShort: 2,
+	target: 3,
+	queued: 4,
+	autonomyWord: 5,
+	branch: 6,
+	cwd: 7,
+	workers: 8,
+	autonomyShort: 9,
+	modelElide: 10,
+} as const;
+const MODEL_ID_MIN_CELLS = 12;
+
+/**
+ * The cwd from its fullest form to its basename. `fitPathLabel` cuts at directory boundaries; asking it for one cell
+ * less than the last form yields the next `~/…/` form, kept while two directories remain (`~/…/proj/standard`). The
+ * project with its parent (`proj/standard`) and the basename (`standard`) follow.
+ */
+function pathForms(path: string): string[] {
+	const parts = path.split("/");
+	const root = parts[0] === "~" ? "~/" : parts[0] === "" ? "/" : "";
+	const segments = parts.slice(root === "" ? 0 : 1).filter((part) => part.length > 0);
+	const lead = `${root}${GLYPH.ellipsis}/`;
+	const forms = [path];
+	for (let width = visibleWidth(path) - 1; width > 0; ) {
+		const form = fitPathLabel(path, width);
+		if (!form.includes("/") || visibleWidth(form) > width) break;
+		if (form.startsWith(lead) && form.slice(lead.length).split("/").length >= 2) forms.push(form);
+		width = visibleWidth(form) - 1;
+	}
+	if (segments.length >= 2) forms.push(segments.slice(-2).join("/"));
+	const base = segments.at(-1);
+	if (base !== undefined) forms.push(base);
+	return [...new Set(forms)];
 }
 
-/** The widest stats a row carries, `272K/272K (100.0%) · last 999 tok/s`. */
-const STATS_RESERVE_WIDTH = 35;
+/**
+ * The leading chips that fit `width` whole. A chip that does not fit is absent with every chip after it; none is cut
+ * and nothing marks the cut, because a `…` at the row's end hid a fact behind a mark.
+ */
+function wholeChips(theme: ClioTheme, chips: ReadonlyArray<string | null>, width: number): string {
+	const separator = theme.fg("separator", ` ${GLYPH.sep} `);
+	let row = "";
+	for (const chip of chips) {
+		if (chip === null || chip.length === 0) continue;
+		const next = row === "" ? chip : `${row}${separator}${chip}`;
+		if (visibleWidth(next) > width) break;
+		row = next;
+	}
+	return row;
+}
 
-/** Workspace and counts above; notices and active harness facts below. */
-export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
-	const theme = clioTheme();
-	const w = Math.max(1, width);
-	const style = state.outputStyle ?? "standard";
-	const minimal = style === "compact";
-	const learning = !minimal && state.demo !== false;
-	const autonomy = state.session.autonomy;
-	const narrow = w <= 60;
-	const yolo =
-		autonomy === "yolo"
-			? autonomyModeReadout({
-					confinement: state.session.yoloConfinement === "unconfined" ? "unconfined" : "contained",
-					osSandbox: state.session.autonomyWindow?.osSandbox !== false,
-					narrow,
-					dot: GLYPH.dot,
-				})
-			: null;
-	const mode = autonomy ? (yolo ? theme.fg(yolo.tone, yolo.text) : theme.fg("annotation", clean(autonomy))) : "";
-	const modeLead = mode ? `${mode}${theme.fg("separator", ` ${GLYPH.dot} `)}` : "";
-	const identityWidth = Math.max(1, w - visibleWidth(modeLead));
-	const fit = (text: string, room = w) =>
-		theme.base("counter", truncateToWidth(text, Math.max(1, room), GLYPH.ellipsis, true));
-	const separator = theme.fg("separator", ` ${GLYPH.dot} `);
-	const counter = compactContextUsage(state.context, theme, Math.floor(w * 0.4));
-	// The streaming turn's live rate, else the newest settled main call's from the read model (#434).
+const COMPACT_COUNT = /^(\d+(?:\.\d+)?)([kmgb]?)$/iu;
+const COUNT_SCALE: Readonly<Record<string, number>> = { "": 1, k: 1e3, m: 1e6, g: 1e9, b: 1e9 };
+
+/** A measured compact count back to its number; an estimate, a bound or an unknown is no figure to divide. */
+function countValue(text: string): number | null {
+	const match = COMPACT_COUNT.exec(text.replaceAll(",", ""));
+	if (!match) return null;
+	const scale = COUNT_SCALE[(match[2] ?? "").toLowerCase()];
+	return scale === undefined ? null : Number(match[1]) * scale;
+}
+
+/** `cache 87%`: the newest main call's prompt read from cache, stated only when every part was measured. */
+function cacheShare(cache: { read: string; write: string; uncached: string } | null): string | null {
+	if (cache === null) return null;
+	const read = countValue(cache.read);
+	const write = countValue(cache.write);
+	const uncached = countValue(cache.uncached);
+	if (read === null || write === null || uncached === null) return null;
+	const prompt = read + write + uncached;
+	return prompt > 0 ? `cache ${Math.round((read / prompt) * 100)}%` : null;
+}
+
+/**
+ * The newest rate the session can stand behind: the streaming turn's, else the newest settled main call's when it ran
+ * on the session's route. A rate read back from a resumed session, or left by a route the session moved off, says
+ * nothing about the next call (J1-F3); it stays on the dashboard labelled as the last call.
+ */
+function footerRate(state: FooterDashboardRenderState): { speed: string | null; ttft: string | null } {
 	const newest = state.throughput ? null : state.telemetry.kind === "ready" ? state.telemetry.speed : null;
-	// A rate read back from a resumed session, or left by the route the session moved off, says nothing about the next
-	// call. It stays on the Activity page, labelled as the last call, and leaves this row until a call settles here (J1-F3).
 	const settled =
 		newest !== null &&
 		state.context.budget?.historical !== true &&
@@ -592,197 +636,412 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const estimated = state.throughput ? state.throughput.estimated === true : settled?.estimated === true;
 	// A rate is live only while tokens are arriving; during a tool the turn's figure is as historical as a settled call's (HF03).
 	const flowing = state.throughput !== null && (state.status.phase === "writing" || state.status.phase === "thinking");
-	const speed =
-		typeof rate === "number" && Number.isFinite(rate) && rate > 0
-			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, tokensPerSecondText(rate, estimated), "tok/s")}`
-			: "";
-	// The row's one separator: a `|` beside the `·` of the workspace read as a table rule with nothing under it (F3).
-	const metrics = [counter, speed].filter(Boolean).join(separator);
-	const statsCap = Math.floor(identityWidth * 0.4);
-	const values = !minimal && visibleWidth(metrics) <= statsCap ? metrics : counter;
-	// Once a figure shows, the stats column keeps its widest width (and the dirty
-	// marker its two columns) whatever the turn adds or drops, so the path's cut
-	// point stays where it was. With no figure yet the path has the whole row.
-	const valueWidth = values === "" ? 0 : Math.min(statsCap, Math.max(visibleWidth(values), STATS_RESERVE_WIDTH));
-	const workspaceWidth = Math.max(1, valueWidth === 0 ? identityWidth : identityWidth - valueWidth - 3);
-	// Until the first probe lands the branch is unknown, not absent: say nothing.
-	// A detached HEAD is still a repository: name the commit rather than claim there is no branch to speak of.
+	return {
+		speed:
+			typeof rate === "number" && Number.isFinite(rate) && rate > 0
+				? `${flowing ? "" : "last "}${tokensPerSecondText(rate, estimated)} tok/s`
+				: null,
+		ttft: settled?.ttft ?? null,
+	};
+}
+
+interface FooterCounts {
+	workers: number;
+	queued: number;
+	plans: number;
+}
+
+/**
+ * The status line: where on the left (the mark, autonomy, cwd, branch), what runs on the right (worker counts, session
+ * cost, target, model id), fitted by {@link fitSides} so a unit drops or shortens whole and the model id never moves.
+ */
+function footerStatusLine(
+	state: FooterDashboardRenderState,
+	theme: ClioTheme,
+	width: number,
+	routeFacts: boolean,
+	counts: FooterCounts,
+	aux: ReadonlyArray<SideUnit>,
+): string {
+	const left: SideUnit[] = [{ text: GLYPH.brand, paint: () => brandMark(theme), lead: true }];
+	const autonomy = state.session.autonomy ?? "default";
+	/** Cells a non-default autonomy keeps at its shortest, with its space after the mark. */
+	let autonomyFloor = 0;
+	if (autonomy === "yolo") {
+		const confinement = state.session.yoloConfinement === "unconfined" ? "unconfined" : "contained";
+		const osSandbox = state.session.autonomyWindow?.osSandbox !== false;
+		const wide = autonomyModeReadout({ confinement, osSandbox, narrow: false, dot: GLYPH.dot });
+		const short = autonomyModeReadout({ confinement, osSandbox, narrow: true, dot: GLYPH.dot }).text;
+		// Contained yolo ends as `YOLO`; an unconfined or unsandboxed session keeps the words that say so.
+		const last = confinement === "contained" && osSandbox ? "YOLO" : short;
+		const forms = [...new Set([short, last])].filter((form) => form !== wide.text);
+		autonomyFloor = 1 + visibleWidth(last);
+		left.push({
+			text: wide.text,
+			paint: (text) => theme.fg(wide.tone, text),
+			shorter: forms.map((text) => ({ text, rank: STATUS_RANK.autonomyShort })),
+		});
+	} else {
+		left.push({
+			text: clean(autonomy),
+			paint: (text) => theme.fg("annotation", text),
+			// Default autonomy is implied by its absence; any other keeps its word.
+			...(autonomy === "default" ? { drop: STATUS_RANK.autonomyWord } : {}),
+		});
+		if (autonomy !== "default") autonomyFloor = 1 + visibleWidth(clean(autonomy));
+	}
+	const paths = pathForms(clean(state.workspace.cwd));
+	// Compact starts from the project and its parent; standard and up from the whole path.
+	const cwdForms = routeFacts ? paths : paths.slice(Math.max(0, paths.length - 2));
+	left.push({
+		text: cwdForms[0] ?? clean(state.workspace.cwd),
+		paint: (text) => theme.fg("workspacePath", text),
+		// `~/…/` forms elide leading directories before the cost drops; the project and basename forms come after it.
+		shorter: cwdForms.slice(1).map((text) => ({
+			text,
+			rank: text.includes(`${GLYPH.ellipsis}/`) ? STATUS_RANK.cwdElide : STATUS_RANK.cwdShort,
+		})),
+		drop: STATUS_RANK.cwd,
+	});
+	// Until the first probe lands the branch is unknown, not absent: say nothing. A detached HEAD is still a repository:
+	// name the commit rather than claim there is no branch. A sentence is whole or absent (`no Gi…ranch`).
 	const unnamed =
 		state.workspace.detachedAt !== undefined ? `detached at ${state.workspace.detachedAt}` : "no Git branch";
-	const named = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? unnamed);
-	const dirtyMarker = state.workspace.dirty ? theme.fg("warning", " *") : "  ";
-	const gitRoom = Math.max(4, Math.floor(workspaceWidth * 0.3));
-	// A branch name may lose its middle; the sentence that says there is none is whole or absent (`no Gi…ranch`).
-	const git = state.workspace.branch == null && visibleWidth(named) + visibleWidth(dirtyMarker) > gitRoom ? "" : named;
-	const gitWidth = git === "" ? 0 : Math.min(visibleWidth(git) + visibleWidth(dirtyMarker), gitRoom);
-	const cwdWidth = git === "" ? workspaceWidth : Math.max(1, workspaceWidth - gitWidth - 3);
-	const cwdLabel = theme.fg("workspacePath", fitPathLabel(clean(state.workspace.cwd), cwdWidth));
-	const workspace =
-		git === ""
-			? cwdLabel
-			: `${cwdLabel}${separator}${theme.fg("branch", fitIdentityLabel(git, Math.max(1, gitWidth - visibleWidth(dirtyMarker))))}${dirtyMarker}`;
-	const statsGap = " ".repeat(Math.max(0, valueWidth - visibleWidth(values)));
-	const firstRow = fit(
-		modeLead +
-			(valueWidth === 0
-				? fit(workspace, workspaceWidth)
-				: `${fit(workspace, workspaceWidth)}   ${statsGap}${fit(values, valueWidth - statsGap.length)}`),
+	const branch = state.workspace.branchPending ? "" : clean(state.workspace.branch ?? unnamed);
+	if (branch !== "") {
+		// The dirty mark belongs to a named branch or commit, never to the sentence that says there is none.
+		const dirty =
+			state.workspace.dirty === true && (state.workspace.branch != null || state.workspace.detachedAt !== undefined);
+		left.push({
+			text: `${branch}${dirty ? "*" : ""}`,
+			paint: (text) =>
+				dirty ? `${theme.fg("branch", text.slice(0, -1))}${theme.fg("warning", "*")}` : theme.fg("branch", text),
+			drop: STATUS_RANK.branch,
+		});
+	}
+
+	const right: SideUnit[] = [...aux];
+	const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+	if (counts.workers > 0)
+		right.push({
+			text: count(counts.workers, "worker", "workers"),
+			paint: (text) => theme.fg("activity", text),
+			drop: STATUS_RANK.workers,
+		});
+	if (counts.plans > 0)
+		right.push({
+			text: count(counts.plans, "plan", "plans"),
+			paint: (text) => theme.fg("activity", text),
+			drop: STATUS_RANK.workers,
+		});
+	if (routeFacts && counts.queued > 0)
+		right.push({
+			text: `${counts.queued} queued`,
+			paint: (text) => theme.fg("annotation", text),
+			drop: STATUS_RANK.queued,
+		});
+	const spend = state.telemetry;
+	// The owner's display string, and only for an amount the session contributed: an unpriced route shows no unit.
+	if (routeFacts && spend.kind === "ready" && spend.cost !== null && spend.cost !== COST_NOT_MEASURED)
+		right.push({ text: clean(spend.cost), paint: (text) => theme.fg("counter", text), drop: STATUS_RANK.cost });
+	const model = state.session.modelId ? clean(state.session.modelId) : null;
+	if (routeFacts && model !== null && state.session.targetId)
+		right.push({
+			text: clean(state.session.targetId),
+			paint: (text) => theme.fg("footerIdentity", text),
+			drop: STATUS_RANK.target,
+		});
+	const identity = model ?? clean(state.session.target ?? "not configured");
+	const leaf = identity.slice(identity.lastIndexOf("/") + 1);
+	// The id's form is chosen against what never drops (the mark and a non-default autonomy): it loses its `provider/`
+	// prefix, then its middle, only when those and the whole id do not fit, so a short row does not give up its
+	// workspace first and then shorten the id anyway.
+	const room = Math.max(MODEL_ID_MIN_CELLS, width - visibleWidth(GLYPH.brand) - autonomyFloor - 2);
+	const prefixFree = visibleWidth(identity) > room && model !== null && leaf.length > 0 ? leaf : identity;
+	const shown =
+		visibleWidth(prefixFree) <= room
+			? prefixFree
+			: fitSides(theme, [], [{ text: prefixFree, elide: { rank: 0, min: MODEL_ID_MIN_CELLS } }], room).trim();
+	right.push({
+		text: shown,
+		paint: (text) => theme.fg("activeModelIdentity", text),
+		elide: { rank: STATUS_RANK.modelElide, min: MODEL_ID_MIN_CELLS },
+	});
+	return fitSides(theme, left, right, width);
+}
+
+/**
+ * The detailed tier's second status row, chips that drop whole from the right: the session's tokens, its cost or
+ * `cost not measured`, the last rate, the first-token time and the cache share.
+ */
+function footerSessionRow(
+	state: FooterDashboardRenderState,
+	theme: ClioTheme,
+	width: number,
+	rate: { speed: string | null; ttft: string | null },
+): string {
+	const spend = state.telemetry;
+	const value = (text: string): string => theme.fg("counter", text);
+	const label = (name: string, text: string): string => `${theme.fg("annotation", name)} ${value(text)}`;
+	// The row's one focal value is the session's measured tokens; every other figure is body text.
+	const tokens =
+		spend.kind === "unavailable"
+			? // Before the first turn the read model has no session view yet, which is no fault.
+				value(state.agent.lastTurn === null ? "no calls yet" : "spend not available")
+			: spend.kind === "reading"
+				? value("reading the call journal")
+				: spend.tokens === null
+					? value("no calls yet")
+					: spend.measuredTokens === null
+						? theme.fg("unknownValue", "usage not measured")
+						: metricText(theme, spend.measuredTokens, "tokens");
+	const cost =
+		spend.kind !== "ready" || spend.tokens === null
+			? null
+			: spend.cost === null || spend.cost === COST_NOT_MEASURED
+				? theme.fg("unknownValue", "cost not measured")
+				: value(clean(spend.cost));
+	return wholeChips(
+		theme,
+		[
+			`${theme.fg("annotation", "session")} ${tokens}`,
+			cost,
+			rate.speed === null ? null : value(rate.speed),
+			rate.ttft === null ? null : label("first token", rate.ttft),
+			spend.kind === "ready" ? (cacheShare(spend.promptCache) ?? null) : null,
+			spend.kind === "ready" && spend.neverSent ? theme.fg("warning", spend.neverSent) : null,
+		],
+		width,
 	);
+}
+
+type FooterAlertKind = "urgent" | "feedback" | "error" | "window" | "weekly" | "silence" | "warning" | "info";
+
+interface FooterAlert {
+	kind: FooterAlertKind;
+	text: string;
+	tone: ClioToken;
+	glyph: string | null;
+	/** The notice behind the alert, which the dismiss key clears; the other alerts end with their cause. */
+	notice: boolean;
+	/** The text continues past its first line, so the row names where the rest is. */
+	more: boolean;
+}
+
+function noticeAlert(notice: Notification, kind: FooterAlertKind): FooterAlert {
+	const [first = "", ...rest] = clean(notice.text).split("\n");
+	return {
+		kind,
+		text: first,
+		tone: notificationToken(notice.level),
+		glyph: notificationGlyph(notice.level),
+		notice: true,
+		more: rest.length > 0,
+	};
+}
+
+/** Newest first, the order a one-slot row reads a group in. */
+function newestFirst(notices: ReadonlyArray<Notification>): Notification[] {
+	return [...notices].sort((a, b) => b.addedAt - a.addedAt);
+}
+
+/**
+ * The notice row: the highest live alert at normal intensity with its glyph, then `+N <dashboard key>` for the rest
+ * and the dismiss key at the right while a notice is among them.
+ */
+function renderAlertRow(
+	theme: ClioTheme,
+	alert: FooterAlert,
+	others: number,
+	dismissable: boolean,
+	width: number,
+	dashboardKey: string,
+	dismissKeyLabel: string | undefined,
+): string {
+	const body = alert.glyph === null ? alert.text : `${alert.glyph} ${alert.text}`;
+	const cut = alert.more || visibleWidth(body) > width;
+	const dismiss =
+		dismissable && dismissKeyLabel && !dismissKeyLabel.startsWith("unbound")
+			? (dismissKeyLabel.split(` ${GLYPH.dot} `).at(-1) ?? "")
+			: "";
+	const more = others > 0 ? `+${others} ${dashboardKey}` : cut ? dashboardKey : "";
+	const keys = [more, dismiss].filter(Boolean).join(` ${GLYPH.sep} `);
+	const keyText = keys ? theme.fg("keyboardHint", keys) : "";
+	const painted = (cells: number): string => theme.fg(alert.tone, fitNoticeWords(body, cells));
+	// A narrow row keeps the alert itself; the keys ride along only while it keeps enough room to read.
+	if (!keyText || width - visibleWidth(keyText) - 2 < NOTICE_MIN_CELLS) return painted(width);
+	const room = width - visibleWidth(keyText) - 2;
+	const shown = painted(room);
+	return `${shown}${" ".repeat(Math.max(2, width - visibleWidth(shown) - visibleWidth(keyText)))}${keyText}`;
+}
+
+/**
+ * The footer (4.2): the status line; at detailed the session row; the notice row while an alert is live; at standard
+ * and up the hint row. Its height is fixed per tier so the composer does not move: 1, 2 or 3 rows, and a notice adds
+ * one. A W1 width, an H1 terminal and a surface that owns the keys reduce every tier to the status line, plus the
+ * notice row only for an armed quit or an error.
+ */
+export function renderCompactDashboard(
+	state: FooterDashboardRenderState,
+	width: number,
+	terminalRows = Number.POSITIVE_INFINITY,
+): string[] {
+	const theme = clioTheme();
+	const w = Math.max(1, width);
+	const policy = tierPolicy(state.outputStyle ?? presentationTier());
+	// The tiers that keep a hint row are the ones that name the route, the session cost and the full path (3.2).
+	const routeFacts = policy.hintRow;
+	const keyContext = state.keyContext ?? "send";
+	const surfaceOwnsKeys = keyContext === "surface";
+	// The keys that answer this moment, which a tip must not cover.
+	const immediateKeys = keyContext !== "surface" && keyContext !== "idle" && keyContext !== "send";
+	const reduced = w < FOOTER_W1_CELLS || terminalRows < FOOTER_H1_ROWS || surfaceOwnsKeys;
+	const narrow = w <= FOOTER_NARROW_CELLS;
+	const now = state.now;
+
+	const liveWorkers = workerRowsOf(state.dispatchRows).filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
+	const queued = liveWorkers.filter((row) => row.status === "enqueued").length;
+	const counts: FooterCounts = {
+		workers: liveWorkers.length - queued,
+		queued,
+		plans: state.dispatchRows.filter((row) => row.plan !== undefined && row.status === "running").length,
+	};
+	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
+	// Idle and off say nothing: memory is named only while it works or cannot. The rail names a memory call from its
+	// first moment, and memory yields the model to the turn on purpose, so its wait is no fault (N9).
+	const guardian = state.session.memoryIntervention?.guardian;
+	const memoryOnRail = (state.background ?? []).some((call) => call.purpose === "memory review");
+	const window = state.session.autonomy === "yolo" ? (state.session.autonomyWindow ?? null) : null;
+	const windowReadout =
+		window === null ? null : autonomyWindowReadout(window, { narrow, dot: GLYPH.dot, resumeHint: "Enter continues" });
+	const windowLeftMs =
+		window !== null && window.caps.minutes > 0 ? window.caps.minutes * 60_000 - window.usage.activeMs : null;
+	const windowEnding =
+		windowReadout !== null &&
+		(windowReadout.tone === "warning" || (windowLeftMs !== null && windowLeftMs < WINDOW_ENDING_MS));
+	const nearest =
+		window === null ? null : autonomyWindowReadout(window, { narrow: true, dot: GLYPH.dot, resumeHint: "" });
+	const skills = state.session.activeSkills ?? [];
+	const styled = (text: string): SideUnit => ({ text, drop: STATUS_RANK.aux });
+	// Facts the row carries beside its own while they fit: an alert of the same kind has the notice row instead.
+	const aux: SideUnit[] = [
+		...(routeFacts && state.session.name
+			? [
+					{
+						text: clean(state.session.name),
+						paint: (text: string) => theme.fg("footerIdentity", text),
+						drop: STATUS_RANK.aux,
+					},
+				]
+			: []),
+		...(guardian === "reviewing" && !memoryOnRail ? [styled(theme.fg("activity", "memory reviewing"))] : []),
+		...(guardian === "unavailable" ? [styled(theme.fg("unknownValue", "memory review paused"))] : []),
+		...(skills.length
+			? [
+					styled(
+						`${theme.fg("skillAction", "skill ")}${theme.fg("counter", fitNames("", skills.map(clean), Math.max(8, Math.floor(w / 3))))}`,
+					),
+				]
+			: []),
+		...(routeFacts && windowReadout !== null && !windowEnding
+			? [
+					{
+						text: windowReadout.text,
+						paint: (text: string) => theme.fg("counter", text),
+						...(nearest !== null && nearest.text !== windowReadout.text
+							? { shorter: [{ text: nearest.text, rank: STATUS_RANK.auxShort }] }
+							: {}),
+						drop: STATUS_RANK.windowDrop,
+					},
+				]
+			: []),
+		...(weekly && weekly.severity !== "critical" && (routeFacts || weekly.severity !== "normal")
+			? [styled(theme.fg(weekly.severity === "normal" ? "counter" : "warning", weekly.label))]
+			: []),
+		...(state.extensionFacts ?? []).map(styled),
+	];
+	const rows = [footerStatusLine(state, theme, w, routeFacts, counts, aux)];
+
+	const rate = footerRate(state);
+	if (policy.statusRows >= 2 && !reduced) rows.push(footerSessionRow(state, theme, w, rate));
 
 	const feedback = topNotification(
 		state.notices.filter((notice) => notice.presentation === "setting"),
-		state.now,
+		now,
 	);
-	const keyContext = state.keyContext ?? "send";
-	const surfaceOwnsKeys = keyContext === "surface";
-	// The keys that answer this moment, which a tip must not cover and a notice may.
-	const immediateKeys = keyContext !== "surface" && keyContext !== "idle" && keyContext !== "send";
-	// A tip is teaching for the idle composer. Under a card or an overlay, or while
-	// a run holds the keys, the slot stays with what applies; a real notice still shows.
-	const liveNotices = state.notices.filter(
+	const hintRow = policy.hintRow && !reduced;
+	const live = state.notices.filter(
 		(entry) =>
-			entry.presentation !== "setting" && !((surfaceOwnsKeys || immediateKeys) && entry.text.startsWith("tip: ")),
+			entry.presentation !== "setting" &&
+			(entry.expiresAt === null || entry.expiresAt > now) &&
+			// A tip teaches the idle composer; under a card, or while a run holds the keys, the row keeps what applies.
+			!((surfaceOwnsKeys || immediateKeys) && entry.text.startsWith("tip: ")),
 	);
-	const notice = topNotification(liveNotices, state.now);
-	const otherNotices = notice
-		? liveNotices.filter((entry) => entry !== notice && (entry.expiresAt === null || entry.expiresAt > state.now)).length
-		: 0;
-	const key = actionKeyLabel("clio-coder.status.toggle") ?? "Dashboard";
 	const leaderKey = formatKeyLabel(getKeybindings().getKeys("clio-coder.leader")[0], "");
 	const urgent = state.session.shutdownArmed
 		? typeof state.session.shutdownArmed === "string"
 			? state.session.shutdownArmed
 			: "Ctrl+C again to quit"
-		: // The leader also opens the action menu, whose own rail lists the keys: a second legend under it said `choose key`
-			// for a choice already on screen.
+		: // The leader also opens the action menu, whose own rail lists the keys: a second legend under it said
+			// `choose key` for a choice already on screen.
 			state.session.leaderArmed && !surfaceOwnsKeys
 			? leaderKey
 				? `${leaderKey} ${GLYPH.next} choose key`
 				: "Choose key"
 			: null;
-	const liveWorkers = workerRowsOf(state.dispatchRows).filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
-	const queuedWorkers = liveWorkers.filter((row) => row.status === "enqueued").length;
-	const workers = liveWorkers.length - queuedWorkers;
-	const plans = state.dispatchRows.filter((row) => row.plan !== undefined && row.status === "running").length;
-	const skills = state.session.activeSkills ?? [];
-	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
-	// Idle and off say nothing: the line names memory only while it works or cannot.
-	const guardian = state.session.memoryIntervention?.guardian;
-	// The rail names a memory call from its first moment, with route and elapsed.
-	const memoryOnRail = (state.background ?? []).some((call) => call.purpose === "memory review");
-	const memoryFact =
-		guardian === "reviewing"
-			? memoryOnRail
-				? ""
-				: theme.fg("activity", "memory reviewing")
-			: // Memory yields the model to the turn on purpose and nothing waits on it, so its wait says nothing: `memory waits`
-				// beside a retry read as a second fault (N9), and in the hint row as a cryptic third party.
-				guardian === "unavailable"
-				? theme.fg("unknownValue", "memory review paused")
-				: "";
-	const facts = [
-		autonomy === "yolo" && state.session.autonomyWindow
-			? autonomyWindowFact(theme, state.session.autonomyWindow, narrow)
-			: "",
-		!minimal && state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
-		!minimal && state.session.duckBadge ? theme.fg("counter", "🦆") : "",
-		workers ? theme.fg("activity", `${workers} ${workers === 1 ? "worker" : "workers"}`) : "",
-		queuedWorkers ? theme.fg("annotation", `${queuedWorkers} queued`) : "",
-		plans ? theme.fg("activity", `${plans} ${plans === 1 ? "plan" : "plans"}`) : "",
-		memoryFact,
-		skills.length
-			? `${theme.fg("skillAction", "skill ")}${theme.fg("counter", fitNames("", skills.map(clean), Math.max(8, Math.floor(w / 3))))}`
-			: "",
-		weekly && (!minimal || weekly.severity === "critical")
-			? theme.fg(
-					weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "counter" : "warning",
-					weekly.label,
-				)
-			: "",
-		...(state.extensionFacts ?? []),
-		...(style === "detailed"
-			? [
-					theme.fg("annotation", outputStyleLabel(style)),
-					...(state.telemetry.kind === "ready" ? sessionSpendChips(state.telemetry) : []),
-				]
-			: []),
-	]
-		.filter(Boolean)
-		.join(separator);
-	const tail = facts;
 	const silence = state.silenceNotes ?? null;
-	const silenceNote = silence?.find((form) => visibleWidth(form) <= w) ?? silence?.at(-1) ?? null;
-	// A narrow footer drops its idle hint row, but never the silence note that row exists to carry (HS16).
-	if (narrow && !immediateKeys && !urgent && !notice && !feedback && !facts && silenceNote === null) return [firstRow];
-	const alone = urgent !== null || silenceNote !== null || !tail;
-	// A wide footer gives its facts half the row, so two extension statuses both fit beside the key hints.
-	const tailWidth = alone ? 0 : Math.min(Math.floor(w * (w >= 100 ? 0.5 : 0.4)), visibleWidth(tail));
-	const room = alone ? w : w - tailWidth - 3;
-	// The controls that answer this moment. A notice has its own row above them, so it never takes their place.
-	const controls = urgent
-		? theme.fg("warning", urgent)
-		: silenceNote !== null
-			? theme.fg("warning", silenceNote)
-			: feedback
-				? theme.fg("changedValue", clean(feedback.text))
-				: surfaceOwnsKeys
-					? ""
-					: learning && state.demoHint && !immediateKeys && !notice
-						? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
-						: theme.fg(
-								"keyboardHint",
-								state.welcomeVisible
-									? ""
-									: (footerKeyHint(state.now, narrow, room, keyContext, {
-											...state.keyHintFacts,
-											learning,
-										}) ?? ""),
-							);
-	const row = (text: string): string => (alone ? fit(text) : fit(`${fit(text, room)}   ${fit(tail, tailWidth)}`));
-	const hasControls = visibleWidth(controls) > 0;
-	if (!notice) return !hasControls && !tail ? [firstRow] : [firstRow, row(controls)];
-	// A narrow footer spends no row on hints it cannot fit, so there the notice keeps the shared row it always had;
-	// only a quit or leader prompt outranks it.
-	if (narrow)
-		return [
-			firstRow,
-			row(urgent ? controls : renderNoticeRow(theme, notice, otherNotices, room, key, state.dismissKeyLabel)),
-		];
-	const noticeRow = renderNoticeRow(theme, notice, otherNotices, w, key, state.dismissKeyLabel);
-	const hintRow = row(controls);
-	// With nothing else to say on the hint row, the notice keeps the one row it always had.
-	if (!hasControls && !tail) return [firstRow, noticeRow];
-	return [firstRow, noticeRow, hintRow];
-}
+	const silenceNote = silence?.find((form) => visibleWidth(form) + 2 <= w) ?? silence?.at(-1) ?? null;
+	const plain = (kind: FooterAlertKind, text: string, tone: ClioToken, glyph: string | null): FooterAlert => ({
+		kind,
+		text,
+		tone,
+		glyph,
+		notice: false,
+		more: false,
+	});
+	// Precedence, highest first (4.2): what the operator just asked for, an error, the alerts that state a standing
+	// limit, then warnings, then information above the tier's floor.
+	const alerts: FooterAlert[] = [
+		...(urgent === null ? [] : [plain("urgent", urgent, "warning", null)]),
+		// Setting feedback acknowledges a key the operator just pressed; with no hint row to carry it, it leads here.
+		...(feedback && !hintRow ? [plain("feedback", clean(feedback.text), "changedValue", null)] : []),
+		...newestFirst(live.filter((entry) => entry.level === "error")).map((entry) => noticeAlert(entry, "error")),
+		...(windowEnding && windowReadout ? [plain("window", windowReadout.text, "warning", GLYPH.warn)] : []),
+		...(weekly && weekly.severity === "critical" ? [plain("weekly", weekly.label, "error", GLYPH.warn)] : []),
+		...(silenceNote === null ? [] : [plain("silence", silenceNote, "warning", GLYPH.warn)]),
+		...newestFirst(live.filter((entry) => entry.level === "warning")).map((entry) => noticeAlert(entry, "warning")),
+		...(policy.noticeFloor === "info"
+			? newestFirst(live.filter((entry) => entry.level === "info" || entry.level === "success")).map((entry) =>
+					noticeAlert(entry, "info"),
+				)
+			: []),
+	];
+	const top = alerts[0];
+	const shownAlert = top === undefined ? null : !reduced || top.kind === "urgent" || top.kind === "error" ? top : null;
+	if (shownAlert !== null)
+		rows.push(
+			renderAlertRow(
+				theme,
+				shownAlert,
+				alerts.length - 1,
+				alerts.some((alert) => alert.notice),
+				w,
+				actionKeyLabel("clio-coder.status.toggle") ?? "Dashboard",
+				state.dismissKeyLabel,
+			),
+		);
+	if (!hintRow) return rows;
 
-/**
- * The top notice on its own row: severity glyph and text first, then how to read the rest and how to clear it.
- * One line flattens a multi-line notice and cuts the end, where a remediation command sits, so the row names the
- * key that opens the dashboard, whose notice panel wraps the full text.
- */
-function renderNoticeRow(
-	theme: ClioTheme,
-	notice: Notification,
-	otherNotices: number,
-	width: number,
-	dashboardKey: string,
-	dismissKeyLabel: string | undefined,
-): string {
-	const body = `${notificationGlyph(notice.level)} ${clean(notice.text)}`;
-	const message = theme.fg(notificationToken(notice.level), body);
-	const cut = otherNotices > 0 || notice.text.includes("\n") || visibleWidth(body) > width;
-	const dismiss =
-		dismissKeyLabel && !dismissKeyLabel.startsWith("unbound") ? `${dismissKeyLabel.split(" · ").at(-1)} dismiss` : "";
-	const more = cut ? `${dashboardKey} ${otherNotices > 0 ? `+${otherNotices} more` : "more"}` : "";
-	const actions = [more, dismiss].filter(Boolean).join(" · ");
-	const actionText = actions ? theme.fg("keyboardHint", ` ${actions}`) : "";
-	// A narrow row keeps the notice itself; the keys only ride along when the notice keeps enough room to read.
-	const fitted = (cells: number): string => theme.fg(notificationToken(notice.level), fitNoticeWords(body, cells));
-	if (!actionText || width - visibleWidth(actionText) < 24) return fitted(width);
-	const room = width - visibleWidth(actionText);
-	const shown = visibleWidth(body) <= room ? message : fitted(room);
-	const gap = " ".repeat(Math.max(0, room - visibleWidth(shown)));
-	return `${shown}${gap}${actionText}`;
+	const learning = policy.tips && state.demo !== false;
+	const controls = feedback
+		? theme.fg("changedValue", fitNoticeWords(clean(feedback.text), w))
+		: learning && state.demoHint && !immediateKeys && shownAlert === null
+			? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", fitNoticeWords(clean(state.demoHint), Math.max(1, w - 4)))}`
+			: state.welcomeVisible
+				? ""
+				: theme.fg("keyboardHint", footerKeyHint(now, narrow, w, keyContext, { ...state.keyHintFacts, learning }) ?? "");
+	rows.push(controls);
+	return rows;
 }
 
 /**

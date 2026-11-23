@@ -66,7 +66,7 @@ export function dispatchSegment(rows: ReadonlyArray<DispatchBoardRow> | null | u
 			if (counts.failed > 0) parts.push(`${counts.failed} failed`);
 			return `${group.label} ${parts.length > 0 ? parts.join(" ") : `${group.rows.length} runs`}`;
 		})
-		.join(" · ");
+		.join(` ${GLYPH.sep} `);
 }
 
 export interface FooterPanel {
@@ -93,7 +93,7 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 				: delivery === "running" || delivery === "pending"
 					? `${job.delivery?.kind === "main_turn" ? "analysis" : "notice"} ${delivery === "running" ? "running" : "waiting"}`
 					: job.state === "paused"
-						? `paused${running ? " · running" : ""}`
+						? `paused${running ? ` ${GLYPH.sep} running` : ""}`
 						: pollFailure !== null
 							? "failing"
 							: running
@@ -112,7 +112,7 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 	let text = `Loop ${state}`;
 	const append = (detail: string): boolean => {
 		if (visibleWidth(text) + 3 + visibleWidth(detail) > width) return false;
-		text += ` · ${detail}`;
+		text += ` ${GLYPH.sep} ${detail}`;
 		return true;
 	};
 	const counter = job.spec.count === null ? `${job.settled} settled` : `${job.settled}/${job.spec.count}`;
@@ -121,7 +121,7 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 		const filled = Math.min(6, Math.max(0, Math.floor((1 - (dueAt - now) / job.spec.intervalMs) * 6)));
 		const meter =
 			theme.fg("composerRail", GLYPH.meterFull.repeat(filled)) + theme.fg("border", GLYPH.meterEmpty.repeat(6 - filled));
-		if (!append(`${meter} · ${counter}`)) append(counter);
+		if (!append(`${meter} ${GLYPH.sep} ${counter}`)) append(counter);
 	} else append(counter);
 	if (pollFailure !== null) {
 		const last = `last poll ${pollFailure.exitCode === null ? "failed" : `exit ${pollFailure.exitCode}`}`;
@@ -129,5 +129,5 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 	}
 	if (jobs.length > 1) append(`+${jobs.length - 1} loops`);
 	if (dueAt !== null) append(dueAt <= now ? "due now" : `in ${formatElapsed(dueAt - now)}`);
-	return theme.base(tone, fitFooterText(text, width, "…"));
+	return theme.base(tone, fitFooterText(text, width, GLYPH.ellipsis));
 }

@@ -83,11 +83,11 @@ test("the session summary counts what Clio answered while the operator was away 
 	} as unknown as ChatLoopEvent);
 	const snapshot = collector.snapshot();
 	deepStrictEqual(snapshot?.unattended, { questions: 2, permissions: 1 });
-	for (const style of ["brief", "standard"] as const) {
+	for (const tier of ["compact", "standard"] as const) {
 		match(
-			renderExitSummary(snapshot, style, 120, false).join("\n"),
-			/Unattended: 2 questions auto-resolved · 1 permission ask timed out and denied/u,
-			style,
+			renderExitSummary(snapshot, "on", 120, false, tier).join("\n"),
+			/^ {2}autonomy +2 questions auto-resolved · 1 permission ask timed out and denied$/mu,
+			tier,
 		);
 	}
 	ok(snapshot);
@@ -98,13 +98,13 @@ test("the session summary counts what Clio answered while the operator was away 
 		const view = telemetryViewOf("session-1", calls);
 		const spend = exitSpend(view, "1970-01-01T00:00:00.000Z");
 		ok(spend.kind === "ready");
-		for (const style of ["brief", "standard", "report"] as const) {
-			const text = renderExitSummary({ ...snapshot, spend }, style, 120, false).join("\n");
-			ok(text.includes(view.session().totals.usd.display), `${style}: ${view.session().totals.usd.display}`);
+		for (const tier of ["compact", "standard", "detailed"] as const) {
+			const text = renderExitSummary({ ...snapshot, spend }, "on", 120, false, tier).join("\n");
+			ok(text.includes(view.session().totals.usd.display), `${tier}: ${view.session().totals.usd.display}`);
 		}
 	}
 	match(
-		renderExitSummary({ ...snapshot, spend: { kind: "unavailable" } }, "brief", 120, false).join("\n"),
+		renderExitSummary({ ...snapshot, spend: { kind: "unavailable" } }, "on", 120, false, "compact").join("\n"),
 		/not available/u,
 	);
 	// The share divides the whole session's spend, so one worker's outcome never reads as that worker's tokens (bt-11 #3).
@@ -112,22 +112,22 @@ test("the session summary counts what Clio answered while the operator was away 
 	ok(ready.kind === "ready");
 	const verified = { kind: "counted" as const, count: "1", parts: [], tokens: "172,879", cost: "~$0.05 est" };
 	match(
-		renderExitSummary({ ...snapshot, spend: { ...ready, verified } }, "standard", 160, false).join("\n"),
-		/^Session verified: 1 outcome · 172,879 session tokens per outcome · ~\$0\.05 est per outcome$/mu,
+		renderExitSummary({ ...snapshot, spend: { ...ready, verified } }, "on", 160, false, "standard").join("\n"),
+		/^ {2}verified +1 outcome · 172,879 session tokens per outcome · ~\$0\.05 est per outcome$/mu,
 	);
-	// Every spend row names the session scope, so none reads as this visit's beside the visit's own counts (drv-tui11).
-	for (const style of ["brief", "standard", "report"] as const) {
-		const rows = renderExitSummary({ ...snapshot, spend: { ...ready, verified } }, style, 160, false);
-		ok(!rows.some((row) => /^Verified:/u.test(row)), style);
+	// The card is titled by its session, so no spend row reads as this visit's beside the visit's own counts (drv-tui11).
+	for (const tier of ["compact", "standard", "detailed"] as const) {
+		const rows = renderExitSummary({ ...snapshot, spend: { ...ready, verified } }, "on", 160, false, tier);
+		match(rows[0] ?? "", /^CLIO Coder · session session-1 · /u, tier);
 		ok(
-			rows.some((row) => /^Session verified: 1 outcome/u.test(row)),
-			style,
+			rows.some((row) => (tier === "compact" ? /1 verified outcome/u : /^ {2}verified +1 outcome/u).test(row)),
+			tier,
 		);
 	}
 	collector.dispose();
 });
 
-test("a wrapped fact's continuation rows use the box's inner width less the hanging indent once (CLI-P57)", () => {
+test("a wrapped fact's continuation rows hang under the value column and rewrap at the row's width (CLI-P57)", () => {
 	const ready = exitSpend(telemetryViewOf("session-1", []), "1970-01-01T00:00:00.000Z");
 	ok(ready.kind === "ready" && ready.verified.kind === "none");
 	const snapshot = createExitSummaryCollector({
@@ -143,14 +143,14 @@ test("a wrapped fact's continuation rows use the box's inner width less the hang
 		getModel: () => null,
 	}).snapshot();
 	ok(snapshot);
-	const rows = renderExitSummary({ ...snapshot, spend: ready }, "brief", 40, true).map((row) =>
-		stripTerminalSequences(row).replace(/^\S\s/u, "").replace(/\s\S$/u, "").trimEnd(),
+	const rows = renderExitSummary({ ...snapshot, spend: ready }, "on", 48, true, "detailed").map((row) =>
+		stripTerminalSequences(row).trimEnd(),
 	);
-	const at = rows.findIndex((row) => row.startsWith("Session verified:"));
+	const at = rows.findIndex((row) => row.startsWith("  verified"));
 	deepStrictEqual(rows.slice(at, at + 3), [
-		"Session verified: no judged outcome",
-		"  this session; command checks such",
-		"  as unit tests are not counted",
+		"  verified  no judged outcome this session",
+		"            command checks such as unit tests",
+		"            are not counted",
 	]);
 });
 
@@ -169,16 +169,16 @@ test("the activity row names its visit scope and a worker whose writes went unre
 		bus.emit("run.started", { runId, agentId: "coder", targetId: "local", wireModelId: "m" } as never);
 		bus.emit("run.completed", { runId, agentId: "coder", outcome: "completed" } as never);
 	}
-	match(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /^Workers: 2 completed$/mu);
+	match(
+		renderExitSummary(collector.snapshot(), "on", 160, false, "standard").join("\n"),
+		/^ {2}workers +2 completed$/mu,
+	);
 	// run-b's receipt names its checkout changes, so only run-a stays unrecorded. Its refused call reaches the
 	// Workers row in the collected block's words (bt-11 s).
 	collector.observeRunResult("run-b", { changedPaths: [], refusedCalls: 1 } as never);
-	const text = renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n");
-	match(
-		text,
-		/^This visit, workers included: 0 turns · 0 files changed \(1 worker kept no write record\) · 2 workers$/mu,
-	);
-	match(text, /^Workers: 2 completed · 1 call refused$/mu);
+	const text = renderExitSummary(collector.snapshot(), "on", 160, false, "standard").join("\n");
+	match(text, /^ {2}work +0 turns · 2 workers · 0 files changed \(1 worker kept no write record\)$/mu);
+	match(text, /^ {2}workers +2 completed · 1 call refused$/mu);
 	collector.dispose();
 });
 
@@ -206,8 +206,8 @@ test("the exit card reads a settled worker's receipt that no card handed over, a
 	}
 	receipts["run-b"] = { changedPaths: [] };
 	match(
-		renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"),
-		/^This visit, workers included: 0 turns · 1 file changed · 2 workers$/mu,
+		renderExitSummary(collector.snapshot(), "on", 160, false, "standard").join("\n"),
+		/^ {2}work +0 turns · 2 workers · 1 file changed$/mu,
 	);
 	collector.snapshot();
 	deepStrictEqual(reads, ["run-a", "run-b"]);
@@ -250,16 +250,13 @@ test("a /resume mid-visit keeps the visit's turns, files and workers on the exit
 	footerTools.set("bash", 1);
 	const snapshot = collector.snapshot();
 	strictEqual(snapshot?.sessionId, "session-2");
-	const card = renderExitSummary(snapshot, "standard", 160, false).join("\n");
-	match(
-		card,
-		/^This visit, workers included: 4 turns \(1 in this session\) · 2 files changed · 1 worker · 2 sessions$/mu,
-	);
+	const card = renderExitSummary(snapshot, "on", 160, false, "standard").join("\n");
+	match(card, /^ {2}work +4 turns \(1 in this session\) · 1 worker · 2 files changed · 2 sessions$/mu);
 	// Tools are the named session's own calls, its workers' included, so the parked one's `bash 2` and the `read 4` of
 	// the worker it dispatched stay out (bt-11 h, TUI-9) and are counted as the other session's; a tool no call ran is
 	// no `verify 0` row.
-	match(card, /^Tools: bash 1 · 6 calls in other sessions this visit$/mu);
-	// Resumed back, a session keeps the calls it made before it was parked, and its worker's.
+	match(card, /^ {2}tools +bash 1 · 6 calls in other sessions this visit$/mu);
+	// Resumed back, a session keeps the calls it made before it was parked, and its worker's; kinds sort by count.
 	bus.emit("session.parked", { sessionId: "session-2", reason: "resume_other", at: 0 });
 	current = { id: "session-1", hasModelTurn: true };
 	bus.emit("session.reattached", { sessionId: "session-1", via: "resume" } as never);
@@ -267,8 +264,8 @@ test("a /resume mid-visit keeps the visit's turns, files and workers on the exit
 	collector.sessionChanged();
 	footerTools.set("bash", 1);
 	match(
-		renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"),
-		/^Tools: bash 3 · read 4 · 1 call in other sessions this visit$/mu,
+		renderExitSummary(collector.snapshot(), "on", 160, false, "standard").join("\n"),
+		/^ {2}tools +read 4 · bash 3 · 1 call in other sessions this visit$/mu,
 	);
 	// After /new the fresh session has run nothing, so the row says so rather than vanishing (bt-48-7).
 	bus.emit("session.parked", { sessionId: "session-1", reason: "create_new", at: 0 });
@@ -277,12 +274,9 @@ test("a /resume mid-visit keeps the visit's turns, files and workers on the exit
 	footerTools.clear();
 	collector.sessionChanged();
 	turns = 1;
-	const fresh = renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n");
-	match(
-		fresh,
-		/^This visit, workers included: 5 turns \(1 in this session\) · 2 files changed · 1 worker · 3 sessions$/mu,
-	);
-	match(fresh, /^Tools: none in this session · 8 calls in other sessions this visit$/mu);
+	const fresh = renderExitSummary(collector.snapshot(), "on", 160, false, "standard").join("\n");
+	match(fresh, /^ {2}work +5 turns \(1 in this session\) · 1 worker · 2 files changed · 3 sessions$/mu);
+	match(fresh, /^ {2}tools +none in this session · 8 calls in other sessions this visit$/mu);
 	collector.dispose();
 });
 
@@ -318,10 +312,13 @@ test("a fork's exit card counts only the compactions the fork ran, not its paren
 	current = { id: "fork", hasModelTurn: true };
 	collector.sessionChanged();
 	strictEqual(collector.snapshot()?.compactions, 0);
-	doesNotMatch(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /Compactions/u);
+	doesNotMatch(renderExitSummary(collector.snapshot(), "on", 160, false, "standard").join("\n"), /compaction/u);
 	// An event that names no session counts for the current one.
 	bus.emit("context.fold", pruned);
-	match(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /^Compactions: 1$/mu);
+	match(
+		renderExitSummary(collector.snapshot(), "on", 160, false, "standard").join("\n"),
+		/^ {2}work +.* · 1 compaction$/mu,
+	);
 	collector.dispose();
 });
 
@@ -345,8 +342,8 @@ test("the session report states the cached share of the prompt, for the session 
 	const base = collector.snapshot();
 	ok(base);
 	const snapshot = { ...base, spend: exitSpend(view, "1970-01-01T00:00:00.000Z") };
-	const card = (style: "standard" | "report") => renderExitSummary(snapshot, style, 120, false).join("\n");
-	match(card("report"), /^Cache: 45\.0% of prompt tokens read from cache · last turn 90\.0%$/mu);
+	const card = (tier: "standard" | "detailed") => renderExitSummary(snapshot, "on", 120, false, tier).join("\n");
+	match(card("detailed"), /^ {2}cache +45\.0% of prompt tokens read from cache · last turn 90\.0%$/mu);
 	strictEqual(card("standard").includes("read from cache"), false);
 	// `in` is the uncached input as /usage and the turn receipt say it, the cache read beside it, not the 2,000 prompt (bt-11).
 	ok(snapshot.spend.kind === "ready");
@@ -390,8 +387,8 @@ test("the session report names where a resumed transcript's replay broke the cac
 	ok(base);
 	const snapshot = { ...base, spend: exitSpend(view, "1970-01-01T00:00:00.000Z") };
 	match(
-		renderExitSummary(snapshot, "report", 160, false).join("\n"),
-		/^Cache: .* · resumed transcript differed at message\[1\]:assistant \(1 break, up to 9,000 re-prefilled\)$/mu,
+		renderExitSummary(snapshot, "on", 160, false, "detailed").join("\n"),
+		/^ {2}cache +.* · resumed transcript differed at message\[1\]:assistant \(1 break, up to 9,000 re-prefilled\)$/mu,
 	);
 	collector.dispose();
 });

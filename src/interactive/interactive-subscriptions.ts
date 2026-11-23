@@ -108,11 +108,15 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	/** Runs a council started; a terminal event may not repeat the council badge its start carried. */
 	const councilRuns = new Set<string>();
 	const heldRunFailures = new Map<string, ReturnType<typeof setTimeout>>();
+	/** Runs whose block the stream placed in the transcript; their card states working and finished itself. */
+	const cardedRuns = new Set<string>();
 	const helperNotice = (
 		payload: DispatchRunIdentity & { assignmentId?: string; attempt?: number; lineage?: { attempt: number } },
 		status: "working" | "completed" | "failed",
 	): void => {
 		if (isContextOperationRun(payload, deps.agentTraits)) return;
+		const carded = deps.applyWorkerState !== undefined && cardedRuns.has(payload.runId);
+		if (status !== "working") cardedRuns.delete(payload.runId);
 		const attempt = payload.lineage?.attempt ?? payload.attempt ?? 0;
 		// A council member answers the operator's own /council question, so it is never a background helper even though
 		// Clio dispatched it on the operator's behalf.
@@ -140,6 +144,13 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			councilRuns.delete(payload.runId);
 		}
 		if (!helper) return;
+		// An info notice that restates the helper's own card says nothing new: the card is the transcript's live tail
+		// while it works and states the outcome when it settles. A failure still warns, and the card's next attempt
+		// retires the warning its last one raised.
+		if (carded && status !== "failed") {
+			deps.dismissNotice?.(`helper:${assignment}`);
+			return;
+		}
 		const name = sanitizeCallTargetText(payload.agentId)
 			.slice(0, 80)
 			.replace(/^./, (letter) => letter.toUpperCase());
@@ -247,9 +258,13 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		// Every attempt writes its own session entry: a failover is history, and
 		// the attempt trail a resumed block shows is that history read back.
 		deps.bus.subscribe("run.started", (payload) => {
+			// The block is placed first, so the helper notice knows whether a card already says the helper is working.
+			folded(workers.started, (change) => {
+				cardedRuns.add(payload.runId);
+				deps.recordWorkerRun?.(workerRunEntryFields(change.entry));
+			})(payload);
 			helperNotice(payload, "working");
 			routeMoveNotice(payload);
-			folded(workers.started, (change) => deps.recordWorkerRun?.(workerRunEntryFields(change.entry)))(payload);
 		}),
 		deps.bus.subscribe("run.progressed", (payload) => {
 			const workerEvent = payload.event as { type?: unknown } | null | undefined;
@@ -316,6 +331,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			for (const held of heldRunFailures.values()) clearTimeout(held);
 			heldRunFailures.clear();
 			pendingWorkers.clear();
+			cardedRuns.clear();
 		},
 	};
 }

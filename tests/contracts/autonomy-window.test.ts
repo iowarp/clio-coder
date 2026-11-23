@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -422,10 +422,15 @@ test("the exit summary closes a yolo session with its window, its halt and the d
 		getModel: () => null,
 		autonomy: () => fx.window.report(),
 	});
-	const brief = renderExitSummary(collector.snapshot(), "brief", 200, false).join("\n");
-	match(brief, /Autonomy: contained yolo · 3 tool calls, .* tokens · paused at the 3-call cap · 1 open decision$/mu);
-	const standard = renderExitSummary(collector.snapshot(), "standard", 200, false).join("\n");
-	match(standard, /Autonomy: .*1 open decision · 1\) bash `git push origin main` \(operator-only, rule git-push\)/u);
+	const compact = renderExitSummary(collector.snapshot(), "on", 200, false, "compact").join("\n");
+	match(compact, /^ {2}autonomy +yolo for \S+ · 3 calls ran unasked · paused at the 3-call cap · 1 open decision$/mu);
+	const standard = renderExitSummary(collector.snapshot(), "on", 200, false, "standard").join("\n");
+	match(standard, /^ {2}autonomy +yolo .*1 open decision · contained · \S+ cap tokens$/mu);
+	const detailed = renderExitSummary(collector.snapshot(), "on", 200, false, "detailed").join("\n");
+	match(
+		detailed,
+		/^ {2}autonomy +.*1 open decision · .* · 1\) bash `git push origin main` \(operator-only, rule git-push\)/mu,
+	);
 	collector.dispose();
 });
 
@@ -534,8 +539,11 @@ test("a project may tighten any safety or fleet limit and switch review on, neve
 	strictEqual(tightened.review.enabled, true);
 });
 
-function footerAt(status: AutonomyStatus, width: number): string {
+function footerAt(status: AutonomyStatus, width: number, tier: "compact" | "standard" = "standard"): string {
 	const state = footerState();
+	state.outputStyle = tier;
+	state.session.targetId = "copilot";
+	state.session.modelId = "gpt-6-luna";
 	state.session.autonomy = "yolo";
 	state.session.yoloConfinement = "contained";
 	state.session.autonomyWindow = status;
@@ -549,16 +557,23 @@ test("the footer shows the window's caps, the nearest alone when narrow, and a p
 		halted: null,
 		osSandbox: true,
 	};
-	for (const width of [160, 100]) {
-		const text = footerAt(status, width);
-		match(text, /412\/600 calls · 38\/120 min · 1\.9M\/5M tok/u);
-		match(text, /YOLO · contained/u);
-		for (const line of text.split("\n")) ok(visibleWidth(line) <= width);
-	}
-	const narrow = footerAt(status, 50);
+	const text = footerAt(status, 160);
+	match(text, /412\/600 calls · 38\/120 min · 1\.9M\/5M tok/u);
+	match(text, /YOLO · contained/u);
+	for (const line of text.split("\n")) ok(visibleWidth(line) <= 160);
+	// A shorter status line keeps the nearest meter, then drops it before anything the row owns.
+	const narrow = footerAt(status, 100);
 	match(narrow, /412\/600 calls/u);
 	ok(!narrow.includes("min ·"));
-	for (const line of narrow.split("\n")) ok(visibleWidth(line) <= 50);
+	for (const line of narrow.split("\n")) ok(visibleWidth(line) <= 100);
+	const narrowest = footerAt(status, 50);
+	doesNotMatch(narrowest, /412\/600/u);
+	match(narrowest, /^>C_ YOLO/u);
+	for (const line of narrowest.split("\n")) ok(visibleWidth(line) <= 50);
+	// A window about to end is an alert: the notice row carries it at compact, with its glyph and its words.
+	const ending = footerAt({ ...status, usage: { ...status.usage, activeMs: 116 * 60_000 } }, 80, "compact").split("\n");
+	strictEqual(ending.length, 2);
+	match(ending[1] ?? "", /^! 412\/600 calls · 116\/120 min/u);
 
 	match(footerAt({ ...status, osSandbox: false }, 160), /YOLO · contained \(no OS sandbox\)/u);
 	const paused = footerAt(
@@ -570,6 +585,7 @@ test("the footer shows the window's caps, the nearest alone when narrow, and a p
 	// The per-turn tool budget leads beside an active window, and is the nearest meter when narrow (CLI-H1).
 	const turn = { ...status, turn: { toolCalls: 70, budget: 73 } };
 	match(footerAt(turn, 160), /turn 70\/73 · 412\/600 calls · 38\/120 min/u);
+	// At 70/73 the turn's budget is nearly spent, so the window is an alert on the notice row, narrow form when narrow.
 	match(footerAt(turn, 50), /turn 70\/73/u);
 	ok(!footerAt(turn, 50).includes("412/600"));
 	const off = footerAt({ ...turn, caps: { toolCalls: 0, minutes: 0, tokens: 0 } }, 160);

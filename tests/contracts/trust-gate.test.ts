@@ -454,9 +454,9 @@ test("config get, set and unset save one setting per scope, refuse bad input unw
 		strictEqual(before.status, 0, before.stderr);
 		strictEqual(config("--json", "trust", "safety").stdout, before.stdout);
 
-		strictEqual(config("set", "interface.exitSummary", "brief").status, 0);
+		strictEqual(config("set", "interface.exitSummary", "on").status, 0);
 		const got = JSON.parse(config("get", "interface.exitSummary", "--json").stdout) as Record<string, unknown>;
-		deepStrictEqual([got.version, got.value, got.source, got.file], [1, "brief", "user", settingsPath()]);
+		deepStrictEqual([got.version, got.value, got.source, got.file], [1, "on", "user", settingsPath()]);
 		const saved = readFileSync(settingsPath());
 		for (const refused of [
 			["interface.exitSummary", "bogus"],
@@ -479,9 +479,9 @@ test("config get, set and unset save one setting per scope, refuse bad input unw
 		const fallback = JSON.parse(config("get", "interface.exitSummary", "--json").stdout) as Record<string, unknown>;
 		strictEqual(fallback.source, "default");
 		// A value equal to the inherited one is still pinned in the scope it was set in.
-		strictEqual(config("set", "interface.exitSummary", "auto").status, 0);
+		strictEqual(config("set", "interface.exitSummary", "on").status, 0);
 		const pinned = JSON.parse(config("get", "interface.exitSummary", "--scope", "user", "--json").stdout);
-		deepStrictEqual([pinned.value, pinned.source], ["auto", "user"]);
+		deepStrictEqual([pinned.value, pinned.source], ["on", "user"]);
 		// A user file that fails validation is refused whole, so get names it instead of reading defaults (FX-47).
 		const valid = readFileSync(settingsPath(), "utf8");
 		writeFileSync(settingsPath(), `${valid}safety:\n  validationWrappers: [7]\n`);
@@ -498,23 +498,23 @@ test("config get, set and unset save one setting per scope, refuse bad input unw
 		writeFileSync(settingsPath(), valid);
 
 		writeFileSync(join(workspace, ".clio-coder", "settings.yaml"), "interface:\n  demo: true\n");
-		const untrusted = config("set", "interface.exitSummary", "brief", "--scope", "project");
+		const untrusted = config("set", "interface.exitSummary", "on", "--scope", "project");
 		strictEqual(untrusted.status, 1);
 		match(untrusted.stderr, /config trust settings/u);
 		strictEqual(existsSync(join(workspace, ".clio-coder", "settings.local.yaml")), false);
 		approve(workspace, "settings");
-		strictEqual(config("set", "interface.exitSummary", "report", "--scope", "project").status, 0);
+		strictEqual(config("set", "interface.exitSummary", "off", "--scope", "project").status, 0);
 		strictEqual(captureProjectSurface(workspace, "settings").verdict, "trusted");
-		strictEqual(readLayeredSettings(workspace).settings.interface.exitSummary, "report");
+		strictEqual(readLayeredSettings(workspace).settings.interface.exitSummary, "off");
 		strictEqual(config("unset", "interface.exitSummary", "--scope", "project").status, 0);
 		strictEqual(captureProjectSurface(workspace, "settings").verdict, "trusted");
 		strictEqual(config("get", "interface.exitSummary", "--scope", "project").status, 1);
-		strictEqual(config("set", "interface.exitSummary", "standard").status, 0);
-		strictEqual(config("set", "interface.exitSummary", "standard", "--scope", "project").status, 0);
+		strictEqual(config("set", "interface.exitSummary", "on").status, 0);
+		strictEqual(config("set", "interface.exitSummary", "on", "--scope", "project").status, 0);
 		const local = JSON.parse(config("get", "interface.exitSummary", "--scope", "project", "--json").stdout);
-		deepStrictEqual([local.value, local.source], ["standard", "project.local"]);
+		deepStrictEqual([local.value, local.source], ["on", "project.local"]);
 		strictEqual(config("set", "interface.exitSummary", "off").status, 0);
-		strictEqual(readLayeredSettings(workspace).settings.interface.exitSummary, "standard");
+		strictEqual(readLayeredSettings(workspace).settings.interface.exitSummary, "on");
 	} finally {
 		home.restore();
 	}

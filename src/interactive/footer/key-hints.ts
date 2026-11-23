@@ -46,24 +46,8 @@ export interface KeyHintFacts {
 	learned?: (feature: string) => boolean;
 }
 
-/** The one shortcut an empty idle composer always offers; the rest are learned one at a time beside it. */
-const IDLE_PINNED: keyof typeof CLIO_APP_KEYBINDINGS = "clio-coder.model.select";
-
-/**
- * Nonessential learning, in the order it is worth knowing. Deliberately a short
- * list and not the catalog: exit and suspend are not lessons, and optional panes
- * such as music and files belong to /help because the keys only work when the
- * pane layer and the integration are on.
- */
-function idleLearning(facts: KeyHintFacts): Array<keyof typeof CLIO_APP_KEYBINDINGS> {
-	return [
-		"clio-coder.library.toggle",
-		"clio-coder.status.toggle",
-		"clio-coder.output.cycle",
-		...(facts.thinkingCycles === false ? [] : (["clio-coder.thinking.cycle"] as const)),
-		"clio-coder.leader",
-	];
-}
+/** What an empty idle composer always offers: the key card, the command menu and the model picker (4.2). */
+const IDLE_MODEL: keyof typeof CLIO_APP_KEYBINDINGS = "clio-coder.model.select";
 
 /** The ways to reach or inspect a run, each offered only when it has something to act on. */
 function runLearning(context: ComposerKeyContext, facts: KeyHintFacts): Array<keyof typeof CLIO_APP_KEYBINDINGS> {
@@ -87,16 +71,17 @@ function firstKey(id: "tui.input.submit" | "tui.input.newLine" | "tui.select.can
 	return key === "escape" ? "Esc" : formatKeyLabel(key);
 }
 
+/** `Alt+M model`: the hint row names an action in the lower-case word the rest of the row speaks. */
 function catalogEntry(id: keyof typeof CLIO_APP_KEYBINDINGS): string | null {
 	const keys = boundKeys(id);
-	return keys ? `${keys} ${CLIO_APP_KEYBINDINGS[id].label}` : null;
+	return keys ? `${keys} ${CLIO_APP_KEYBINDINGS[id].label.toLowerCase()}` : null;
 }
 
 function catalogEntries(ids: ReadonlyArray<keyof typeof CLIO_APP_KEYBINDINGS>, facts: KeyHintFacts = {}): string[] {
 	return ids.flatMap((id) => {
 		if (id === "clio-coder.dispatchBoard.toggle" && facts.workersDock === false) {
 			const keys = boundKeys(id);
-			return keys ? [`${keys} Fleet runs`] : [];
+			return keys ? [`${keys} fleet`] : [];
 		}
 		return catalogEntry(id) ?? [];
 	});
@@ -119,16 +104,16 @@ function immediateEntries(context: ComposerKeyContext): string[] {
 	}
 	switch (context) {
 		case "idle":
-			return catalogEntries([IDLE_PINNED]);
+			return ["? keys", "/ commands", ...catalogEntries([IDLE_MODEL])];
 		case "recover":
 			// After a failed turn the two ways forward are the receipt's and the rail's, so the row states them too (N1).
-			return ["↑ recalls your prompt", ...catalogEntries([IDLE_PINNED])];
+			return [`${GLYPH.up} recalls your prompt`, ...catalogEntries([IDLE_MODEL])];
 		case "send":
 			return [...enter("sends"), ...(newline ? [`${newline} newline`] : [])];
 		case "send-shell":
 			return enter("runs this shell command");
 		case "steer":
-			return [...enter("steers"), ...esc("stops the run")];
+			return [...enter("steers at the next step"), ...esc("stops the run")];
 		case "steer-empty":
 			return ["Type to steer", ...esc("stops the run")];
 		case "hold":
@@ -151,25 +136,16 @@ function learningEntries(context: ComposerKeyContext, facts: KeyHintFacts): stri
 	if (facts.learning === false) return [];
 	const learned = facts.learned ?? (() => false);
 	const unlearned = (ids: ReadonlyArray<keyof typeof CLIO_APP_KEYBINDINGS>) => ids.filter((id) => !learned(`key:${id}`));
-	if (context === "idle") {
-		const newline = firstKey("tui.input.newLine");
-		return [
-			...(learned("?") ? [] : ["? Keys"]),
-			...(newline ? [`${newline} newline`] : []),
-			...catalogEntries(unlearned(idleLearning(facts))),
-		];
-	}
 	if (context === "steer" || context === "steer-empty")
 		return catalogEntries(unlearned(runLearning(context, facts)), facts);
 	return [];
 }
 
 /**
- * The hint row's policy. The keys that answer this moment are pinned and describe
- * what the composer holds now. While the composer is empty one learning hint may
- * sit beside them, changing only when its key is learned. A draft silences the learning, because
- * the operator is typing and the row is about their Enter. A key whose target does
- * not exist right now is never offered, and a hint wider than the row is never cut.
+ * The hint row's policy (4.2). It holds keys only, never counts or session facts. The keys that answer this moment are
+ * pinned and describe what the composer holds now; idle and empty that is `? keys · / commands · Alt+M model`. During
+ * a run with an empty composer one learning hint may sit beside them, changing only when its key is learned. A key
+ * whose target does not exist right now is never offered, and a hint wider than the row is never cut.
  */
 export function footerKeyHint(
 	_now: number,
@@ -179,8 +155,9 @@ export function footerKeyHint(
 	facts: KeyHintFacts = {},
 ): string | null {
 	if (context === "surface") return null;
-	// Sending is the composer's plain meaning, so with guidance off it needs no reminding. Everything else is a surprise worth stating.
-	if (facts.learning === false && (context === "idle" || context === "send")) return null;
+	// Sending is the composer's plain meaning, so with guidance off a draft needs no reminding. Everything else is a
+	// surprise worth stating, and idle keeps its three keys.
+	if (facts.learning === false && context === "send") return null;
 	const pinned = fitWhole(immediateEntries(context), width);
 	const lead = pinned.join(HINT_SEPARATOR);
 	const room = pinned.length > 0 ? width - visibleWidth(lead) - visibleWidth(HINT_SEPARATOR) : width;

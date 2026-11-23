@@ -389,6 +389,10 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		true: "compact automatically before a turn crosses the threshold",
 		false: "context is only compacted when you run /context compact",
 	},
+	"interface.exitSummary": {
+		on: "print the session summary on exit, sized by output detail",
+		off: "print only the command that resumes the session",
+	},
 	"chat.retry.enabled": {
 		true: "retry transient provider errors automatically",
 		false: "surface transient errors immediately without retrying",
@@ -528,7 +532,7 @@ export const OFF_MENU_HAND_ROWS: ReadonlySet<string> = new Set([
 
 const CHOICES: Record<string, readonly string[]> = {
 	"integrations.git.commitAuthor": ["auto", "human"],
-	"interface.exitSummary": ["auto", "brief", "standard", "report", "off"],
+	"interface.exitSummary": ["on", "off"],
 	"telemetry.mode": ["standard", "research"],
 	"report.offers": ["ask", "off"],
 	"prompts.profile": ["v1", "v2"],
@@ -692,7 +696,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"interface.exitSummary": [
 		"Session summary on exit",
-		"Auto follows output style: compact gives a brief summary, standard gives activity and usage, detailed gives a one-page report. Choose brief, standard or report to override; off shows only how to resume.",
+		"Print a summary of the session when CLIO Coder exits. Output detail sizes it: compact a few rows, standard a fact table, detailed up to the terminal's height. Off prints only how to resume.",
 	],
 	"safety.sandbox": [
 		"Command sandbox",

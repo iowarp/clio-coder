@@ -63,6 +63,16 @@ export interface TierPolicy {
 	listDescriptions: ListDescriptions;
 	decisionPreviewRows: number;
 	usageSections: UsageSections;
+	/** Message rows of the steering queue island; 0 keeps its one summary row. */
+	queueRows: number;
+	/** Whether each queued message row states its mode (steer or later) and its age. */
+	queueRowDetail: boolean;
+	/** Whether a transcript notice keeps its subsystem tag (`[model]`, `[context engine]`). */
+	noticeSourceTag: boolean;
+	/** Whether a settled compaction card lists its measured facts (the entry count) as body rows. */
+	contextBodyFacts: boolean;
+	/** Whether a settled context operation card adds its summary notice text as a body row. */
+	contextBodyDetail: boolean;
 }
 
 const BASE_COLUMNS: readonly BoardColumn[] = ["state", "agent", "time", "text"];
@@ -102,6 +112,11 @@ const POLICIES: Readonly<Record<OutputStyle, TierPolicy>> = {
 		listDescriptions: "focused",
 		decisionPreviewRows: 2,
 		usageSections: "totals",
+		queueRows: 0,
+		queueRowDetail: false,
+		noticeSourceTag: false,
+		contextBodyFacts: false,
+		contextBodyDetail: false,
 	},
 	standard: {
 		tier: "standard",
@@ -136,6 +151,11 @@ const POLICIES: Readonly<Record<OutputStyle, TierPolicy>> = {
 		listDescriptions: "all",
 		decisionPreviewRows: 6,
 		usageSections: "breakdown",
+		queueRows: 3,
+		queueRowDetail: false,
+		noticeSourceTag: false,
+		contextBodyFacts: true,
+		contextBodyDetail: false,
 	},
 	detailed: {
 		tier: "detailed",
@@ -170,6 +190,11 @@ const POLICIES: Readonly<Record<OutputStyle, TierPolicy>> = {
 		listDescriptions: "all",
 		decisionPreviewRows: 12,
 		usageSections: "provenance",
+		queueRows: 3,
+		queueRowDetail: true,
+		noticeSourceTag: true,
+		contextBodyFacts: true,
+		contextBodyDetail: true,
 	},
 };
 

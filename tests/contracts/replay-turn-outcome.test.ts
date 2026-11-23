@@ -347,7 +347,7 @@ test("an unknown dynamic tool reads by its persisted action class, live and on r
 	} as ChatLoopEvent);
 	live.applyEvent(end as ChatLoopEvent);
 	const liveRow = rowOf(live.render(120));
-	assert.equal(liveRow, "$ ran deploy_preview · stage staging · 16B ✓ · 1.2s");
+	assert.equal(liveRow, "$ ran deploy_preview · 16B ✓ · 1.2s");
 
 	const replayed = createChatPanel();
 	rehydrateChatPanelFromTurns(replayed, [
@@ -410,7 +410,7 @@ test("a refused skill load reads the same live and on replay, from its persisted
 	live.applyEvent({ type: "tool_execution_start", toolCallId: "load-1", toolName: "context", args } as ChatLoopEvent);
 	live.applyEvent(end as ChatLoopEvent);
 	const plain = (lines: string[]) => lines.map(stripTerminalSequences).filter((line) => line.length > 0);
-	assert.deepEqual(plain(live.render(120)), ["§ skill tech-spec not loaded · manual-only: /skill tech-spec ✗"]);
+	assert.deepEqual(plain(live.render(120)), ["§ skill tech-spec not loaded · manual-only: /skill tech-spec ✗ failed"]);
 
 	// The replay clock advances on every read, as a slow runner's does. A
 	// replayed row may only state a duration the ledger recorded, never the
@@ -677,7 +677,7 @@ test("a memory note renders as a titled callout without refs at 40 through 200 c
 		const legacy = createChatPanel();
 		rehydrateChatPanelFromTurns(legacy, [entry({ message, severity: "advisory" })]);
 		const text = rows(live).join("\n");
-		assert.match(rows(live)[0] ?? "", /┌─ i Memory ─+┐$/u, `${width}`);
+		assert.match(rows(live)[0] ?? "", /^i Memory ─+$/u, `${width}`);
 		const sentence = text.replace(/[│┌┐└┘─]/gu, " ").replace(/\s+/gu, " ");
 		assert.match(
 			sentence,
@@ -906,8 +906,8 @@ test("an operator /run resumes with its command above its card, the spend its li
 	rehydrateChatPanelFromTurns(replayed, entries, { readWorkerRunResult: () => receipt });
 	const plain = (panel: ReturnType<typeof createChatPanel>) => panel.render(100).map(stripTerminalSequences).join("\n");
 	assert.match(plain(replayed), /^▌ \/run documenter --target blade/u);
-	assert.match(plain(replayed), /0 tool calls · 18,200 tokens/u);
-	assert.match(plain(replayed), /18,200 tokens/u);
+	assert.match(plain(replayed), /0 calls · 18.2k tokens/u);
+	assert.match(plain(replayed), /18.2k tokens/u);
 	assert.equal(plain(replayed), plain(live));
 	// Detailed lists the calls the run made, oldest first, on /resume as it did live.
 	style = "detailed";

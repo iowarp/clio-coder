@@ -1194,7 +1194,7 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 /** Old value spellings `2026-11-21-retired-settings` renames, by dotted key path. */
 export const SETTINGS_V2_RETIRED_VALUE_SPELLINGS: Readonly<Record<string, Readonly<Record<string, string>>>> =
 	Object.freeze({
-		"interface.exitSummary": { full: "standard" },
+		"interface.exitSummary": { auto: "on", brief: "on", standard: "on", report: "on", full: "on" },
 		"interface.outputDetail": { minimal: "compact", default: "standard", verbose: "detailed" },
 	});
 
@@ -2779,7 +2779,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("exitSummary" in ui) {
 				const style = normalizeExitSummaryStyle(ui.exitSummary);
 				if (style) settings.interface.exitSummary = style;
-				else issues.add("interface.exitSummary", "expected auto, brief, standard, report, or off");
+				else issues.add("interface.exitSummary", "expected on or off");
 			}
 			for (const [key, allowed] of [
 				["smoothStreaming", ["off", "auto", "on"]],

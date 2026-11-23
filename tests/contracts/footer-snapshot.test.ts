@@ -50,18 +50,19 @@ test("unchanged footer refresh preserves rendered rows while changed state and w
 		strictEqual(panel.view.render(120), first, "elapsed status is owned by the composer");
 		used = 200;
 		panel.refresh();
-		notStrictEqual(panel.view.render(120), first);
+		strictEqual(panel.view.render(120), first, "context fill is the rail's, so the footer keeps its rows");
 		const narrow = panel.view.render(60);
-		strictEqual(narrow.length, 1);
+		// Standard keeps its hint row at every width from 44 up, so the composer does not move.
+		strictEqual(narrow.length, 2);
 		strictEqual(panel.view.render(60), narrow);
 		notStrictEqual(panel.view.render(120), narrow);
 		strictEqual(panel.view.render(120).length, 2);
 		notices.push({ id: "warning", level: "warning", text: "Needs attention", key: null, addedAt: now, expiresAt: null });
 		panel.refresh();
-		strictEqual(panel.view.render(60).length, 2);
+		strictEqual(panel.view.render(60).length, 3);
 		notices.pop();
 		panel.refresh();
-		strictEqual(panel.view.render(60).length, 1);
+		strictEqual(panel.view.render(60).length, 2);
 	} finally {
 		panel.dispose();
 	}
@@ -112,11 +113,16 @@ test("minimal and demo-off footers suppress teaching without hiding immediate co
 			for (const width of [40, 80, 120, 200]) {
 				const lines = renderCompactDashboard(state, width);
 				const text = lines.map(stripTerminalSequences).join("\n");
-				match(text, autonomy === "yolo" ? /YOLO/u : /default/u);
+				// Yolo never drops; the word `default` is implied by its absence once the row runs short.
+				if (autonomy === "yolo" || width >= 80) match(text, autonomy === "yolo" ? /YOLO/u : /default/u);
 				ok(!/learn a shortcut|Dashboard/u.test(text));
-				strictEqual(lines.length, 1, "quiet idle footer has no empty hint row");
+				// Compact is the status line alone; standard keeps its hint row of keys, a W1 width does not.
+				const hintRow = style === "standard" && width >= 44;
+				strictEqual(lines.length, hintRow ? 2 : 1, "the footer height is the tier's");
 				state.keyContext = "command:/settings";
-				match(renderCompactDashboard(state, width).map(stripTerminalSequences).join("\n"), /runs \/settings/u);
+				const command = renderCompactDashboard(state, width).map(stripTerminalSequences).join("\n");
+				if (hintRow) match(command, /runs \/settings/u);
+				else doesNotMatch(command, /runs \/settings/u);
 				state.keyContext = "idle";
 				state.notices = [{ id: "fail", level: "error", text: "Route failed", key: null, addedAt: 0, expiresAt: null }];
 				match(renderCompactDashboard(state, width).map(stripTerminalSequences).join("\n"), /Route failed/u);
@@ -145,13 +151,13 @@ test("footer pages use snapshot time and preserve their row contracts at release
 	}
 });
 
-test("compact footer names an unknown serving window without a percentage", () => {
+test("the footer leaves an unknown serving window to the rail and never prints a placeholder percentage", () => {
 	const state = footerState();
 	state.context.ledger = null;
 	state.context.used = 100;
 	state.context.contextWindow = null;
 	const rows = renderCompactDashboard(state, 100).map(stripTerminalSequences).join("\n");
-	match(rows, /100 in context/u);
+	doesNotMatch(rows, /in context|ctx/u);
 	strictEqual(/\?%/u.test(rows), false);
 });
 
@@ -237,7 +243,7 @@ test("footer, queue and action hints spell live keybindings consistently", () =>
 		strictEqual(manager.actionLabel("clio-coder.model.select"), "Ctrl+M");
 		strictEqual(manager.fullActionLabel("clio-coder.model.select"), "Ctrl+M · Alt+G M");
 		strictEqual(manager.actionLabel("clio-coder.autonomy.toggle"), "Alt+G Y");
-		match(footerKeyHint(0, false, Number.POSITIVE_INFINITY, "idle") ?? "", /Ctrl\+M Model\b/u);
+		match(footerKeyHint(0, false, Number.POSITIVE_INFINITY, "idle") ?? "", /Ctrl\+M model\b/u);
 		const state = footerState();
 		state.demo = false;
 		state.session.leaderArmed = true;

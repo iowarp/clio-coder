@@ -2464,14 +2464,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			const snapshot = exitSummary.snapshot();
 			const lines =
 				snapshot === null
-					? renderExitWithoutConversation(
-							ui?.exitSummary ?? "auto",
-							ui?.outputDetail ?? "standard",
-							process.stdout.isTTY === true,
-						)
+					? renderExitWithoutConversation(ui?.exitSummary ?? "on", process.stdout.isTTY === true)
 					: renderExitSummary(
 							snapshot,
-							ui?.exitSummary ?? "auto",
+							ui?.exitSummary ?? "on",
 							process.stdout.columns ?? 80,
 							process.stdout.isTTY === true,
 							ui?.outputDetail ?? "standard",

@@ -205,8 +205,11 @@ test("an approved git-control-file write refreshes the baseline, and the exit su
 		getModel: () => null,
 		gitHookChanges: () => s.guard.sessionChanges(),
 	});
-	for (const style of ["brief", "standard"] as const) {
-		match(renderExitSummary(collector.snapshot(), style, 120, false).join("\n"), /Git hooks: added \.husky\/pre-commit/u);
+	for (const tier of ["standard", "detailed"] as const) {
+		match(
+			renderExitSummary(collector.snapshot(), "on", 120, false, tier).join("\n"),
+			/^ {2}hooks +added \.husky\/pre-commit/mu,
+		);
 	}
 	collector.dispose();
 });

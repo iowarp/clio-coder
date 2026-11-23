@@ -181,8 +181,9 @@ test("invocation previews omit redundant short primary values, retain options an
 		};
 		const text = plain(renderToolPreview(call, 100, transcriptDetail(style)));
 		strictEqual(text.split("README.md").length - 1, 1);
-		match(text, /offset.*40/);
-		match(text, /limit.*80/);
+		// Arguments the row does not consume leave the header; detailed states them as the card's `args` row.
+		(style === "detailed" ? match : doesNotMatch)(text, /offset.*40/);
+		(style === "detailed" ? match : doesNotMatch)(text, /limit.*80/);
 		match(plain(renderToolExecution(call, 100)), /path.*README.md/);
 		const long = { ...call, args: { path: `${"directory/".repeat(12)}final.ts` } };
 		// Compact is the action row alone, so a cut path keeps its tail there and
@@ -245,10 +246,11 @@ test("Activity retains fast tool actions between calls and shows live worker out
 	match(render(), /Live response · provisional/);
 });
 
-test("compact footer exposes workspace, headroom and worker count in bounded responsive rows", () => {
+test("the footer exposes workspace, model identity and worker count in bounded rows of the tier's height", () => {
 	for (const width of [40, 80, 160]) {
 		const rows = renderCompactDashboard(state(), width);
-		strictEqual(rows.length, 2);
+		// Standard is the status line and the hint row; a W1 width keeps the status line alone.
+		strictEqual(rows.length, width < 44 ? 1 : 2);
 		ok(rows.every((row) => visibleWidth(row) <= width));
 	}
 	const idle = state();
@@ -256,7 +258,9 @@ test("compact footer exposes workspace, headroom and worker count in bounded res
 	strictEqual(renderCompactDashboard(idle, 40).length, 1, "a narrow idle footer is one row");
 	const text = plain(renderCompactDashboard(state(), 160));
 	match(text, /1 worker/);
-	match(text, /262\.1K/);
+	match(text, /^>C_ /);
+	// Context fill is the rail's; the status line never repeats it.
+	doesNotMatch(text, /262\.1K/);
 	match(text, /clio-coder.*v050/);
 	doesNotMatch(text, /think/u);
 	doesNotMatch(text, /autonomy|yolo|70k processed|standard|exploring/);
@@ -360,19 +364,19 @@ test("footer hints resolve remapped bindings and omit unbound actions", () => {
 		const hints = Array.from({ length: 40 }, (_, i) =>
 			footerKeyHint(i * 60000, false, Number.POSITIVE_INFINITY, "idle"),
 		).join("\n");
-		match(hints, /Ctrl\+M Model(?! picker)/);
+		match(hints, /Ctrl\+M model(?! picker)/);
 		doesNotMatch(hints, /Alt\+M|Alt\+L|Library/);
-		match(hints, /\? Keys/);
+		match(hints, /\? keys · \/ commands/);
 		const runHints = Array.from({ length: 40 }, (_, i) =>
 			footerKeyHint(i * 60000, false, Number.POSITIVE_INFINITY, "steer"),
 		).join("\n");
-		match(runHints, /Send now/);
+		match(runHints, /send now/);
 	} finally {
 		setKeybindings(previous);
 	}
 });
 
-test("a key the operator already pressed leaves the learning rotation", () => {
+test("idle keeps its pinned keys while a key the operator already pressed leaves the run's learning rotation", () => {
 	const previous = getKeybindings();
 	createKeybindingManager(DEFAULT_SETTINGS);
 	try {
@@ -381,13 +385,18 @@ test("a key the operator already pressed leaves the learning rotation", () => {
 				footerKeyHint(i * 60000, false, Number.POSITIVE_INFINITY, context, { learned }),
 			).join("\n");
 		const fresh = rotation("idle", () => false);
-		match(fresh, /\? Keys/);
+		match(fresh, /\? keys · \/ commands · Alt\+M model/);
+		// Idle is the same three keys whatever the operator learned; the row teaches nothing more there.
 		const learned = rotation("idle", (feature) => feature === "?" || feature === "key:clio-coder.thinking.cycle");
-		doesNotMatch(learned, /\? Keys|Thinking effort/);
-		match(learned, /newline/);
+		match(learned, /\? keys · \/ commands · Alt\+M model/);
+		doesNotMatch(learned, /thinking/i);
+		match(
+			rotation("steer", () => false),
+			/send now/,
+		);
 		doesNotMatch(
 			rotation("steer", (feature) => feature === "key:clio-coder.message.interrupt"),
-			/Send now/,
+			/send now/,
 		);
 	} finally {
 		setKeybindings(previous);
@@ -517,52 +526,60 @@ test("compact quota stays beside the selected model while workspace and rotating
 	];
 	for (const width of [80, 120, 160]) {
 		const rows = renderCompactDashboard(snapshot, width).map(stripTerminalSequences);
-		match(rows[1] ?? "", /weekly 9% used/);
-		doesNotMatch(rows[1] ?? "", /Codex|5h/);
-		match(rows[0] ?? "", /clio-coder.*v050 \*/);
-		doesNotMatch(rows[0] ?? "", /weekly|Claude|Codex/);
+		// The weekly window rides the status line beside the route while it fits, and is the first fact to drop;
+		// the hint row holds keys only.
+		if (width >= 120) match(rows[0] ?? "", /weekly 9% used/);
+		doesNotMatch(rows.join("\n"), /Codex|5h/);
+		match(rows[0] ?? "", /clio-coder.*v050\*/);
+		doesNotMatch(rows[1] ?? "", /weekly|Claude|Codex/);
 		ok(rows.every((line) => visibleWidth(line) <= width));
 	}
 	const initial = plain(renderCompactDashboard(snapshot, 160));
 	match(initial, /Enter send/);
 	for (let page = 0; page < 40; page++) {
 		snapshot.now = page * 12000;
-		match(stripTerminalSequences(renderCompactDashboard(snapshot, 160)[0] ?? ""), /clio-coder.*v050 \*/);
+		match(stripTerminalSequences(renderCompactDashboard(snapshot, 160)[0] ?? ""), /clio-coder.*v050\*/);
 		ok(footerKeyHint(snapshot.now));
 	}
 	snapshot.session.shutdownArmed = true;
-	match(plain(renderCompactDashboard(snapshot, 100)), /clio-coder.*v050 \*[\s\S]*Ctrl\+C again/);
+	match(plain(renderCompactDashboard(snapshot, 100)), /clio-coder.*v050\*[\s\S]*Ctrl\+C again/);
 	match(plain(renderCompactDashboard(snapshot, 40)), /Ctrl\+C again to quit/u);
 	snapshot.quotaRoute = { runtimeId: "litellm", wireModelId: "claude-opus" };
 	doesNotMatch(plain(renderCompactDashboard(snapshot, 160)), /weekly/);
 });
 
-test("the compact footer names an armed skill surface beside the worker count until it clears", () => {
+test("the status line names an armed skill surface beside the worker count until it clears", () => {
 	const snapshot = state();
-	const facts = (width: number) => stripTerminalSequences(renderCompactDashboard(snapshot, width)[1] ?? "");
+	snapshot.session.modelId = "qwopus";
+	const facts = (width: number) => stripTerminalSequences(renderCompactDashboard(snapshot, width)[0] ?? "");
 	for (const width of [60, 100, 200]) doesNotMatch(facts(width), /skill|§/u);
 	snapshot.session.activeSkills = ["tdd"];
 	for (const width of [60, 100, 200]) {
-		match(facts(width), /1 worker · skill tdd$/u);
+		// The fact drops whole before anything the status line owns, so 60 cells keep the workspace instead.
+		if (width >= 100) match(facts(width), /skill tdd · 1 worker/u);
 		ok(visibleWidth(facts(width)) <= width);
 	}
-	// The facts take at most 40% of the row; what does not fit ends in one ellipsis.
+	// The skill names take at most a third of the row; what does not fit ends in one ellipsis, and a row too narrow
+	// for the fact drops it whole before the worker count.
 	snapshot.session.activeSkills = ["tdd", "perf-review"];
 	for (const width of [40, 60, 100]) {
 		const row = facts(width);
-		match(row, /1 worker · skil/u);
-		doesNotMatch(row, /……/u);
+		match(row, /1 worker/u);
+		doesNotMatch(row, /……|skil(?!l)/u);
 		ok(visibleWidth(row) <= width, row);
 	}
+	match(facts(100), /skill tdd, perf-review · 1 worker/u);
 	snapshot.dispatchRows = [];
 	snapshot.session.activeSkills = ["tdd-go"];
-	match(facts(60), /skill tdd-go$/u);
+	match(facts(100), /skill tdd-go · qwopus$/u);
 	snapshot.session.activeSkills = [];
 	doesNotMatch(facts(100), /skill|§/u);
 });
 
-test("a narrow compact footer keeps the counts and never cuts a figure", () => {
+test("a narrow status line leaves the context counts to the rail and never cuts a figure", () => {
 	const snapshot = state();
+	// A short model id, so the only identifier the row could elide is not in the way of the figure check.
+	snapshot.session.modelId = "qwopus";
 	const line = (width: number) => stripTerminalSequences(renderCompactDashboard(snapshot, width)[0] ?? "");
 	// The context engine's budget meter, as the live footer reads it: counts with a percent.
 	snapshot.context = {
@@ -580,15 +597,11 @@ test("a narrow compact footer keeps the counts and never cuts a figure", () => {
 		ok(visibleWidth(row) <= width, row);
 		doesNotMatch(row, /\d…/u, row);
 	}
-	// A percent that does not fit is dropped whole; the counts stay.
-	match(line(40), /33\.9K\/262\.1K$/u);
-	match(line(60), /33\.9K\/262\.1K \(~?12\.\d%\)$/u);
-	match(line(100), /33\.9K\/262\.1K \(~?12\.\d%\)$/u);
-	// The ledger meter keeps its counts on a narrow row too.
+	// The bottom rail owns context fill (4.1); the status line states none of it at any width.
+	for (const width of [40, 60, 100]) doesNotMatch(line(width), /33\.9K|262\.1K|%/u);
 	const ledgerSnapshot = state();
-	const narrow = stripTerminalSequences(renderCompactDashboard(ledgerSnapshot, 40)[0] ?? "");
-	match(narrow, /68\.5K\/262\.1K$/u, narrow);
-	match(stripTerminalSequences(renderCompactDashboard(ledgerSnapshot, 100)[0] ?? ""), /68\.5K\/262\.1K \(26\.1%\)$/u);
+	for (const width of [40, 100])
+		doesNotMatch(stripTerminalSequences(renderCompactDashboard(ledgerSnapshot, width)[0] ?? ""), /68\.5K|262\.1K|%/u);
 });
 
 test("the compact footer holds still across refreshes and carries no activity spinner", () => {

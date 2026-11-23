@@ -121,6 +121,7 @@ problem.
 | `scratch/<sessionId>/`, `scratch/<runId>/` | Offloaded tool output and harness scratch; tool offloads are `0600` files in `0700` directories. `run --verify` keeps a failing check's whole output under its run id while the base replay compares it, and removes the directory when the checks end |
 | `reports/` | Reports to the maintainers: `drafts/<id>.json` with the rendered Markdown beside it, `bundles/` for kept diagnostic bundles, `crashes/` for crash records, `shares.json` for share receipts, and the `offers.json`, `reply-check.json` and `outbox.json` ledgers. Drafts are written mode `0600`. |
 | `interviews/` | Interview transcripts |
+| `welcome/seen/<sha256(project root)>` | Empty marker written after a project's first launchpad painted on a terminal; its absence is what shows the full wordmark on first boot ([welcome-seen.ts](../../src/core/welcome-seen.ts)) |
 | `tui/` | The terminal renderer's crash dump `pi-tui-crash.log` (every rendered row, so the transcript), in a directory created mode `0700` |
 | `context-observations/`, `context-seeds/` | Recallable observations and worker context seeds |
 | `protected-artifact-pending/<key>/` | Write-ahead records for pending protected artifacts |

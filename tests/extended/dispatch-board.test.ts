@@ -692,18 +692,16 @@ describe("dispatch quality presentation", () => {
 			result: { details: { runCount: 3, failedCount: 0, runs: [{ trust: trusts[0] }, { trust: trusts[1] }, {}] } },
 		};
 		const plain = renderToolSubline(finished, 44).map(stripTerminalSequences).join(" ").replace(/\s+/gu, " ");
-		// With no card under it, the dispatch row carries execution and quality as separate facts.
-		match(plain, /delegated · 3 ok · quality /u);
-		match(plain, /1 grounded/u);
-		match(plain, /1 validation failed/u);
-		match(plain, /1 validation unknown/u);
-		// Cards state each run's quality: a fan-out keeps only its execution tally,
-		// and a single dispatch's card is its whole outcome.
+		// With no card under it, the dispatch row counts its runs by state, worst first: a validation failure is a
+		// failure, a run whose record is not verified is unverified, and no `✓` sits beside the tally.
+		match(plain, /delegated · 1 failed · 1 unverified · 1 ok$/u);
+		doesNotMatch(plain, /quality|✓/u);
+		// Cards state each run's quality; a fan-out keeps the same tally, and a single dispatch's card is its whole outcome.
 		const fanOut = renderToolSubline({ ...finished, cardAttached: true }, 76)
 			.map(stripTerminalSequences)
 			.join(" ");
-		match(fanOut, /delegated · 3 ok/u);
-		doesNotMatch(fanOut, /3 ok ✓/u);
+		match(fanOut, /delegated · 1 failed · 1 unverified · 1 ok/u);
+		doesNotMatch(fanOut, /ok ✓/u);
 		doesNotMatch(fanOut, /quality|grounded|validation/u);
 		const single = renderToolSubline(
 			{
@@ -734,9 +732,8 @@ describe("dispatch quality presentation", () => {
 			.map(stripTerminalSequences)
 			.join(" ")
 			.replace(/\s+/gu, " ");
-		match(historical, /2 ok, 1 failed/u);
-		match(historical, /3 validation unknown/u);
-		doesNotMatch(historical, /validation failed/u);
+		match(historical, /1 failed · 2 ok/u);
+		doesNotMatch(historical, /validation/u);
 	});
 
 	for (const [quality, state, wording] of [
@@ -804,10 +801,11 @@ describe("dispatch quality presentation", () => {
 					},
 					76,
 				);
-				match(plain(collapsed), /3 ok · quality /u);
-				ok(plain(collapsed).includes(wording), plain(collapsed));
-				// The label is a word, not a second colon ahead of a word that may carry one.
-				doesNotMatch(plain(collapsed), /quality:/u);
+				// The tally counts the runs by their worst input: a failed validation is a failure and an ungrounded claim
+				// is adverse; the quality words stay on the cards and the board.
+				const bucket = { pass: "3 ok", fail: "3 failed", unknown: "3 ok", ungrounded: "3 unverified" }[quality];
+				match(plain(collapsed), new RegExp(`delegated · ${bucket}$`, "u"));
+				doesNotMatch(plain(collapsed), /quality/u);
 				const island = formatTaskIslandLines([{ ...row, agentAudience: "base" }]);
 				ok(plain(island).replace(/\s+/gu, " ").includes(`quality ${wording}`), plain(island));
 				match(plain(island), /done/u);
@@ -823,10 +821,20 @@ describe("dispatch quality presentation", () => {
 				stream.started({ ...IDENTITY, agentAudience: "base", pid: null, assignmentId: IDENTITY.runId, attempt: 0 });
 				const worker = stream.completed(COMPLETED)?.entry;
 				ok(worker);
+				// The card's run row leads with the run's state from outcome, validation and record together: a failed or
+				// ungrounded validation is never a check mark, and detailed names the record beside the route.
+				const expected: Record<typeof quality, readonly [string, string]> = {
+					pass: ["✓", "record: grounded"],
+					fail: ["✗", "record: not trusted"],
+					unknown: ["✓", "record: "],
+					ungrounded: ["✗", "record: not trusted"],
+				};
+				const [glyph, record] = expected[quality];
 				for (const style of ["compact", "standard", "detailed"] as const) {
 					const lines = renderWorkerEntryLines(worker, 76, { detail: transcriptDetail(style) });
-					ok(plain(lines).includes(quality === "fail" ? "validation failed" : `quality ${wording}`), plain(lines));
-					match(plain(lines), /✓ done|· it finished/u);
+					ok(plain(lines).includes(`${glyph} ◇ Alpha`), plain(lines));
+					if (quality === "fail") ok(plain(lines).includes("validation failed"), plain(lines));
+					if (style === "detailed") ok(plain(lines).includes(record), plain(lines));
 					ok(lines.every((line) => visibleWidth(line) <= 76));
 				}
 				const monitor = createMonitorTool({
