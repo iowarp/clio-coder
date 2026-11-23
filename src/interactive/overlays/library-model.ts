@@ -84,6 +84,9 @@ const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const 
 /** External text is never trusted on a row: one line, controls neutralized. */
 const safe = sanitizeCallTargetText;
 
+/** A table cell with no value. */
+const NO_VALUE = "\u2014";
+
 /** Two facts of one origin on one value, joined the way the rest of the chrome joins facts. */
 const FACT_JOIN = ` ${GLYPH.sep} `;
 
@@ -1053,7 +1056,8 @@ function push(
 			if (!columns) return item.meta ?? "";
 			if (!scopeColumns()) return "";
 			const theme = clioTheme();
-			const scope = widths.scope > 0 ? theme.fg("annotation", columns.scope.padEnd(widths.scope)) : "";
+			// A row with no copy still fills the scope cell, so the version column never starts with a bare separator.
+			const scope = widths.scope > 0 ? theme.fg("annotation", (columns.scope || NO_VALUE).padEnd(widths.scope)) : "";
 			const version = columns.version ? theme.fg("annotation", columns.version) : "";
 			return scope && version ? `${scope}${dotSep(theme)}${version}` : scope || version;
 		},
@@ -1064,7 +1068,7 @@ function push(
 		},
 		detailHead: (width) => rows(width).head.length,
 	});
-	if (columns) widths.scope = Math.max(widths.scope, columns.scope.length);
+	if (columns) widths.scope = Math.max(widths.scope, (columns.scope || NO_VALUE).length);
 }
 
 /**
