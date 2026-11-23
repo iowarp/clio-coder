@@ -401,6 +401,8 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 					isRecord(verdict.result.details?.judgement) &&
 					verdict.result.details.judgement.execution === "unavailable") ||
 				(spec.name === ToolNames.Gateway && verdict.result.details?.op === "chain") ||
+				// A batch with a failed run keeps its run tally, so the row counts its runs instead of `✗ failed` alone.
+				(spec.name === ToolNames.Dispatch && typeof verdict.result.details?.runCount === "number") ||
 				// A cancelled extension interview keeps the checkpoints it put to the author on the ledger.
 				isRecord(verdict.result.details?.interview))
 		) {
