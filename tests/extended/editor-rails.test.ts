@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { stripTerminalSequences, type Terminal, TuiMainScreen, visibleWidth } from "../../src/engine/tui.js";
 import { ClioEditor } from "../../src/interactive/clio-editor.js";
 import { type DispatchBoardRow, dispatchWaitRuns } from "../../src/interactive/dispatch-board.js";
+import { parseEditorBashCommand } from "../../src/interactive/editor-bash.js";
 import { renderEditorRail } from "../../src/interactive/editor-rails.js";
 import { contextRailGroup, contextRailUnit, thinkingRailUnit } from "../../src/interactive/footer/context-rail.js";
 import { compactionRailLabel, workerWaitRailLabel } from "../../src/interactive/footer/widgets.js";
@@ -200,5 +201,28 @@ test("rail content: worker waits name a count and a clock, and Esc stops outlast
 	for (const width of [120, 80, 48]) {
 		const label = compactionRailLabel({ phase: "summarize", startedAtMs: 0 }, statusRailLabelRoom(width) - 2, 5_200);
 		strictEqual(label, "is summarizing history · 5s · Esc stops");
+	}
+});
+test("rail content: a multi-line `!` draft is a prompt, so its bottom rail has no shell unit (W1-10, FX-11)", () => {
+	// The composer's own reading: Enter runs a `!` draft as shell only while it is one line (editor-bash.ts).
+	const editor = new ClioEditor(new TuiMainScreen({ columns: 80, rows: 24, write() {} } as unknown as Terminal), {
+		getModelLabel: () => "model",
+		getThinkingLabel: () => "low",
+		getDraftOperator: (text) => (parseEditorBashCommand(text) ? "shell" : null),
+	});
+	const bottom = (draft: string): string => {
+		editor.setText(draft);
+		const rows = editor.render(80);
+		ok(rows.every((row) => visibleWidth(row) <= 80));
+		return stripTerminalSequences(rows.at(-1) ?? "");
+	};
+	match(bottom("!echo 1"), /^━ \$ shared shell · Enter runs/u);
+	match(bottom("!!echo 1"), /^━ \$ private shell · Enter runs/u);
+	const more = Array.from({ length: 30 }, (_, index) => `line ${index + 2}`).join("\n");
+	for (const lead of ["!echo 1", "!!echo 1"]) {
+		doesNotMatch(bottom(`${lead}\nline 2`), /\$/u);
+		const tall = bottom(`${lead}\n${more}`);
+		match(tall, /^━ 31 lines ━/u);
+		doesNotMatch(tall, /\$|shell/u);
 	}
 });
