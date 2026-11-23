@@ -1,4 +1,5 @@
 import type { OutputStyle } from "../../core/defaults.js";
+import { tierPolicy } from "../../core/presentation-tier.js";
 import type { DoctorFinding } from "../../domains/lifecycle/doctor.js";
 import { GLYPH } from "../theme/index.js";
 import { renderTranscriptReport } from "./report.js";
@@ -10,7 +11,8 @@ export function renderDoctorReport(
 	style: OutputStyle = "standard",
 	unbounded = false,
 ): string[] {
-	const full = style === "detailed" || unbounded;
+	const policy = tierPolicy(style);
+	const full = policy.provenance || unbounded;
 	const errors = findings.filter((finding) => !finding.ok);
 	const warnings = findings.filter((finding) => finding.ok && finding.level === "warn");
 	const information = findings.filter((finding) => finding.ok && finding.level === "info");
@@ -46,7 +48,7 @@ export function renderDoctorReport(
 							...passed.map((finding) => ({ label: finding.name, value: "OK", detail: finding.detail })),
 						]
 					: [
-							...(style === "standard" && passed.length > 0
+							...(policy.evidence && passed.length > 0
 								? [{ label: "OK", value: passed.map((finding) => finding.name).join(` ${GLYPH.dot} `) }]
 								: []),
 							...(routineCount > 0

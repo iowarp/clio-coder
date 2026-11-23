@@ -278,33 +278,3 @@ function councilFullBody(theme: ClioTheme, group: CouncilGroupView, contentWidth
 	}
 	return body;
 }
-
-/**
- * The compact Fleet Runs island card for a council: the council by its size and state, the question, then each
- * member by label with its own state, so the dock says who is still answering without opening the board. The grid
- * belongs to the expanded board, where there is width to read it in.
- */
-export function councilIslandLines(theme: ClioTheme, group: CouncilGroupView, width: number): string[] {
-	const dot = dotSep(theme);
-	const glyph = theme.fg(group.status.glyphToken ?? group.status.token, group.status.glyph);
-	const status = theme.fg(group.status.token, group.status.label);
-	// The group id is the record's; a person knows the council by its size and its question.
-	const name = group.members.length === 0 ? "council" : `council of ${group.members.length}`;
-	const head = `${glyph} ${theme.fg("workerIdentity", name)}${dot}${status}${dot}${theme.fg("toolMetadata", group.elapsed)}`;
-	const seat = (member: CouncilMemberView): string =>
-		`${councilLabelText(theme, member.label, member.color)} ${theme.fg(member.status.glyphToken ?? member.status.token, member.status.glyph)}`;
-	const seats = [
-		...group.members.map(seat),
-		...(group.synthesis !== null ? [seat(group.synthesis)] : []),
-		...(group.round > 1 ? [theme.fg("annotation", `round ${group.round}`)] : []),
-	].join(dot);
-	const lines = [
-		truncateToWidth(head, width, GLYPH.ellipsis, false),
-		...(group.task !== undefined
-			? [truncateToWidth(`  ${theme.fg("body", group.task)}`, width, GLYPH.ellipsis, false)]
-			: []),
-		truncateToWidth(`  ${seats}`, width, GLYPH.ellipsis, false),
-		truncateToWidth(theme.fg("annotation", "  /fleet to read each answer"), width, GLYPH.ellipsis, false),
-	];
-	return lines.map((line) => padAnsi(line, width));
-}

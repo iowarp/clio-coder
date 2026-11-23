@@ -62,7 +62,7 @@ const TOKEN_FIGURE = /^(?:in|out|cache read|cache write|reasoning) \S+$/u;
 function sessionCostFacts(spend: ExitSummarySnapshot["spend"], tier: OutputStyle): string[] {
 	if (spend.kind !== "ready") return [SPEND_NOT_AVAILABLE];
 	const facts = [spend.cost, ...(spend.economy ? economyReceipt(spend.economy, null).map((part) => part.text) : [])];
-	if (tier === "detailed") return facts;
+	if (tierPolicy(tier).provenance) return facts;
 	// Below detailed a row states one unknown at most (2.9): the measured parts, else the route cost's own words.
 	const known = facts.filter((fact) => !UNKNOWN_COST.test(fact));
 	return known.length > 0 ? known : [spend.cost];
@@ -81,7 +81,9 @@ function verifiedFacts(spend: ExitSummarySnapshot["spend"], tier: OutputStyle): 
 	const verified = spend.verified;
 	// Below detailed a row states one unknown, so the none case keeps its two facts short (2.9).
 	if (verified.kind === "none")
-		return tier === "detailed" ? verified.words.split("; ") : ["no judged outcome", "command checks are not counted"];
+		return tierPolicy(tier).provenance
+			? verified.words.split("; ")
+			: ["no judged outcome", "command checks are not counted"];
 	return [
 		countLabel(verified.count, "outcome"),
 		...verified.parts,
@@ -236,11 +238,11 @@ function autonomyFacts(snapshot: ExitSummarySnapshot, tier: OutputStyle): string
 						: `paused at the ${report.halted.detail}`,
 			);
 		if (total > 0) facts.push(countLabel(total, "open decision"));
-		if (tier !== "compact") {
+		if (tierPolicy(tier).evidence) {
 			facts.push(report.confinement, `${formatFooterTokens(report.usage.tokens)} cap tokens`);
 			if (total === 0) facts.push("no open decisions");
 		}
-		if (tier === "detailed") {
+		if (tierPolicy(tier).provenance) {
 			const shown = report.openDecisions.slice(-GIT_HOOKS_SHOWN).map(formatOpenDecision);
 			facts.push(...shown);
 			if (shown.length > 0 && total > shown.length) facts.push(`${count(total - shown.length)} more`);
@@ -407,7 +409,7 @@ export function renderExitSummary(
 			: []),
 	];
 	const routine: Section[] = [];
-	if (tier === "compact") {
+	if (!tierPolicy(tier).evidence) {
 		const model = models.at(-1);
 		routine.push({
 			label: "",
@@ -471,7 +473,7 @@ export function renderExitSummary(
 					spend.kind === "ready"
 						? factsOf(spend.breakdown)
 								// Standard states the figures; detailed adds the notes on what no call reported (2.9).
-								.filter((fact) => tier === "detailed" || TOKEN_FIGURE.test(fact))
+								.filter((fact) => tierPolicy(tier).provenance || TOKEN_FIGURE.test(fact))
 								.map(shortFigures)
 						: [SPEND_NOT_AVAILABLE],
 				),
@@ -479,7 +481,7 @@ export function renderExitSummary(
 		});
 		routine.push({ label: "cost", lines: [clean(sessionCostFacts(spend, tier))] });
 		routine.push({ label: "verified", lines: [clean(verifiedFacts(spend, tier))] });
-		if (tier === "detailed" && spend.kind === "ready" && spend.cache !== null) {
+		if (tierPolicy(tier).provenance && spend.kind === "ready" && spend.cache !== null) {
 			routine.push({
 				label: "cache",
 				lines: [
@@ -493,7 +495,7 @@ export function renderExitSummary(
 		}
 		if (models.length > 0) {
 			routine.push(
-				tier === "detailed"
+				tierPolicy(tier).provenance
 					? {
 							label: models.length > 1 ? "models" : "model",
 							lines: models.map(({ target, model, spend: recorded }) =>
@@ -512,7 +514,7 @@ export function renderExitSummary(
 						},
 			);
 		}
-		if (tier === "detailed" && spend.kind === "ready" && spend.byRole.length > 0)
+		if (tierPolicy(tier).provenance && spend.kind === "ready" && spend.byRole.length > 0)
 			routine.push({ label: "calls", lines: [clean(factsOf(spend.byRole))] });
 		// Tools are the named session's own; a visit that switched sessions says what the others ran instead of
 		// dropping the row when this session ran none (TUI-6). Kinds sort by count, then name.
@@ -525,17 +527,17 @@ export function renderExitSummary(
 			const extras = [
 				...(kinds.length === 0 ? ["none in this session"] : []),
 				...(otherTools > 0 ? [`${countLabel(otherTools, "call")} in other sessions this visit`] : []),
-				...(tier === "detailed" && failures > 0 ? [`${count(failures)} failed`] : []),
+				...(tierPolicy(tier).provenance && failures > 0 ? [`${count(failures)} failed`] : []),
 			];
 			routine.push({ label: "tools", lines: [clean([...kinds, ...extras])], noun: "kinds", maxRows: stacked ? 2 : 1 });
 		}
 		if (snapshot.workers.length > 0)
 			routine.push(
-				tier === "detailed"
+				tierPolicy(tier).provenance
 					? { label: "workers", lines: [clean(snapshot.workers.map(workerFact))], noun: "workers" }
 					: { label: "workers", lines: [clean(outcomes(snapshot))] },
 			);
-		if (tier === "detailed" && snapshot.timeline.length > 0)
+		if (tierPolicy(tier).provenance && snapshot.timeline.length > 0)
 			routine.push({
 				label: "timeline",
 				lines: [clean(snapshot.timeline.map((event) => `${clock(event.elapsedMs)} ${event.text}`))],
@@ -588,11 +590,11 @@ export function renderExitSummary(
 	 * alone is too wide keeps its first rows, the last closed with an ellipsis. Null when not even the cut count fits.
 	 */
 	const fit = (section: Section, budget: number): Row[] | null => {
-		const perSection = tier === "compact" ? (stacked ? 2 : 1) : budget;
+		const perSection = !tierPolicy(tier).evidence ? (stacked ? 2 : 1) : budget;
 		const limit = Math.min(budget, perSection, section.maxRows ?? budget);
 		if (limit <= 0) return null;
 		const units = section.lines.length > 1 ? section.lines.length : (section.lines[0]?.length ?? 0);
-		const mark = tier !== "compact";
+		const mark = tierPolicy(tier).evidence;
 		for (let shown = units; shown >= (mark ? 0 : 1); shown -= 1) {
 			const rows = layout(section, shown, mark);
 			if (rows.length <= limit) return rows;
@@ -626,7 +628,7 @@ export function renderExitSummary(
 	body.push({ section: resumeSection, rows: resumeRows });
 
 	const sessionText = `${narrow ? "" : "session "}${snapshot.sessionName ? `${sanitizeCallTargetText(snapshot.sessionName)} ${GLYPH.sep} ` : ""}${id}`;
-	const meta = tier === "compact" ? formatElapsed(snapshot.wallMs) : "this visit";
+	const meta = !tierPolicy(tier).evidence ? formatElapsed(snapshot.wallMs) : "this visit";
 	const paint = (row: Row, role: SemanticRole): string => {
 		const text = `${row.label}${row.value}`;
 		if (!theme) return `${INDENT}${text}`.trimEnd();

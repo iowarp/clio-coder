@@ -38,8 +38,6 @@ const UNICODE_GLYPHS = {
 	classExternal: "⇢",
 	running: "●",
 	queued: "◌",
-	// Retired: an emoji-presentation glyph drawn two cells wide. The unit `tok/s` says it; empty until callers drop it.
-	speed: "",
 	ok: "✓",
 	error: "✗",
 	cancelled: "⊘",
@@ -146,7 +144,6 @@ const ASCII_GLYPHS: { readonly [K in keyof typeof UNICODE_GLYPHS]: string } = {
 	classExternal: "E",
 	running: "@",
 	queued: "o",
-	speed: "",
 	ok: "+",
 	error: "x",
 	cancelled: "-",

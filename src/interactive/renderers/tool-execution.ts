@@ -2651,14 +2651,14 @@ export function renderToolPreview(
 		? renderToolSubline(call, width, policy)
 		: previewActionRows(call, width, liveFact, policy);
 	if (
-		detail.style === "compact" &&
+		!detail.evidence &&
 		!options.operator &&
 		(finished === undefined || (!failure && row.spec.class !== "interaction" && finished.operatorGrant === undefined))
 	)
 		return [...rows, ...approvalReceiptRows(call, width, failure)];
 	rows.push(...approvalReceiptRows(call, width, failure));
 	if (policy.toolArgRow) rows.push(...argumentFactRows(row, finished ?? null, width, failure));
-	const args = previewArguments(call, width, detail.style === "detailed" && finished === undefined, policy.toolArgRow);
+	const args = previewArguments(call, width, detail.provenance && finished === undefined, policy.toolArgRow);
 	const expanded = isPlainObject(args.edits) ? { ...args, ...args.edits, edits: undefined } : args;
 	rows.push(
 		...renderToolArguments(
@@ -2709,7 +2709,7 @@ export function renderToolPreview(
 	const skill = finished ? skillLoadFacts(finished) : null;
 	// The tool surface a loaded skill declares and the one line that says what
 	// it is for; Compact keeps the row alone.
-	if (skill !== null && detail.style !== "compact") {
+	if (skill !== null && detail.evidence) {
 		const surface = skillSurfaceLine(skill);
 		for (const line of [surface, skill.description]) {
 			if (line === null || line.length === 0) continue;
@@ -2771,7 +2771,8 @@ export function renderToolPreview(
 		const shown = failure && command ? withoutCommandStatus(result) : result;
 		const metadataOnly =
 			!failure &&
-			detail.style === "standard" &&
+			detail.evidence &&
+			!detail.provenance &&
 			isPlainObject(shown) &&
 			Object.keys(shown).every((key) => key === "details");
 		const { body: told, notes } = splitModelNotes(
@@ -2821,7 +2822,7 @@ export function renderToolPreview(
 		// Guidance middleware attached for the model is not the tool's output and asks
 		// nothing of the operator: Detailed states it as one toolMeta row, Standard leaves
 		// it out, and /view keeps the result as the model read it.
-		if (notes.length > 0 && detail.style === "detailed") {
+		if (notes.length > 0 && detail.provenance) {
 			const more = notes.length > 1 ? ` · +${notes.length - 1} more` : "";
 			rows.push(
 				`${failure ? RAIL_ERROR() : RAIL_NORMAL()}${toolMeta(truncateToWidth(sanitizeCallTargetText(`note to model · ${operatorNoteText(notes[0] ?? "")}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${toolMeta(more)}`,
@@ -3012,7 +3013,7 @@ function renderChainPreview(
 	const failure = finished?.isError === true || finished?.outcome !== undefined;
 	const rail = failure ? RAIL_ERROR() : RAIL_NORMAL();
 	const rows = previewActionRows(call, width, undefined, tierPolicy(detail.style));
-	if (detail.style === "compact" && (finished === undefined || (!failure && finished.operatorGrant === undefined)))
+	if (!detail.evidence && (finished === undefined || (!failure && finished.operatorGrant === undefined)))
 		return [
 			...rows,
 			...approvalReceiptRows(call, width, failure),

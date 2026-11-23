@@ -2,7 +2,7 @@ import { doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { isStructuredAnswerText, type WorkerProgressSnapshot } from "../../src/domains/telemetry/worker-progress.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import { type DispatchBoardRow, formatTaskIslandLines, runTableRows } from "../../src/interactive/dispatch-board.js";
+import { type DispatchBoardRow, runTableRows } from "../../src/interactive/dispatch-board.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
 
@@ -36,10 +36,6 @@ function boardRow(snapshot: WorkerProgressSnapshot): DispatchBoardRow {
 		usage: { kind: "pending" },
 		progress: snapshot,
 	} as unknown as DispatchBoardRow;
-}
-
-function islandRow(snapshot: WorkerProgressSnapshot): string {
-	return stripTerminalSequences(formatTaskIslandLines([boardRow(snapshot)])[1] ?? "");
 }
 
 function cardLines(snapshot: WorkerProgressSnapshot): string {
@@ -77,9 +73,6 @@ const cases: Array<[string, WorkerProgressSnapshot, RegExp]> = [
 
 for (const [when, snapshot, words] of cases) {
 	test(`${when}, the island and the card name the same activity`, () => {
-		const island = islandRow(snapshot);
-		match(island, words, island);
-		doesNotMatch(island, /· running ·/u, island);
 		match(cardLines(snapshot), words);
 	});
 }

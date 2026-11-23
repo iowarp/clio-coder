@@ -5,6 +5,8 @@ import { presentationTier, type TierPolicy, tierPolicy } from "../core/presentat
 export interface TranscriptDetailPolicy
 	extends Pick<
 		TierPolicy,
+		| "evidence"
+		| "provenance"
 		| "reasoningRows"
 		| "reasoningBeforeActionRows"
 		| "invocationRows"
@@ -25,6 +27,8 @@ function slice(tier: OutputStyle): TranscriptDetailPolicy {
 	const policy = tierPolicy(tier);
 	return {
 		style: policy.tier,
+		evidence: policy.evidence,
+		provenance: policy.provenance,
 		reasoningRows: policy.reasoningRows,
 		reasoningBeforeActionRows: policy.reasoningBeforeActionRows,
 		invocationRows: policy.invocationRows,

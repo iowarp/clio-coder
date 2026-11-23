@@ -1,4 +1,5 @@
 import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
+
 /**
  * `clio-coder fleet view <runId|fleetRootId> [--follow]`.
  *
@@ -38,6 +39,7 @@ import { readSettings } from "../core/config.js";
 import type { OutputStyle } from "../core/defaults.js";
 import { clockLocal, formatCount, formatElapsed } from "../core/format-time.js";
 import { GLYPH } from "../core/glyphs.js";
+import { tierPolicy } from "../core/presentation-tier.js";
 import type { RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { terminalBackground } from "../core/terminal-background.js";
 import { type ColorDepth, colorDepth } from "../core/terminal-preferences.js";
@@ -951,8 +953,9 @@ function fitSegments(segments: ReadonlyArray<string>, width: number): string {
 
 function paneRowLine(row: PaneRow, tier: OutputStyle, typeWidth: number, width: number, paint: PanePaint): string {
 	const clock = row.clock.length > 0 ? row.clock : " ".repeat(CLOCK_WIDTH);
-	const type = tier === "detailed" ? truncatePlain(row.type, typeWidth).padEnd(typeWidth) : "";
-	const text = tier === "detailed" && row.facts !== undefined ? `${row.text}${PANE_SEPARATOR}${row.facts}` : row.text;
+	const type = tierPolicy(tier).provenance ? truncatePlain(row.type, typeWidth).padEnd(typeWidth) : "";
+	const text =
+		tierPolicy(tier).provenance && row.facts !== undefined ? `${row.text}${PANE_SEPARATOR}${row.facts}` : row.text;
 	const tail = [row.mark?.glyph, row.duration].filter((part) => part !== undefined && part.length > 0).join(" ");
 	const head = ` ${clock} ${type.length > 0 ? `${type} ` : ""}`;
 	const fixed = visibleWidth(head) + visibleWidth(row.glyph.glyph) + 1 + (tail.length > 0 ? 1 + visibleWidth(tail) : 0);

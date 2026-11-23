@@ -81,7 +81,7 @@ import { createFollowUpQueuePanel } from "./follow-up-queue-panel.js";
 import type { FooterDashboardDeps, FooterDashboardPanel } from "./footer/dashboard.js";
 import { buildFooterDashboard } from "./footer/dashboard.js";
 import type { ComposerKeyContext } from "./footer/key-hints.js";
-import { type LiveWorkFacts, liveWorkStrip, overlayRunState, railDetail } from "./footer/live-work.js";
+import { type LiveWorkFacts, overlayRunState, railDetail } from "./footer/live-work.js";
 import type { NotificationCenter } from "./footer/notifications.js";
 import { createNotificationCenter, type Notification, routeAppliedNoticeKey } from "./footer/notifications.js";
 import { routeFirstOutput } from "./footer/silence-note.js";
@@ -965,7 +965,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				(readiness.glyph === GLYPH.queued || readiness.glyph === GLYPH.ok) && target.health.status === "healthy";
 			return { ...readiness, ...(quiet ? { label: "is idle", glyph: GLYPH.queued } : {}), detail };
 		},
-		getLiveWorkStrip: (width, escVerb) => liveWorkStrip(clioTheme(), currentLiveWork(), width, escVerb),
 		getBesideCard: (room) => overlayRunState(currentLiveWork(), room),
 		...(deps.workspaceSurfaces
 			? { getWorkspaceRail: (width: number) => deps.workspaceSurfaces?.rail(width) ?? null }
@@ -1284,7 +1283,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const dispatchBoard = factories.createDispatchBoardView(
 		() => dispatchBoardStore.rows(),
 		() => telemetrySnapshot,
-		() => deps.getSettings?.().interface.outputDetail ?? "standard",
 	);
 	const chatRenderer = factories.createChatRenderer({
 		chatPanel,
