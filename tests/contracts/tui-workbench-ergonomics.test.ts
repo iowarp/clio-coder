@@ -156,16 +156,17 @@ for (const width of widths) {
 		);
 		const empty = board.render(width);
 		bounded(empty, width);
-		assert.match(plain(empty), /Use \/run to start a run\./u);
+		assert.match(plain(empty), /\/run <agent> <task> starts one/u);
 		board.selectNext();
 		assert.equal(board.selectedRow(), null);
 		rows = [boardRow("研究-long-1"), boardRow("研究-long-2")];
 		bounded(board.render(width), width);
-		assert.match(plain(board.render(width)), /q6/u);
 		board.selectNext();
 		assert.equal(board.selectedRow()?.runId, "研究-long-2");
 		board.toggleDetail();
 		bounded(board.render(width), width);
+		// The route is a fact of the open detail at standard (boardFacts).
+		assert.match(plain(board.render(width)), /q6/u);
 		rows = [...rows].reverse();
 		assert.equal(board.selectedRow()?.runId, "研究-long-2");
 		board.selectPrevious();
