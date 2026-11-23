@@ -1,13 +1,15 @@
 /**
  * The rails budget (D-TUI 4.8): whatever opens above the composer, the transcript keeps at least a third of the
- * terminal, and a short terminal at least six rows. Under RAILS_FOLD_ROWS the fleet dock and the context rail give up
- * their rows: the composer's top rail already names running workers and compaction, and names other context
- * operations while folded, so the rows only repeated it.
+ * terminal, and a short terminal at least six rows. Under RAILS_FOLD_ROWS a foldable rail (the context rail) gives up
+ * its rows: the composer's top rail names compaction, and names other context operations while folded. The fleet
+ * dock sizes itself by the terminal's rows instead and offers whole variants, so a cut never splits a run from its
+ * telemetry row.
  */
+import type { Component } from "../engine/tui.js";
 import { truncateToWidth } from "../engine/tui.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 
-/** Under this many terminal rows the fleet dock and the context rail fold into the composer's top rail. */
+/** Under this many terminal rows the foldable rails fold into the composer's top rail. */
 const RAILS_FOLD_ROWS = 30;
 
 export function railsFolded(terminalRows: number): boolean {
@@ -20,8 +22,15 @@ function transcriptFloor(terminalRows: number): number {
 	return railsFolded(rows) ? Math.min(6, Math.ceil(rows / 4)) : Math.ceil(rows / 3);
 }
 
+/** A rail that offers whole variants of itself, largest first; the budget grants the first that fits. */
+export interface VariantRail extends Component {
+	renderVariants(width: number): string[][];
+}
+
 export interface RailRows {
 	lines: readonly string[];
+	/** Whole variants, largest first. A rail that offers them is granted one whole or none, never a cut. */
+	variants?: ReadonlyArray<readonly string[]>;
 	/** Lower keeps its rows first when the budget is short. */
 	priority: number;
 	/** Gives up every row while the terminal is folded. */
@@ -29,8 +38,9 @@ export interface RailRows {
 }
 
 /**
- * Each rail's rows within `room`, in the order given. Rails are served by priority; one that does not fit whole keeps
- * its head and ends on a row saying how many it holds back, so a cut never reads as the whole list.
+ * Each rail's rows within `room`, in the order given. Rails are served by priority. A rail with variants gets the
+ * first one that fits whole. A rail of plain lines that does not fit whole keeps its head and ends on a row saying how
+ * many it holds back, so a cut never reads as the whole list.
  */
 export function fitRails(rails: ReadonlyArray<RailRows>, room: number, folded: boolean, width: number): string[][] {
 	const granted: string[][] = rails.map(() => []);
@@ -38,6 +48,14 @@ export function fitRails(rails: ReadonlyArray<RailRows>, room: number, folded: b
 	const order = rails.map((rail, index) => ({ rail, index })).sort((a, b) => a.rail.priority - b.rail.priority);
 	for (const { rail, index } of order) {
 		if (folded && rail.foldable === true) continue;
+		if (rail.variants !== undefined) {
+			const fits = rail.variants.find((variant) => variant.length <= left);
+			if (fits !== undefined) {
+				granted[index] = [...fits];
+				left -= fits.length;
+			}
+			continue;
+		}
 		const lines = rail.lines;
 		if (lines.length <= left) {
 			granted[index] = [...lines];
