@@ -1,11 +1,13 @@
 import { formatFooterTokens } from "../core/display-units.js";
+import { formatCount } from "../core/format-time.js";
 import type { FactMetric, FactScope, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import { factKnownValue } from "../core/telemetry/known.js";
-import { COST_NOT_MEASURED, renderCompactCount } from "../core/telemetry/render.js";
+import { COST_NOT_MEASURED } from "../core/telemetry/render.js";
 import { usageCoverageLabel } from "../domains/session/usage.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 import { type ReasoningUsageView, reasoningFromQuantity } from "./status/reasoning.js";
+import { GLYPH } from "./theme/glyphs.js";
 
 /**
  * One operator turn's spend as the read model folds it: the session's own calls and the worker runs the turn
@@ -86,24 +88,42 @@ function nonZero(quantity: Quantity): boolean {
 export const USAGE_NOT_MEASURED_NOTE = "usage not measured (/usage)";
 
 /**
- * A compact figure without its `+?`: `≥` already says it is a lower bound, and the line ends on how many calls had no
- * usage data, once (F4). A figure nothing reported is `not measured`, never `?`.
+ * A receipt figure in the shared count form (`881`, `2.0k`, `151.5k`): `≈` marks an estimate and `≥` a lower bound, which
+ * already says calls went unreported, so the line ends on how many calls had no usage data, once (F4). A figure nothing
+ * reported is `not measured`, never `?`.
  */
 function compactFigure(quantity: Quantity): string {
-	const figure = renderCompactCount(quantity.fact).replace(/ \+\?$/u, "");
-	return figure === "?" ? "not measured" : figure;
+	const fact = quantity.fact;
+	if ("kind" in fact) {
+		if (fact.kind === "measured") return formatCount(fact.value);
+		if (fact.kind === "estimated") return `${GLYPH.estimate}${formatCount(fact.value)}`;
+		return fact.kind === "unknown" ? "not measured" : "n/a";
+	}
+	const counted = fact.coverage.measured > 0 || fact.coverage.estimated > 0;
+	if (!counted && fact.unknownCount === 0 && fact.absentCount > 0) return "n/a";
+	const figure = `${fact.coverage.estimated > 0 ? GLYPH.estimate : ""}${formatCount(known(quantity))}`;
+	if (fact.unknownCount === 0) return figure;
+	return counted ? `${GLYPH.atLeast}${figure}` : "not measured";
 }
 
+/** The measured part of a quantity in the footer's narrow form, or null when no call measured it. */
 export function measuredCount(quantity: Quantity): string | null {
 	const fact = quantity.fact;
 	if ("kind" in fact) return fact.kind === "measured" ? formatFooterTokens(fact.value) : null;
 	return fact.coverage.measured > 0 ? formatFooterTokens(fact.measured) : null;
 }
 
+/** The measured part of a quantity as a receipt states it, in the shared count form, or null when no call measured it. */
+function receiptCount(quantity: Quantity): string | null {
+	const fact = quantity.fact;
+	if ("kind" in fact) return fact.kind === "measured" ? formatCount(fact.value) : null;
+	return fact.coverage.measured > 0 ? formatCount(fact.measured) : null;
+}
+
 /** `in 321 · out 12` from what was measured, or null when neither side was. */
 function measuredTokens(input: Quantity, output: Quantity): string | null {
-	const inMeasured = measuredCount(input);
-	const outMeasured = measuredCount(output);
+	const inMeasured = receiptCount(input);
+	const outMeasured = receiptCount(output);
 	if (inMeasured === null && outMeasured === null) return null;
 	return [inMeasured === null ? null : `in ${inMeasured}`, outMeasured === null ? null : `out ${outMeasured}`]
 		.filter(Boolean)
@@ -111,7 +131,7 @@ function measuredTokens(input: Quantity, output: Quantity): string | null {
 }
 
 function measuredCached(cacheRead: Quantity): string | null {
-	const cached = measuredCount(cacheRead);
+	const cached = receiptCount(cacheRead);
 	return cached === null || cached === "0" ? null : cached;
 }
 

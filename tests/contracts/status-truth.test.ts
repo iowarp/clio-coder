@@ -321,7 +321,7 @@ test("Esc during a first-token wait puts the receipt under the cancelled prompt 
 	const output = screen(panel);
 	const firstReceipt = output.indexOf("✓ Done · 3.0s");
 	const prompt = output.indexOf("second prompt");
-	const cancelled = output.indexOf("⊘ Cancelled · 15s");
+	const cancelled = output.indexOf("⊘ Stopped · 15s");
 	ok(firstReceipt >= 0, output);
 	ok(prompt > firstReceipt, output);
 	ok(cancelled > prompt, output);
