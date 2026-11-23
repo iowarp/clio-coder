@@ -66,7 +66,7 @@ import {
 	dotSep,
 	emptyState,
 	fitUnits,
-	formatCompactMs,
+	formatElapsed,
 	formatTargetLabel,
 	frame,
 	functionText,
@@ -530,7 +530,7 @@ function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation, c
 
 function retryCountdown(retry: DispatchRetryPresentation, now = Date.now()): string {
 	const remainingMs = Math.max(0, retry.dueAtMs - now);
-	return remainingMs === 0 ? "now" : `in ${formatCompactMs(remainingMs)}`;
+	return remainingMs === 0 ? "now" : `in ${formatElapsed(remainingMs)}`;
 }
 
 /**
@@ -877,7 +877,7 @@ const PLAN_LIVE_STEP_ROWS = 4;
 /** A running plan on the fleet card: its progress and clock, then the steps around the one running now. */
 function planIslandLines(theme: ClioTheme, row: DispatchBoardRow, plan: FleetPlanRunView, width: number): string[] {
 	const lead = plan.state === "cancelling" ? theme.fg("warning", GLYPH.cancelled) : theme.fg("activity", GLYPH.running);
-	const head = `${lead} ${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg("body", planProgressText(plan))}${dotSep(theme)}${theme.fg("annotation", formatCompactMs(row.elapsedMs))}`;
+	const head = `${lead} ${functionText(theme, "dispatch", GLYPH.workerHuman)} ${theme.fg("workerIdentity", `plan ${plan.name}`)}${dotSep(theme)}${theme.fg("body", planProgressText(plan))}${dotSep(theme)}${theme.fg("annotation", formatElapsed(row.elapsedMs))}`;
 	const steps = planStepLines(theme, plan, Math.max(1, width - 2));
 	const running = plan.steps.findIndex((step) => step.state === "running");
 	const start = Math.max(0, Math.min(Math.max(0, running - 1), steps.length - PLAN_LIVE_STEP_ROWS));
@@ -1250,7 +1250,7 @@ function taskIslandHeader(row: DispatchBoardRow, width: number): string {
 	const agentLabel = agentDisplayLabel(row);
 	// A queued run has not started, so it has no clock; a run whose telemetry has not arrived yet still has its own.
 	const elapsed =
-		row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : formatCompactMs(row.elapsedMs));
+		row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : formatElapsed(row.elapsedMs));
 	const dot = dotSep(theme);
 	const presentation = dispatchStatusPresentation(row.status, {
 		compact: true,
@@ -1485,7 +1485,7 @@ function councilMemberView(
  */
 function councilMemberProgress(row: DispatchBoardRow): string | null {
 	if (row.status === "enqueued") return null;
-	const facts: string[] = [formatCompactMs(row.elapsedMs)];
+	const facts: string[] = [formatElapsed(row.elapsedMs)];
 	const measured = dispatchUsageText(row.usage).measuredOutput;
 	if (isTerminalStatus(row.status)) {
 		if (measured !== null && measured > 0) facts.push(`${dispatchUsageText(row.usage).output} out`);
@@ -1582,7 +1582,7 @@ function foldCouncilGroup(
 		status: { ...presentation },
 		...(task !== undefined ? { task: sanitizeCallTargetText(task) } : {}),
 		round,
-		elapsed: formatCompactMs(elapsedMs),
+		elapsed: formatElapsed(elapsedMs),
 		...(selectedInGroup !== undefined ? { selectedRunId: selectedInGroup } : {}),
 		...(rows.length > 0 && rows.every((row) => row.earlier === true) ? { earlier: true as const } : {}),
 	};
@@ -1924,7 +1924,7 @@ export function runTableRows(
 		const usage = dispatchUsageText(row.usage);
 		const weekly = anyAccount ? routeWeeklyQuota(row, quota) : null;
 		const elapsed =
-			row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : formatCompactMs(row.elapsedMs));
+			row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : formatElapsed(row.elapsedMs));
 		const pending = row.usage.kind !== "ready";
 		if (row.plan !== undefined) {
 			const cells: Array<string | TableCell> = [];
@@ -2188,7 +2188,7 @@ function formatDispatchBoardBody(
 					}
 				: {
 						title: runRuleTitle(item.row),
-						meta: item.row.telemetry?.activity.elapsed.display ?? formatCompactMs(item.row.elapsedMs),
+						meta: item.row.telemetry?.activity.elapsed.display ?? formatElapsed(item.row.elapsedMs),
 						runId: item.row.runId,
 						body: dispatchCardBody(item.row, width, deriveRunEvidenceState(telemetry, item.row.runId), {
 							expanded: detailExpanded,

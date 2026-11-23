@@ -1,3 +1,4 @@
+import { formatCountdown } from "../../core/format-time.js";
 import { escapeTerminalControls } from "../../core/terminal-controls.js";
 import {
 	classifyDecisionPresentation,
@@ -55,12 +56,7 @@ import {
 	statusChip,
 	titleRow,
 } from "../theme/index.js";
-import {
-	formatUnattendedRemaining,
-	startUnattendedCountdown,
-	type UnattendedCountdown,
-	type UnattendedTimers,
-} from "../unattended-countdown.js";
+import { startUnattendedCountdown, type UnattendedCountdown, type UnattendedTimers } from "../unattended-countdown.js";
 import { nextContentScrollOffset, type ViewScrollAction } from "../view/view-overlay.js";
 
 /**
@@ -705,7 +701,7 @@ class AskUserOverlayView implements Component {
 		}
 		const left = countdown.remainingMs();
 		if (left === null) return [];
-		const remaining = formatUnattendedRemaining(left);
+		const remaining = formatCountdown(left);
 		if (!headers) {
 			// The widest sentence that fits. `4:57 then recommended · key holds` read as a fragment, so
 			// every form keeps a verb; the outcome is what gives way, never the time or the key that holds it.

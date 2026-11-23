@@ -10,7 +10,7 @@ import {
 	splitWarnings,
 	tokenRow,
 } from "../context-operation-view.js";
-import { clioTheme, formatCompactMs, frame, GLYPH } from "../theme/index.js";
+import { clioTheme, formatElapsed, frame, GLYPH } from "../theme/index.js";
 import { presentProviderError } from "./provider-error.js";
 
 /**
@@ -54,7 +54,7 @@ export function renderContextOperationResult(operation: ContextOperation, width:
 	}
 	if (body.length === 0) body.push(theme.fg("annotation", "No changes."));
 	return frame(theme, title, body, width, {
-		...(operation.elapsedMs !== undefined ? { rightMeta: formatCompactMs(operation.elapsedMs) } : {}),
+		...(operation.elapsedMs !== undefined ? { rightMeta: formatElapsed(operation.elapsedMs) } : {}),
 	});
 }
 

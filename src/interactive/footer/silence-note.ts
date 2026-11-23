@@ -4,7 +4,7 @@ import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import { firstTokenStallLimitMs } from "../../session-control/chat-loop-policy.js";
 import type { AgentStatus } from "../../session-control/status-types.js";
 import { computeWatchdogTier } from "../status/index.js";
-import { formatCompactMs } from "../theme/index.js";
+import { formatElapsed } from "../theme/index.js";
 
 /** What this session's settled calls of one role say about how long a route takes to its first output. */
 export interface RouteFirstOutput {
@@ -63,9 +63,9 @@ export function routeFirstOutput(
 	return routeFold(view, role).get(`${targetId}\0${modelId}`) ?? null;
 }
 
-/** `10m`, not the counter form `10m0s`: a limit reads as a round figure, and an age never lands exactly on one for long. */
+/** `10m`, not the counter form `10m00s`: a limit reads as a round figure, and an age never lands exactly on one for long. */
 function age(ms: number): string {
-	return formatCompactMs(Math.floor(Math.max(0, ms) / 1000) * 1000).replace(/(?<=\d[mh])0s$/u, "");
+	return formatElapsed(Math.floor(Math.max(0, ms) / 1000) * 1000).replace(/(?<=\d[mh])00s$/u, "");
 }
 
 /** Which of Clio's two silence limits governs the phase, read the way the stall timer in the turn runtime applies them. */

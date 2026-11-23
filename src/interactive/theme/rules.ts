@@ -66,6 +66,11 @@ export interface RuleOptions {
 	left?: string;
 	leftToken?: ClioToken;
 	leftRaw?: boolean;
+	/**
+	 * Cells of fill drawn before the left label, then one space: the overlay title form `━ Models ━━━`. The lead is
+	 * drawn the way the rest of the fill is, so a heavy rule leads with heavy cells.
+	 */
+	leftLead?: number;
 	right?: string;
 	fillToken?: ClioToken;
 	rightToken?: ClioToken;
@@ -78,22 +83,25 @@ export interface RuleOptions {
 export function rule(theme: ClioTheme, width: number, options: RuleOptions = {}): string {
 	const safeWidth = Math.max(0, width);
 	if (safeWidth === 0) return "";
-	// A left label starts flush at column 0, with a single trailing space before
-	// the fill. There is no leading space, so labeled rules align with the frame.
+	const drawFill = (columns: number, offset: number): string =>
+		options.renderFill
+			? options.renderFill(columns, offset)
+			: theme.style(options.fillToken ?? "divider", GLYPH.rule.repeat(columns), {
+					bold: options.fillToken === "composerRail",
+				});
+	// Without a lead, a left label starts flush at column 0 with a single trailing
+	// space before the fill, so labeled rules align with the body under them.
 	const leftBody = options.leftRaw
 		? options.left
 		: theme.style(options.leftToken ?? "sectionHeading", options.left ?? "", { bold: true });
-	const left = options.left ? `${leftBody} ` : "";
+	const leadCells = options.left ? Math.max(0, Math.floor(options.leftLead ?? 0)) : 0;
+	const lead = leadCells > 0 ? `${drawFill(leadCells, 0)} ` : "";
+	const left = options.left ? `${lead}${leftBody} ` : "";
 	const rightBody = options.rightRaw ? options.right : theme.fg(options.rightToken ?? "annotation", options.right ?? "");
 	const right = options.right ? ` ${rightBody} ${options.rightTail ?? ""}` : "";
 	const labelsWidth = visibleWidth(left) + visibleWidth(right);
 	if (labelsWidth >= safeWidth) return truncateToWidth(`${left}${right}`.trim(), safeWidth, "", true);
-	const fill = options.renderFill
-		? options.renderFill(safeWidth - labelsWidth, visibleWidth(left))
-		: theme.style(options.fillToken ?? "divider", GLYPH.rule.repeat(safeWidth - labelsWidth), {
-				bold: options.fillToken === "composerRail",
-			});
-	return `${left}${fill}${right}`;
+	return `${left}${drawFill(safeWidth - labelsWidth, visibleWidth(left))}${right}`;
 }
 
 export interface FrameOptions {
@@ -105,8 +113,10 @@ export interface FrameOptions {
 }
 
 /**
- * The one framed-island recipe for every in-flow block: the welcome dashboard,
- * the task island, the steering queue, and the dispatch cards.
+ * A closed framed island. First-party surfaces no longer draw one: an
+ * out-of-flow summary is an open island (`openIsland` in `primitives.ts`), a
+ * titled light rule with indented rows. `frame()` stays for extension panels
+ * (`src/interactive/surfaces/*`).
  *
  * ```
  * ┌─ Title ──────────────────── meta ─┐

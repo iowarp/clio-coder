@@ -2,7 +2,7 @@ import type { ModelAdmissionWait } from "../../core/model-admission.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { ordinal } from "../../session-control/retry-status-text.js";
 import type { AgentStatus, RetryOverlay } from "../../session-control/status-types.js";
-import { formatCompactMs, GLYPH, spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
+import { formatElapsed, GLYPH, spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
 
 export interface VerbRender {
 	text: string;
@@ -27,12 +27,12 @@ export function spinnerFrame(frameIndex: number): string {
 
 /**
  * Elapsed time in the footer and inline status verbs. This delegates to
- * formatCompactMs so status durations share the one duration formatter:
+ * formatElapsed so status durations share the one duration formatter:
  * `4.2s` under ten seconds, `42s`, then `1m5s` with no space and no zero pad
  * (the previous body emitted `1m 5s`).
  */
 function formatStatusElapsed(elapsedMs: number): string {
-	return formatCompactMs(elapsedMs);
+	return formatElapsed(elapsedMs);
 }
 
 /**
@@ -44,7 +44,7 @@ function formatStatusElapsed(elapsedMs: number): string {
 function formatLiveElapsed(elapsedMs: number): string | null {
 	if (elapsedMs < 1_000) return null;
 	const seconds = Math.floor(elapsedMs / 1_000);
-	return seconds < 10 ? `${seconds}s` : formatCompactMs(seconds * 1_000);
+	return seconds < 10 ? `${seconds}s` : formatElapsed(seconds * 1_000);
 }
 
 function elapsedSince(status: AgentStatus, now: number): string | null {

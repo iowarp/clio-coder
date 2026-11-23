@@ -14,7 +14,7 @@ import type {
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createJobRuntime } from "../../src/entry/job-runtime.js";
 import { loopSegment } from "../../src/interactive/footer-panel.js";
-import { formatCompactMs } from "../../src/interactive/theme/labels.js";
+import { formatElapsed } from "../../src/interactive/theme/labels.js";
 import type { ChatLoop } from "../../src/session-control/chat-loop.js";
 import type { MachineTurnRequest } from "../../src/session-control/job-turn-types.js";
 import { loopJobDetail } from "../../src/session-control/loop-command.js";
@@ -650,8 +650,8 @@ describe("job continuation at yolo (#445)", () => {
 	});
 
 	it("rounds a footer countdown and an elapsed clock to whole seconds before splitting minutes from seconds", () => {
-		strictEqual(formatCompactMs(10_799_600), "180m0s");
-		strictEqual(formatCompactMs(59_600), "1m0s");
+		strictEqual(formatElapsed(10_799_600), "3h00m");
+		strictEqual(formatElapsed(59_600), "1m00s");
 		strictEqual(renderFact({ kind: "measured", value: 119_600, source: "local-clock" }, "duration"), "2m00s");
 	});
 

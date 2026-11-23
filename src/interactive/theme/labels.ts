@@ -3,6 +3,17 @@ import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
 
+/** The quantity formatters live in core so the pane process prints them the same way; the TUI reaches them here. */
+export type { FillSource } from "../../core/format-time.js";
+export {
+	formatCount,
+	formatCountdown,
+	formatElapsed,
+	formatFill,
+	formatLimit,
+	formatWaitClock,
+} from "../../core/format-time.js";
+
 const identitySegments = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /** Keep both placement and the distinguishing suffix when an identity must fit. */
@@ -202,26 +213,6 @@ export function formatTargetLabel(
 	if (target.length === 0) return fit(`no target ${GLYPH.dot} ${shown}`);
 	if (model.length === 0) return fit(`${target} ${GLYPH.dot} no model`);
 	return `${target}${options.separator ?? ` ${GLYPH.dot} `}${shown}`;
-}
-
-/**
- * Compact duration used everywhere the TUI shows elapsed time (footer chips,
- * dispatch cards, task island rows): sub-second in ms, sub-minute in seconds
- * with one decimal under 10s, then `XmYs`.
- */
-export function formatCompactMs(value: number): string {
-	const ms = Math.max(0, Math.round(value));
-	if (ms < 1000) return `${ms}ms`;
-	if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
-	// Round before splitting, or 59.6s of a minute prints as `179m60s` (#445).
-	const seconds = Math.round(ms / 1000);
-	return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${seconds % 60}s`;
-}
-
-/** A running wait in whole seconds: tenths on a live clock read as jitter, and a wait never shows milliseconds. */
-export function formatWaitClock(elapsedMs: number): string {
-	const seconds = Math.floor(Math.max(0, elapsedMs) / 1000);
-	return seconds < 10 ? `${seconds}s` : formatCompactMs(seconds * 1000);
 }
 
 /**

@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { operatorCalendar } from "../../src/core/format-time.js";
+import { formatElapsed, formatLimit, operatorCalendar } from "../../src/core/format-time.js";
 import { createLocalClockReminderRegistration } from "../../src/domains/middleware/local-clock-reminder.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { type CompiledSessionPrompt, compile, type SessionPromptInputs } from "../../src/domains/prompts/compiler.js";
@@ -106,5 +106,23 @@ describe("the operator's local date reaches the model (WTF-P 0.8.3 A4)", () => {
 			JSON.stringify(changed),
 		);
 		deepStrictEqual(clock.evaluate(afterTool), []);
+	});
+});
+
+describe("elapsed and limit formatters", () => {
+	it("round before choosing a form and print a limit in its largest whole unit", () => {
+		const elapsed: Array<[number, string]> = [
+			[999, "999ms"],
+			[1000, "1.0s"],
+			[9950, "10s"],
+			[59_500, "1m00s"],
+			[67_000, "1m07s"],
+			[3_599_500, "1h00m"],
+			[7_500_000, "2h05m"],
+		];
+		for (const [ms, text] of elapsed) strictEqual(formatElapsed(ms), text);
+		strictEqual(formatLimit(600_000), "10m");
+		strictEqual(formatLimit(1_800_000), "30m");
+		strictEqual(formatLimit(90_000), "90s");
 	});
 });

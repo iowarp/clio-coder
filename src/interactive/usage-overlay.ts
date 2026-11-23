@@ -30,7 +30,7 @@ import {
 	renderQuotaAccounts,
 	renderWorkerUsage,
 } from "./quota-view.js";
-import { clioTheme, formatCompactMs, padAnsi, positionRow, rule } from "./theme/index.js";
+import { clioTheme, formatElapsed, padAnsi, positionRow, rule } from "./theme/index.js";
 import {
 	economyEvidence,
 	economyReceipt,
@@ -532,7 +532,7 @@ function renderActivity(
 			: `${theme.fg("success", `+${changes.insertions}`)} ${theme.fg("error", `-${changes.deletions}`)} ${theme.fg("annotation", `· ${changes.files} file${changes.files === 1 ? "" : "s"}`)}`;
 	lines.push(...row("Changes", changesValue));
 	const started = startedAt ? Date.parse(startedAt) : Number.NaN;
-	const elapsed = Number.isFinite(started) ? `${formatCompactMs(Math.max(0, now - started))} so far` : null;
+	const elapsed = Number.isFinite(started) ? `${formatElapsed(Math.max(0, now - started))} so far` : null;
 	const view = data.view;
 	if (!view)
 		lines.push(

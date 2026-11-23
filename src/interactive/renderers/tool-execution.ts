@@ -57,7 +57,7 @@ import type { ApprovalRequestView } from "../permission-overlay.js";
 import {
 	clioTheme,
 	collapseHomePath,
-	formatCompactMs,
+	formatElapsed,
 	formatWaitClock,
 	functionText,
 	GLYPH,
@@ -288,16 +288,16 @@ function stripShellWrapperForDisplay(command: string): string {
 }
 
 /**
- * Optional-duration guard around the single duration formatter. formatCompactMs
+ * Optional-duration guard around the single duration formatter. formatElapsed
  * is the one formatter for elapsed time, but these call sites carry a
  * `number | undefined` that may be missing, non-finite, or negative and must
  * then omit the ` · <dur>` segment entirely. Returns null in those cases and
- * delegates every real value to formatCompactMs, so durations render as
+ * delegates every real value to formatElapsed, so durations render as
  * `860ms`, `4.2s`, `42s`, and `1m36s` with no zero padding on the seconds.
  */
 function optionalCompactMs(durationMs: number | undefined): string | null {
 	if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0) return null;
-	return formatCompactMs(durationMs);
+	return formatElapsed(durationMs);
 }
 
 /**
@@ -2191,7 +2191,7 @@ function bashStopRow(execution: BashTranscriptExecution, width: number, killed =
 		return !execution.running && killed ? settledRow(["killed after it ignored the stop", "killed"]) : null;
 	}
 	if (execution.running) return stopSentRow(wait, width);
-	const took = formatCompactMs(Math.floor(wait / 100) * 100);
+	const took = formatElapsed(Math.floor(wait / 100) * 100);
 	if (killed) {
 		return settledRow([
 			`killed ${took} after you asked, because it ignored the stop`,

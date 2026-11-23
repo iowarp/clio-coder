@@ -6,7 +6,7 @@ import type { Text } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
-import { clioTheme, formatCompactMs, GLYPH } from "./theme/index.js";
+import { clioTheme, formatElapsed, GLYPH } from "./theme/index.js";
 
 /** Shared footer projection of live and failed worker states. */
 export const ACTIVE_DISPATCH_STATUSES: ReadonlySet<DispatchBoardStatus> = new Set([
@@ -128,6 +128,6 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 		if (pollFailure.stderr === null || !append(`${last}: ${pollFailure.stderr}`)) append(last);
 	}
 	if (jobs.length > 1) append(`+${jobs.length - 1} loops`);
-	if (dueAt !== null) append(dueAt <= now ? "due now" : `in ${formatCompactMs(dueAt - now)}`);
+	if (dueAt !== null) append(dueAt <= now ? "due now" : `in ${formatElapsed(dueAt - now)}`);
 	return theme.base(tone, fitFooterText(text, width, "…"));
 }

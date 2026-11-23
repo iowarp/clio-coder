@@ -10,7 +10,7 @@ import {
 	brandMark,
 	clioTheme,
 	exactRouteLabel,
-	formatCompactMs,
+	formatElapsed,
 	formatTargetLabel,
 	frame,
 	innerDivider,
@@ -218,7 +218,7 @@ function autonomySummary(snapshot: Pick<ExitSummarySnapshot, "autonomy">, list: 
 	const shown = list ? report.openDecisions.slice(-GIT_HOOKS_SHOWN).map(formatOpenDecision) : [];
 	return [
 		`${report.confinement} yolo`,
-		`${countLabel(used.toolCalls, "tool call")}, ${formatCompactMs(used.activeMs)}, ${formatFooterTokens(used.tokens)} cap tokens`,
+		`${countLabel(used.toolCalls, "tool call")}, ${formatElapsed(used.activeMs)}, ${formatFooterTokens(used.tokens)} cap tokens`,
 		...halted,
 		total === 0 ? "no open decisions" : countLabel(total, "open decision"),
 		...shown,
@@ -309,7 +309,7 @@ export function renderExitSummary(
 			? [resume]
 			: ["To resume:", resumeCommand].flatMap((row) => wrapTextWithAnsi(row, room));
 	const resumeLines = resumeRows.map((row) => theme?.fg("commandHint", row) ?? row);
-	const visitTime = `${formatCompactMs(snapshot.wallMs)} this visit`;
+	const visitTime = `${formatElapsed(snapshot.wallMs)} this visit`;
 	if (!tty) lines.push(`CLIO Coder · Session ${style === "report" ? "report" : "summary"} · this visit`);
 	// Session names can be arbitrarily long; keep identity from consuming the page.
 	lines.push(truncateToWidth(paint(`Session: ${sanitizeCallTargetText(session)}`, "Session: ".length), room));
@@ -450,7 +450,7 @@ export function renderExitSummary(
 			);
 			section(
 				`Timeline${snapshot.timelineOmitted ? ` (${countLabel(snapshot.timelineOmitted, "earlier highlight")} omitted)` : ""}`,
-				snapshot.timeline.map((event) => [formatCompactMs(event.elapsedMs), event.text]),
+				snapshot.timeline.map((event) => [formatElapsed(event.elapsedMs), event.text]),
 			);
 			// One terminal page, capped at 80 rows; reserve resume and an omission row per group.
 			const page = Math.max(16, Math.min(80, Math.floor(height) - 1));

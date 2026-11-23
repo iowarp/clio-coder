@@ -95,10 +95,3 @@ export function startUnattendedCountdown(input: UnattendedCountdownInput): Unatt
 		cancel: () => stop("cancelled"),
 	};
 }
-
-/** Always `m:ss` (`4:59`, `0:45`) so the clock keeps one shape as it crosses the minute. */
-export function formatUnattendedRemaining(ms: number): string {
-	const seconds = Math.max(0, Math.ceil(ms / 1000));
-	const minutes = Math.floor(seconds / 60);
-	return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
-}

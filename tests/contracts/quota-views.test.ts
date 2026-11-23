@@ -300,7 +300,7 @@ test("the receipt leads with the binding window, keeps sub-cent digits and leave
 	match(evidence.find(([label]) => label === "priced from")?.[1] ?? "", /google\/gemini-pro as of 2026-09-01/);
 	match(
 		quotaWaitWords(binding, now),
-		/^waiting for quota on Antigravity Claude and GPT models Weekly 96% used · resets in 1h 0m · read 1m0s ago$/,
+		/^waiting for quota on Antigravity Claude and GPT models Weekly 96% used · resets in 1h 0m · read 1m00s ago$/,
 	);
 	match(quotaWaitWords(null, now), /window unknown/);
 

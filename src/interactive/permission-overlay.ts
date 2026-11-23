@@ -1,3 +1,4 @@
+import { formatCountdown } from "../core/format-time.js";
 import { type ActionClass, actionClassWords } from "../domains/safety/action-classifier.js";
 import { credentialedCallKind } from "../domains/safety/call-consequence.js";
 import {
@@ -52,7 +53,6 @@ import {
 } from "./theme/index.js";
 import { keyName } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
-import { formatUnattendedRemaining } from "./unattended-countdown.js";
 
 export { type AskAxis, askAxis } from "../domains/safety/approval-axis.js";
 export { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -566,7 +566,7 @@ function compactCountdownClause(
 	if (countdown === null) return null;
 	if (countdown === "held") return { outcome: `${GLYPH.phaseBlocked} no time limit now`, holds: "", tone: "annotation" };
 	if (isWorkerWindow(countdown)) {
-		const left = formatUnattendedRemaining(countdown.remainingMs);
+		const left = formatCountdown(countdown.remainingMs);
 		const ending = view.workerFallback === "fail" ? "fails the run" : "denies";
 		if (!countdown.held) return { outcome: `${GLYPH.warn} ${left} ${ending}`, holds: "key holds", tone: "warning" };
 		return {
@@ -575,7 +575,7 @@ function compactCountdownClause(
 			tone: countdown.remainingMs <= HELD_WINDOW_WARNING_MS ? "warning" : "annotation",
 		};
 	}
-	const remaining = formatUnattendedRemaining(countdown);
+	const remaining = formatCountdown(countdown);
 	if (view.origin.kind !== "worker") {
 		return { outcome: `${GLYPH.warn} ${remaining} denies`, holds: "key holds", tone: "warning" };
 	}
@@ -755,7 +755,7 @@ function permissionFacts(
 			...hangingWrap(theme.fg("annotation", `${GLYPH.phaseBlocked} No time limit now. ${answer}, ${escWords}.`), width),
 		);
 	} else if (isWorkerWindow(countdown)) {
-		const left = formatUnattendedRemaining(countdown.remainingMs);
+		const left = formatCountdown(countdown.remainingMs);
 		const sentence = countdown.held
 			? `${GLYPH.phaseBlocked} Extended for you. No answer in ${left} ${after}. ${answer}, ${escWords}.`
 			: `${GLYPH.warn} No answer in ${left} ${after}. Any key holds the card.`;
@@ -765,10 +765,7 @@ function permissionFacts(
 		// The window runs inside the worker's process, so no key here can hold it.
 		timer.push(
 			...hangingWrap(
-				theme.fg(
-					"warning",
-					`${GLYPH.warn} No answer in ${formatUnattendedRemaining(countdown)} ${after}. No key pauses this.`,
-				),
+				theme.fg("warning", `${GLYPH.warn} No answer in ${formatCountdown(countdown)} ${after}. No key pauses this.`),
 				width,
 			),
 		);
@@ -777,7 +774,7 @@ function permissionFacts(
 			...hangingWrap(
 				theme.fg(
 					"warning",
-					`${GLYPH.warn} No answer in ${formatUnattendedRemaining(countdown)} denies this call and CLIO Coder continues without it. Any key holds the card.`,
+					`${GLYPH.warn} No answer in ${formatCountdown(countdown)} denies this call and CLIO Coder continues without it. Any key holds the card.`,
 				),
 				width,
 			),
