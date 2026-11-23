@@ -10,6 +10,8 @@ import { clioTheme, padAnsi } from "./theme/index.js";
  */
 
 export const ACTIVITY_SPAN_DAYS = 182;
+/** The sparkline's span: one cell per week, the heatmap's 182 days. */
+export const ACTIVITY_SPARK_WEEKS = 26;
 const DAY_MS = 86_400_000;
 const LEVEL_TOKENS: ReadonlyArray<ClioToken> = ["meterFree", "activityLow", "activityMedium", "activityHigh"];
 /** A cell's shape carries its level in every mode: a hue-only scale says nothing without colour or to a colorblind reader. */
@@ -46,6 +48,28 @@ export function bucketActivity(sources: ReadonlyArray<ActivitySource>, now: numb
 function level(count: number, max: number): number {
 	if (count <= 0 || max <= 0) return 0;
 	return Math.min(3, Math.max(1, Math.ceil((count / max) * 3)));
+}
+
+/** Midnight of the Monday that starts the week holding `now`, in local time. */
+function weekStart(now: number): number {
+	const today = new Date(now);
+	today.setHours(0, 0, 0, 0);
+	return today.getTime() - ((today.getDay() + 6) % 7) * DAY_MS;
+}
+
+/**
+ * Activity per Monday-first week, oldest first and ending on the week that holds `now`: the values of the one-row
+ * sparkline that stands in for the heatmap below the detailed tier.
+ */
+export function weeklyActivity(days: ReadonlyMap<string, number>, now: number, weeks = ACTIVITY_SPARK_WEEKS): number[] {
+	const count = Math.max(1, Math.floor(weeks));
+	const first = weekStart(now) - (count - 1) * 7 * DAY_MS;
+	return Array.from({ length: count }, (_, week) => {
+		let sum = 0;
+		// Noon steps across a daylight-saving change and still lands on the intended local day.
+		for (let day = 0; day < 7; day += 1) sum += days.get(dayKey(first + (week * 7 + day) * DAY_MS + DAY_MS / 2)) ?? 0;
+		return sum;
+	});
 }
 
 /** Monday-first week columns ending on the week that holds `now`. */

@@ -263,21 +263,27 @@ test("usage suppresses the empty graph outside Detailed and adapts without reope
 		showOverlay: () => ({ hide() {} }),
 	} as unknown as TUI;
 	const telemetry = { subscribe: () => () => {} } as unknown as TelemetryContract;
-	const handle = openUsageOverlay(tui, telemetry, { getOutputStyle: () => style });
+	// /usage reads the tier from the policy table, so each step sets it there.
+	setPresentationTier(style);
+	const handle = openUsageOverlay(tui, telemetry);
 	try {
 		const frame = dockTop(tui)?.frame as unknown as Component;
 		for (const width of [24, 80, 120, 200]) {
 			style = "compact";
+			setPresentationTier(style);
 			doesNotMatch(plain(frame.render(width)), /182 days|Less.*More/);
 			style = "standard";
+			setPresentationTier(style);
 			doesNotMatch(plain(frame.render(width)), /182 days|Less.*More/);
 			style = "detailed";
+			setPresentationTier(style);
 			const detailed = frame.render(width);
 			fits(detailed, width);
 			if (width >= 80) match(plain(detailed), /182 days/);
 		}
 	} finally {
 		handle.hide();
+		setPresentationTier("standard");
 	}
 });
 

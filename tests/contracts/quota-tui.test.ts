@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { localQuotaSnapshot } from "../../src/domains/quota/presentation.js";
@@ -271,7 +272,9 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 			return { hide: () => hidden++ };
 		},
 	} as unknown as TUI;
-	const handle = openUsageOverlay(tui, telemetry, { getOutputStyle: () => "detailed" });
+	// /usage reads the tier from the policy table.
+	setPresentationTier("detailed");
+	const handle = openUsageOverlay(tui, telemetry);
 	// The engine overlay is a zero-row focus proxy; the composer draws the
 	// docked frame, so the test renders the dock's top entry at the terminal height.
 	const frame = dockTop(tui)?.frame as unknown as Component | undefined;
@@ -317,14 +320,14 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		listener?.(snapshot);
 		ok(renders > before);
 		frame?.handleInput?.("3");
-		match(render(), /Session tokens & cost/);
+		match(render(), /Session ─.* this session, every branch/);
 		render(40, 12);
 		// Twelve rows leave the dock five body rows, one of them content, so the
 		// End and Home checks read a 16-row terminal.
 		frame?.handleInput?.("\x1b[F");
 		match(render(40, 16), /no calls recorded/);
 		frame?.handleInput?.("\x1b[H");
-		match(render(40, 16), /Session tokens/);
+		match(render(40, 16), /Session ─/);
 		frame?.handleInput?.("2");
 		match(render(), /Account-wide limits/);
 		frame?.handleInput?.("4");
@@ -333,7 +336,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		ok(renders > rendersBefore);
 		const live = render();
 		match(live, /fixture\/model-a/);
-		match(live, /1,234 tokens/);
+		match(live, /1,234\s+tokens/);
 		match(live, /\$0.25/);
 		doesNotMatch(live, /no calls recorded/);
 		addCalls(
@@ -361,8 +364,8 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		);
 		frame?.handleInput?.("3");
 		const combined = scrolled();
-		match(combined, /worker calls.*2/);
-		match(combined, /conversation calls.*1/);
+		match(combined, /workers 2/);
+		match(combined, /conversation 1/);
 		match(combined, /System One.*1/);
 		match(combined, /usage data\s+1 call had no usage data/);
 		// An unreported cache read is unknown on this tab, never 0 (#434).
@@ -388,6 +391,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		match(render(), /Less .* More/);
 	} finally {
 		handle.hide();
+		setPresentationTier("standard");
 	}
 	strictEqual(unsubscribed, 1);
 	strictEqual(hidden, 1);

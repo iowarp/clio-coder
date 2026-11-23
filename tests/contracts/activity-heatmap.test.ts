@@ -30,11 +30,11 @@ test("usage Activity preserves unpriced, estimated and measured session cost fro
 	const call = (usd: number | null, pricedBy?: "free" | "catalog" | "target-rates") =>
 		telemetryCall("usage-session", { usage: { input: 100, output: 10 }, usd, ...(pricedBy ? { pricedBy } : {}) });
 	const cases: Array<{ calls: ReturnType<typeof call>; expected: RegExp; unpriced?: boolean }> = [
-		{ calls: [], expected: /Session\s+0 tokens/, unpriced: true },
-		{ calls: call(null), expected: /Session\s+110 tokens · cost not measured/, unpriced: true },
-		{ calls: call(0, "free"), expected: /Session\s+\$0\.00 free/ },
-		{ calls: call(0.25, "catalog"), expected: /Session\s+~\$0\.25 est/ },
-		{ calls: [...call(0.25), ...call(null)], expected: /Session\s+\$0\.25 \+\?/ },
+		{ calls: [], expected: /session\s+0 tokens/, unpriced: true },
+		{ calls: call(null), expected: /session\s+110 tokens · cost not measured/, unpriced: true },
+		{ calls: call(0, "free"), expected: /session\s+\$0\.00 free/ },
+		{ calls: call(0.25, "catalog"), expected: /session\s+~\$0\.25 est/ },
+		{ calls: [...call(0.25), ...call(null)], expected: /session\s+\$0\.25 \+\?/ },
 	];
 	for (const { calls, expected, unpriced } of cases) {
 		const text = activityOverlay(telemetryViewOf("usage-session", calls));
@@ -45,7 +45,7 @@ test("usage Activity preserves unpriced, estimated and measured session cost fro
 
 test("usage Activity leaves pending or unavailable Git changes unobserved", () => {
 	const text = activityOverlay(telemetryViewOf("usage-session", []));
-	match(text, /Changes\s+not observed/);
+	match(text, /changes\s+not observed/);
 	doesNotMatch(text, /no repository/);
 });
 

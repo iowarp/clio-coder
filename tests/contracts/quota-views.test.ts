@@ -150,12 +150,12 @@ test("worker quota joins only known local credential owners and does not claim a
 	doesNotMatch(text, /\$0.00|quota saved/);
 	match(
 		plain(renderWorkerUsage([{ ...row, usage: { kind: "unavailable" } }], [], quotaRows([account]), 80)),
-		// No measured value is the dash in every cell, and the legend under the table says why once.
-		/— {4}—[\s\S]*n\/a not measured/,
+		// No measured value is the dash in every cell, and the line under the table says what a dash means, once.
+		/— {4}—[\s\S]*— not measured, or no calls yet/,
 	);
 	match(
 		plain(renderWorkerUsage([{ ...row, usage: { kind: "pending" } }], [], quotaRows([account]), 80)),
-		/researcher {2}1\.0s {3}— {4}—[\s\S]*— no calls yet/,
+		/researcher {2}1\.0s {3}— {4}—[\s\S]*— not measured, or no calls yet/,
 	);
 });
 
