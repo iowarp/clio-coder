@@ -1,7 +1,7 @@
 import { cardHead, cardRail, cardRows } from "../card.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
-import { groupWrappedRows, previewBudget, previewLines, previewRows } from "./preview.js";
+import { groupWrappedRows, previewBudget, previewLines, previewRows, tidyPreviewText } from "./preview.js";
 /**
  * Structured renderer for tool-execution chat segments (Slice A of the
  * pi-coding-agent parity work). pi-coding-agent renders every tool call as
@@ -16,9 +16,15 @@ import { groupWrappedRows, previewBudget, previewLines, previewRows } from "./pr
  * two surfaces stay byte-identical.
  */
 
+import {
+	LONG_TOOL_DURATION_MS,
+	type TierPolicy,
+	type ToolDurationBudget,
+	tierPolicy,
+} from "../../core/presentation-tier.js";
+import { type RunCountBuckets, type RunFacts, type RunOutcome, runCountBuckets } from "../../core/run-row.js";
 import { isSkillLoadRefusal, type SkillLoadRefusal } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
-import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { actionClassWords } from "../../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { safetyNetRailText } from "../../domains/safety/decision-presentation.js";
@@ -57,6 +63,7 @@ import type { ApprovalRequestView } from "../permission-overlay.js";
 import {
 	clioTheme,
 	collapseHomePath,
+	factRows,
 	formatElapsed,
 	formatWaitClock,
 	functionText,
@@ -69,7 +76,7 @@ import {
 import { shellCommandInk, toolOutputInk } from "./code-ink.js";
 import { renderDiffLines } from "./diff.js";
 import { LiveToolView } from "./live-tool-view.js";
-import { highlightJsonLine, tryRenderJson, tryRenderXml } from "./structured.js";
+import { highlightJsonLine, jsonFactRows, tryRenderJson, tryRenderXml } from "./structured.js";
 import { renderToolResultImages } from "./tool-images.js";
 
 // The argument projection lives in the safety domain so the worker tool seam
@@ -298,6 +305,25 @@ function stripShellWrapperForDisplay(command: string): string {
 function optionalCompactMs(durationMs: number | undefined): string | null {
 	if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0) return null;
 	return formatElapsed(durationMs);
+}
+
+/**
+ * A settled call's duration under its tier's `toolDurations` budget: never, from one second, or always. Without a
+ * budget (inspection, export) every duration shows.
+ */
+function budgetedDuration(durationMs: number | undefined, budget: ToolDurationBudget = "always"): string | null {
+	if (budget === "never") return null;
+	if (budget === "long" && (durationMs ?? 0) < LONG_TOOL_DURATION_MS) return null;
+	return optionalCompactMs(durationMs);
+}
+
+/**
+ * A live call's ticking elapsed time. Live work always ticks (2.8), but a sub-second figure shows only where the tier
+ * states every duration, so a quick call does not flash a figure its settled row then drops.
+ */
+function liveElapsed(elapsedMs: number | undefined, budget: ToolDurationBudget = "always"): string | null {
+	if (budget !== "always" && (elapsedMs ?? 0) < LONG_TOOL_DURATION_MS) return null;
+	return optionalCompactMs(elapsedMs);
 }
 
 /**
@@ -605,7 +631,7 @@ const SKILL_ACTIVATION_WORDS: Readonly<Record<string, string>> = {
  * free text except a failed command's exit status, which the main agent's
  * error path delivers as text alone.
  */
-function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): string[] {
+function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow, provenance = true): string[] {
 	const skill = skillLoadFacts(finished);
 	if (skill !== null) {
 		return [
@@ -655,19 +681,25 @@ function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): stri
 			break;
 		}
 		case "delegate": {
+			// A detached batch runs on after the call returns; its id is provenance, which detailed states.
+			if (row.toolName === ToolNames.Dispatch && details?.mode === "detached") {
+				parts.push("running in the background");
+				const batch = stringField(details, "batchId");
+				if (batch !== null && provenance) parts.push(`batch ${batch}`);
+				break;
+			}
 			const runCount = numberField(details, "runCount");
 			if (runCount !== null) {
 				// A card under the call is the run's row: a single dispatch states no
-				// tally, a fan-out keeps its execution counts, and quality stays on
-				// each card. A dispatch with no card carries both. A recovery after a
-				// failed attempt is always stated, since the card shows only the last.
+				// tally, a fan-out counts its runs by state. A dispatch with no card
+				// carries the counts too. A recovery after a failed attempt is always
+				// stated, since the card shows only the last.
 				const recovered = numberField(details, "recoveredCount") ?? 0;
 				if (finished.cardAttached === true && runCount <= 1 && recovered === 0) break;
-				const failed = numberField(details, "failedCount") ?? 0;
-				parts.push(failed > 0 ? `${runCount - failed} ok, ${failed} failed` : `${runCount} ok`);
+				const pending = details?.complete === false ? (numberField(details, "pendingCount") ?? 0) : 0;
+				if (pending > 0) parts.push(`${pending} of ${runCount} still running`);
+				else parts.push(...runCountFacts(details, runCount));
 				if (recovered > 0) parts.push(`${recovered} recovered after a failed attempt`);
-				const quality = finished.cardAttached === true ? null : runQuality(details, runCount);
-				if (quality !== null) parts.push(`quality ${quality}`);
 				break;
 			}
 			const counts = isPlainObject(details?.counts) ? details.counts : null;
@@ -695,26 +727,71 @@ function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): stri
 	return parts;
 }
 
+/** The run-row count buckets in the order every count row states them, worst first. */
+const RUN_BUCKET_ORDER: ReadonlyArray<keyof RunCountBuckets> = [
+	"failed",
+	"waiting",
+	"unverified",
+	"running",
+	"queued",
+	"cancelled",
+	"ok",
+];
+
+const RUN_SUCCESS_STATES: ReadonlySet<string> = new Set(["succeeded", "completed", "done"]);
+
+const RUN_VALIDATION: Readonly<Record<string, NonNullable<RunFacts["validation"]>>> = {
+	validated: "passed",
+	failed: "failed",
+	ungrounded: "self-reported",
+	absent: "none",
+	not_applicable: "none",
+};
+
 /**
- * Validation quality across a dispatch's runs, counted by state, with
- * runs that carry no trust summary counted as unknown. Execution success
- * and quality stay separate facts: a run can execute cleanly and fail
- * validation.
+ * A run entry of a dispatch or collect result as run-row facts: its outcome from the exit and the stated outcome, its
+ * validation and record integrity from the trust axes, so a successful exit with an adverse verdict counts adverse.
  */
-function runQuality(details: Record<string, unknown> | null, runCount: number): string | null {
+function runFactsOf(run: unknown): RunFacts {
+	const entry = isPlainObject(run) ? run : {};
+	const said = stringField(entry, "outcome") ?? stringField(entry, "state");
+	const exitCode = entry.exitCode;
+	const outcome: RunOutcome =
+		said === "cancelled" || said === "canceled"
+			? "cancelled"
+			: said === "blocked" || said === "guarded" || said === "running" || said === "queued"
+				? said
+				: (said !== null && !RUN_SUCCESS_STATES.has(said)) || (typeof exitCode === "number" && exitCode !== 0)
+					? "failed"
+					: "succeeded";
+	const axes = isPlainObject(entry.trust) && isPlainObject(entry.trust.axes) ? entry.trust.axes : null;
+	const status = isPlainObject(entry.trustStatus) ? entry.trustStatus : null;
+	const axis = (name: string): string | null => {
+		const nested = status?.[name];
+		return stringField(axes, name) ?? (isPlainObject(nested) ? stringField(nested, "state") : null);
+	};
+	const seal = axis("artifactIntegrity");
+	return {
+		agent: stringField(entry, "agentId") ?? "run",
+		origin: "model",
+		outcome,
+		integrity: seal === "verified" ? "verified" : seal === "failed" ? "compromised" : "unverified",
+		validation: RUN_VALIDATION[axis("validationGrounding") ?? ""] ?? "unknown",
+	};
+}
+
+/**
+ * A dispatch's runs counted by state, worst first (`1 failed · 1 unverified · 1 ok`). A result that lists no runs
+ * counts its exits alone.
+ */
+function runCountFacts(details: Record<string, unknown> | null, runCount: number): string[] {
 	const runs = Array.isArray(details?.runs) ? details.runs.slice(0, runCount) : [];
-	const counts = new Map<string, number>();
-	for (const run of runs) {
-		const trust = isPlainObject(run) && isPlainObject(run.trust) ? run.trust : null;
-		const axes = isPlainObject(trust?.axes) ? trust.axes : null;
-		const word = trustStateWord("validationGrounding", stringField(axes, "validationGrounding") ?? "unknown");
-		counts.set(word, (counts.get(word) ?? 0) + 1);
+	if (runs.length === 0) {
+		const failed = numberField(details, "failedCount") ?? 0;
+		return [...(failed > 0 ? [`${failed} failed`] : []), ...(runCount > failed ? [`${runCount - failed} ok`] : [])];
 	}
-	if (runs.length < runCount) {
-		const unknown = trustStateWord("validationGrounding", "unknown");
-		counts.set(unknown, (counts.get(unknown) ?? 0) + runCount - runs.length);
-	}
-	return counts.size === 0 ? null : [...counts].map(([word, count]) => `${count} ${word}`).join(", ");
+	const buckets = runCountBuckets(runs.map(runFactsOf));
+	return RUN_BUCKET_ORDER.filter((key) => buckets[key] > 0).map((key) => `${buckets[key]} ${key}`);
 }
 
 /** A read states the range it returned, which is truer than the window it asked for. */
@@ -820,9 +897,13 @@ function structuredExitCode(finished: ToolExecutionFinished): string | null {
  * change stat rides first in its own colors. One line of plain text carries
  * the call and its outcome when copied.
  */
-function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { facts: string; offload: string } {
+function ledgerTail(
+	finished: ToolExecutionFinished,
+	row: ResolvedToolRow,
+	provenance = true,
+): { facts: string; offload: string } {
 	const executed = !didNotRun(finished);
-	const parts = executed ? classFacts(finished, row) : [];
+	const parts = executed ? classFacts(finished, row, provenance) : [];
 	if (executed) {
 		if (isTruncatedResult(finished) && !parts.includes("truncated")) parts.push("truncated");
 		const details = detailsOf(finished.result);
@@ -1017,6 +1098,11 @@ interface StatusMeta {
 	blockReason?: string | undefined;
 	/** What an in-flight call has produced so far (`146 lines`, `3 edits`). */
 	live?: string | undefined;
+	/**
+	 * The tier's budgets: which durations show and whether provenance (a batch id) does. Absent for inspection and
+	 * export, which state everything.
+	 */
+	policy?: TierPolicy | undefined;
 }
 
 /**
@@ -1055,30 +1141,37 @@ function refusalTail(reason: string): string {
 
 function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === undefined) return "";
+	const budget = meta.policy?.toolDurations;
 	const live = meta.live === undefined ? "" : toolMeta(` · ${meta.live}`);
 	if (status === "forming") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" preparing")}${live}`;
 	if (status === "ready") return ` ${toolMeta(GLYPH.queued)}${toolMeta(" queued")}${live}`;
 	if (status === "running") {
 		// The progressive verb already says the call is running; the tail adds
 		// only the live mark and the elapsed time.
-		const elapsed = optionalCompactMs(meta.elapsedMs);
+		const elapsed = liveElapsed(meta.elapsedMs, budget);
 		return ` ${theme.fg("activity", GLYPH.running)}${elapsed === null ? "" : toolMeta(` ${elapsed}`)}${live}`;
 	}
-	const duration = optionalCompactMs(meta.durationMs);
+	const duration = budgetedDuration(meta.durationMs, budget);
 	const durationSuffix = duration ? toolMeta(` · ${duration}`) : "";
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
 	if (status === "unfinished") return ` ${yellow(GLYPH.warn)}${durationSuffix}`;
 	if (status === "cancelled") return ` ${toolMeta(GLYPH.cancelled)}${durationSuffix}`;
 	if (status === "not_run") return ` ${yellow(GLYPH.warn)}${toolMeta(" output limit")}`;
-	// A blocked row says `blocked` as its verb; an aborted or orphaned one names
-	// its outcome here. The exit status is a fact on the row, never a suffix.
-	const outcomeSuffix = meta.outcome !== undefined && meta.outcome !== "blocked" ? toolMeta(` ${meta.outcome}`) : "";
-	// A refusal that names no rule tells the operator only that something was
-	// stopped. The reason rides the same tail as the outcome so the collapsed
-	// row and the expanded header state it identically.
+	// A failed row ends on its state, glyph and word, in the error role: `✗ failed`, or the outcome that stands for it
+	// (`✗ aborted`, `✗ blocked`). The exit status and a refusal's reason are facts on the row, never a suffix.
+	const word = meta.outcome ?? "failed";
+	return `${durationSuffix} ${red(`${STATUS_ERROR_GLYPH} ${word}`)}`;
+}
+
+/**
+ * A refusal that names no rule tells the operator only that something was stopped, so a refused or stopped row
+ * states its reason as its last fact, ahead of `✗`. It rides the lead, so a narrow row cuts the reason, never the
+ * state.
+ */
+function refusalReason(status: HeaderStatus, meta: StatusMeta): string {
+	if (status !== "error") return "";
 	const reason = meta.outcome !== undefined ? meta.blockReason?.trim() : undefined;
-	const reasonSuffix = reason ? toolMeta(` · ${refusalTail(reason)}`) : "";
-	return ` ${red(STATUS_ERROR_GLYPH)}${outcomeSuffix}${reasonSuffix}${durationSuffix}`;
+	return reason ? toolMeta(` · ${refusalTail(reason)}`) : "";
 }
 
 /** A running process whose stop already went out: its card must not keep the live mark beside a stop row. */
@@ -1104,9 +1197,12 @@ const CLASS_MARKS: Readonly<Record<ToolClass, string>> = {
 	external: GLYPH.classExternal,
 };
 
-/** The class mark in the gutter, toolMeta, with the space that separates it from the verb. */
-function classMark(toolClass: ToolClass): string {
-	return theme.fg(toolClass === "execute" ? "shellAction" : "toolGlyph", `${CLASS_MARKS[toolClass]} `);
+/** The class mark in the gutter with the space that separates it from the verb; a failed call's in the error role. */
+function classMark(toolClass: ToolClass, failed = false): string {
+	return theme.fg(
+		failed ? "error" : toolClass === "execute" ? "shellAction" : "toolGlyph",
+		`${CLASS_MARKS[toolClass]} `,
+	);
 }
 
 /** The row a call reads as, from its redacted arguments and, once settled, its result. */
@@ -1368,7 +1464,7 @@ function sublineParts(
 		return { lead, tail: "" };
 	}
 	if (refusal !== null) {
-		const lead = `${classMark("knowledge")}${toolMeta("skill")} ${theme.fg("skillIdentity", sanitizeCallTargetText(refusal.name))} ${functionText(theme, "skill", "not loaded")}${toolMeta(" · ")}${refusalFact(refusal)}`;
+		const lead = `${classMark("knowledge", status === "error")}${toolMeta("skill")} ${theme.fg("skillIdentity", sanitizeCallTargetText(refusal.name))} ${functionText(theme, "skill", "not loaded")}${toolMeta(" · ")}${refusalFact(refusal)}${refusalReason(status, meta)}`;
 		return { lead, tail: statusGlyph(status, meta) };
 	}
 	const settled =
@@ -1406,7 +1502,6 @@ function sublineParts(
 		inline === null
 			? ""
 			: ` ${toolMeta("→")} ${theme.fg("body", truncate(sanitizeCallTargetText(inline.answer), ARG_PREVIEW_LIMIT))}`;
-	const scalars = inlineArgs(row, finished);
 	// A resource read names what it read (`handbook`) unless the path the row
 	// shows already says so (`docs/retry.md`, `SKILL.md`).
 	const resourceLabel = classifyResourceRead(call.toolName, call.args);
@@ -1414,7 +1509,6 @@ function sublineParts(
 		resourceLabel !== null && !stripTerminalSequences(object).toLowerCase().includes(resourceLabel)
 			? toolMeta(` · ${resourceLabel}`)
 			: "";
-	const inlineText = scalars.length > 0 ? theme.fg("toolArgument", ` · ${scalars.join(" · ")}`) : "";
 	// A process states who started it, because the two read the same otherwise and only one was the model's doing.
 	const executed = call.actor !== undefined && !notRun && status !== "forming" && status !== "ready";
 	const actor = !executed
@@ -1424,14 +1518,19 @@ function sublineParts(
 		executed && call.requestedBy && !omitRequester
 			? toolMeta(` (requested by ${sanitizeCallTargetText(call.requestedBy)})`)
 			: "";
-	const head = (inline: string): string =>
-		`${classMark(row.spec.class)}${actor}${notRun || failedChange ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${requestedBy}${scope}${answer}${resource}${inline}`;
-	const ledger = finished === null ? null : ledgerTail(finished, row);
+	// Arguments the row does not consume never ride the header; detailed states them as the card's `args` row.
+	const head = `${classMark(row.spec.class, status === "error")}${actor}${notRun || failedChange ? theme.fg("warning", verb) : styledVerb(verb, row)}${object.length > 0 ? ` ${object}` : ""}${requestedBy}${scope}${answer}${resource}`;
+	const provenance = meta.policy === undefined || meta.policy.runSubRows > 0;
+	const ledger = finished === null ? null : ledgerTail(finished, row, provenance);
 	const local = call.excludeFromContext === true ? toolMeta(" · not sent to model") : "";
 	// A check here would state the call beside a card whose run may read `!` or `✗`, so the card alone states the outcome.
+	// A tally of runs states their outcomes itself, worst first, so it carries no `✓` beside a `1 failed` either.
+	// The batch's elapsed time is the run's own fact, so it shows at every tier.
+	const tallied =
+		row.spec.class === "delegate" && finished !== null && numberField(detailsOf(finished.result), "runCount") !== null;
 	const cardDuration = optionalCompactMs(meta.durationMs);
 	const tail =
-		status === "ok" && row.context.cardAttached === true
+		status === "ok" && (row.context.cardAttached === true || tallied)
 			? cardDuration === null
 				? ""
 				: toolMeta(` · ${cardDuration}`)
@@ -1441,16 +1540,10 @@ function sublineParts(
 					? // The person owns this wait: a ticking `● 5.7s` read as Clio still working on it (HS11).
 						` ${theme.fg("attentionRail", GLYPH.phaseBlocked)}${toolMeta(" waiting for you")}`
 					: statusGlyph(status, meta);
-	const compose = (inline: string): SublineParts =>
-		ledger !== null
-			? { lead: `${head(inline)}${ledger.facts}`, tail: `${tail}${ledger.offload}` }
-			: { lead: `${head(inline)}${local}`, tail };
-	const full = compose(inlineText);
-	if (width === undefined || inlineText.length === 0 || visibleWidth(`${full.lead}${full.tail}`) <= width) return full;
-	// A row whose status would wrap onto a second line gives up its scalar
-	// arguments first, but only when that is enough to keep the row whole.
-	const lean = compose("");
-	return visibleWidth(`${lean.lead}${lean.tail}`) <= width ? lean : full;
+	const reason = refusalReason(status, meta);
+	return ledger !== null
+		? { lead: `${head}${ledger.facts}${reason}`, tail: `${tail}${ledger.offload}` }
+		: { lead: `${head}${local}${reason}`, tail };
 }
 
 function contentWidth(width: number): number {
@@ -1994,13 +2087,18 @@ function singleActionLine(lead: string, tail: string, width: number): string {
 	return theme.base("toolSummary", releaseSpaces(`${truncateToWidth(lead, budget, GLYPH.ellipsis)}${status}`));
 }
 
-function previewActionRows(call: ToolExecutionStart | ToolExecutionFinished, width: number, live?: string): string[] {
-	if ("result" in call && skillRefusalOf(call) !== null) return renderToolSubline(call, width);
+function previewActionRows(
+	call: ToolExecutionStart | ToolExecutionFinished,
+	width: number,
+	live?: string,
+	policy?: TierPolicy,
+): string[] {
+	if ("result" in call && skillRefusalOf(call) !== null) return renderToolSubline(call, width, policy);
 	const status = sublineStatus(call);
 	const meta: StatusMeta =
 		"result" in call
-			? { durationMs: call.durationMs, outcome: call.outcome, blockReason: call.blockReason }
-			: { elapsedMs: call.elapsedMs, live };
+			? { durationMs: call.durationMs, outcome: call.outcome, blockReason: call.blockReason, policy }
+			: { elapsedMs: call.elapsedMs, live, policy };
 	let parts = sublineParts(call, status, meta, width);
 	// A narrow row gives up who requested the call before any of the command it ran.
 	if (visibleWidth(`${parts.lead}${parts.tail}`) > width)
@@ -2020,14 +2118,18 @@ function previewActionRows(call: ToolExecutionStart | ToolExecutionFinished, wid
 	return [singleActionLine(parts.lead, parts.tail, width)];
 }
 
-/** Stable action identity, outcome, and captured-result metadata. */
-export function renderToolSubline(wire: ToolExecutionStart | ToolExecutionFinished, width: number): string[] {
+/** Stable action identity, outcome, and captured-result metadata; `policy` budgets it as a tier's transcript row. */
+export function renderToolSubline(
+	wire: ToolExecutionStart | ToolExecutionFinished,
+	width: number,
+	policy?: TierPolicy,
+): string[] {
 	const call = presentedCall(wire);
 	const status = sublineStatus(call);
 	const meta: StatusMeta =
 		"result" in call
-			? { durationMs: call.durationMs, outcome: call.outcome, blockReason: call.blockReason }
-			: { elapsedMs: call.elapsedMs };
+			? { durationMs: call.durationMs, outcome: call.outcome, blockReason: call.blockReason, policy }
+			: { elapsedMs: call.elapsedMs, policy };
 	// A failed call always shows its bounded body, which carries the diagnosis;
 	// the row states the outcome once and never excerpts the body onto itself.
 	const parts = sublineParts(call, status, meta, width);
@@ -2324,10 +2426,14 @@ function previewArguments(
 	call: ToolExecutionStart | ToolExecutionFinished,
 	width: number,
 	livePayload = false,
+	argRow = false,
 ): Record<string, unknown> {
 	const row = resolveRow(call);
 	const finished = "result" in call ? call : null;
 	const failed = finished !== null && (finished.isError || finished.outcome !== undefined);
+	// Scalars never ride the header. Where no `args` row states them, a failed call keeps them in its body: what it
+	// was asked to do is part of why it failed.
+	const keepScalars = failed && !argRow;
 	const consumed = new Set<string>([...row.spec.consumes, ...factConsumedFields(row, finished)]);
 	const display = objectDisplay(row, width);
 	const rest: Record<string, unknown> = {};
@@ -2342,7 +2448,7 @@ function previewArguments(
 			if (typeof value === "string" && cutFromRow(value, display)) rest[key] = value;
 			continue;
 		}
-		if (row.spec.dropsUnknownArgs === true || inlineArgValue(value) !== null) continue;
+		if (row.spec.dropsUnknownArgs === true || (inlineArgValue(value) !== null && !keepScalars)) continue;
 		rest[key] = value;
 	}
 	return rest;
@@ -2517,6 +2623,17 @@ export function renderToolPreview(
 	const failure = (finished?.isError === true && finished.notRunCause === undefined) || finished?.outcome !== undefined;
 	const row = resolveRow(call);
 	const command = row.spec.class === "execute";
+	const policy = tierPolicy(detail.style);
+	// A batch collect folds into the dispatch header above it and the worker rows under that; its own row and the
+	// batch id it names are provenance, which only a tier with run telemetry shows. A collect that failed or ran out
+	// its wait keeps its row, since a state is never tier-gated.
+	if (
+		row.toolName === ToolNames.Monitor &&
+		row.args.mode === "collect" &&
+		policy.runSubRows === 0 &&
+		(finished === undefined || settledStatus(finished) === "ok")
+	)
+		return [];
 	const limit = previewBudget(
 		failure
 			? detail.errorRows
@@ -2529,7 +2646,9 @@ export function renderToolPreview(
 						: detail.resultRows,
 		options.terminalRows,
 	);
-	const rows = options.operator ? renderToolSubline(call, width) : previewActionRows(call, width, liveFact);
+	const rows = options.operator
+		? renderToolSubline(call, width, policy)
+		: previewActionRows(call, width, liveFact, policy);
 	if (
 		detail.style === "compact" &&
 		!options.operator &&
@@ -2537,7 +2656,8 @@ export function renderToolPreview(
 	)
 		return [...rows, ...approvalReceiptRows(call, width, failure)];
 	rows.push(...approvalReceiptRows(call, width, failure));
-	const args = previewArguments(call, width, detail.style === "detailed" && finished === undefined);
+	if (policy.toolArgRow) rows.push(...argumentFactRows(row, finished ?? null, width, failure));
+	const args = previewArguments(call, width, detail.style === "detailed" && finished === undefined, policy.toolArgRow);
 	const expanded = isPlainObject(args.edits) ? { ...args, ...args.edits, edits: undefined } : args;
 	rows.push(
 		...renderToolArguments(
@@ -2675,19 +2795,27 @@ export function renderToolPreview(
 			// A failed command's body is the command's own output, shown as it ran; a
 			// failed tool's body is the harness's error text, so its paths abbreviate.
 			const shownText = failure && !command ? displayEmbeddedPaths(text, row.context.cwd ?? process.cwd()) : text;
-			const body = toolOutputInk(redactStreamingSecretString(shownText, finished !== undefined).trimEnd()).map((line) =>
-				cardRows(line, width, failure),
-			);
-			rows.push(
-				...previewLines(
-					body,
-					limit,
-					width,
-					command || !finished,
-					failure ? RAIL_ERROR() : RAIL_NORMAL(),
-					BODY_INDENT_VISIBLE_WIDTH,
-				),
-			);
+			const safeText = tidyPreviewText(redactStreamingSecretString(shownText, finished !== undefined)).trimEnd();
+			const rail = failure ? RAIL_ERROR() : RAIL_NORMAL();
+			// A JSON result reads as fact rows of its first level, never as raw JSON cut mid-token; a command's output
+			// is shown as it printed.
+			const facts = command ? null : jsonFactRows(safeText, Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH));
+			if (facts !== null) {
+				rows.push(
+					...previewRows(
+						facts.map((fact) => `${rail}${fact}`),
+						limit,
+						width,
+						false,
+						rail,
+						BODY_INDENT_VISIBLE_WIDTH,
+						(hidden) => `${hidden.length} more ${hidden.length === 1 ? "field" : "fields"}`,
+					),
+				);
+			} else {
+				const body = toolOutputInk(safeText).map((line) => cardRows(line, width, failure));
+				rows.push(...previewLines(body, limit, width, command || !finished, rail, BODY_INDENT_VISIBLE_WIDTH));
+			}
 		}
 		// Guidance middleware attached for the model is not the tool's output and asks
 		// nothing of the operator: Detailed states it as one toolMeta row, Standard leaves
@@ -2702,6 +2830,26 @@ export function renderToolPreview(
 	// A settled call's screenshots draw under its body where the terminal draws images (S5).
 	if (finished !== undefined && !failure) rows.push(...renderToolResultImages(finished.result, width, options));
 	return rows;
+}
+
+/**
+ * The arguments a row does not consume, as the card's first body row (`args   limit 30 · related`). The header never
+ * carries them; the tier that shows arguments states them here.
+ */
+function argumentFactRows(
+	row: ResolvedToolRow,
+	finished: ToolExecutionFinished | null,
+	width: number,
+	failure: boolean,
+): string[] {
+	const scalars = inlineArgs(row, finished);
+	if (scalars.length === 0) return [];
+	const rail = failure ? RAIL_ERROR() : RAIL_NORMAL();
+	return factRows(
+		theme,
+		[{ label: "args", value: theme.fg("toolArgument", scalars.join(` ${GLYPH.dot} `)) }],
+		Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH),
+	).map((line) => `${rail}${line}`);
 }
 
 /**
@@ -2748,7 +2896,7 @@ function chainSublineParts(
 	const factText =
 		facts.length > 0 ? toolMeta(joinFacts(["", ...facts.map((fact) => sanitizeCallTargetText(fact))])) : "";
 	return {
-		lead: `${classMark(CHAIN_ROW.class)}${styledVerb(verb, resolveRow(call))}${object}${factText}`,
+		lead: `${classMark(CHAIN_ROW.class, status === "error")}${styledVerb(verb, resolveRow(call))}${object}${factText}${refusalReason(status, meta)}`,
 		tail: statusGlyph(status, meta),
 	};
 }
@@ -2844,9 +2992,10 @@ function chainOutputRows(finished: ToolExecutionFinished, width: number, failure
 		const command = resolveRow(call).spec.class === "execute";
 		const shown = call.isError && command ? withoutCommandStatus(call.result) : call.result;
 		const { body } = splitModelNotes(resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY));
-		if (body.trim().length === 0) continue;
+		const tidy = tidyPreviewText(body);
+		if (tidy.trim().length === 0) continue;
 		rows.push(...cardRows(toolMeta(sanitizeCallTargetText(`${call.toolName} · ${id} ›`)), width, failure));
-		rows.push(...cardRows(redactSecretString(body), width, failure));
+		rows.push(...cardRows(redactSecretString(tidy), width, failure));
 	}
 	return rows;
 }
@@ -2861,7 +3010,7 @@ function renderChainPreview(
 	const finished = "result" in call ? call : undefined;
 	const failure = finished?.isError === true || finished?.outcome !== undefined;
 	const rail = failure ? RAIL_ERROR() : RAIL_NORMAL();
-	const rows = previewActionRows(call, width);
+	const rows = previewActionRows(call, width, undefined, tierPolicy(detail.style));
 	if (detail.style === "compact" && (finished === undefined || (!failure && finished.operatorGrant === undefined)))
 		return [
 			...rows,
@@ -2891,7 +3040,9 @@ function renderChainPreview(
 		const result = finished?.result ?? options.partialResult;
 		const text = result === undefined ? "" : resultText(unwrapResultEnvelope(result), Number.POSITIVE_INFINITY);
 		body =
-			text.trim().length === 0 ? [] : cardRows(redactStreamingSecretString(text, finished !== undefined), width, failure);
+			text.trim().length === 0
+				? []
+				: cardRows(redactStreamingSecretString(tidyPreviewText(text), finished !== undefined), width, failure);
 	}
 	rows.push(...previewRows(body, limit, width, finished === undefined, rail, BODY_INDENT_VISIBLE_WIDTH));
 	return rows;
