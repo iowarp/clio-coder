@@ -1,5 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock, test } from "node:test";
@@ -307,6 +307,69 @@ test("local invocation inspection scrolls complete redacted arguments without ad
 	strictEqual(JSON.stringify(view), before);
 	body.toggleInspect();
 	ok(!body.isInspecting());
+});
+
+test("a dispatch card reads write roots against the workspace, and its every-field view states durations in configured units (FX-16)", () => {
+	const base = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-plan-scope-")));
+	const workspace = join(base, "proj");
+	mkdirSync(join(workspace, "src"), { recursive: true });
+	mkdirSync(join(base, "elsewhere"));
+	symlinkSync(workspace, join(base, "alias"));
+	symlinkSync(join(base, "elsewhere"), join(workspace, "escape"));
+	const originalCwd = process.cwd();
+	process.chdir(workspace);
+	try {
+		const card = (writes: string) => {
+			const view: ApprovalRequestView = {
+				...WRITE_VIEW,
+				tool: "dispatch",
+				actionClass: "execute",
+				artifact: {
+					kind: "dispatch-plan",
+					text: [
+						"dispatch plan: topology=parallel tasks=1",
+						"advisory session cost baseline: unavailable",
+						"deadline: none (advisory planning)",
+						'  1. agent=coder target=copilot model=gpt-6-luna node=local posture=balanced maxCostUsd=none deadlineMs=none minimumQuality=none locality=any task_bytes=14 task_sha256=00 task_preview="wait 5 ms here"',
+						"    limits: unpriced route: each response stops at 600 s, and the run stops at its 1800000 ms wall clock; planned for about 150 tool calls",
+						`    writes: ${writes}`,
+					].join("\n"),
+				},
+			};
+			delete view.mutation;
+			delete view.target;
+			return createPermissionOverlayBody(view, undefined, () => ({ tasks: [] }));
+		};
+		const scope = (writes: string) =>
+			plain(card(writes).render(76)).find((row) => row.trimStart().startsWith("scope")) ?? "";
+		for (const inside of [
+			`roots ${workspace}/src/math.js, ${workspace}/src/mul.js`,
+			`roots ${base}/alias/src/new.js`,
+			"roots src/math.js",
+			`own worktree, merges back only ${workspace}/src`,
+		]) {
+			match(scope(inside), /writes in the workspace/u, inside);
+		}
+		for (const outside of [
+			`roots ${workspace}/src/math.js, ../elsewhere/x.js`,
+			"roots escape/x.js",
+			"roots ~/x.js",
+			`roots ${workspace}/../elsewhere`,
+		]) {
+			match(scope(outside), /writes outside the workspace/u, outside);
+		}
+		const body = card(`roots ${workspace}/src/math.js`);
+		body.toggleInspect();
+		body.scrollInspect(-1000);
+		const detail = plain(body.render(200)).join("\n");
+		match(detail, /each response stops at 10m, and the run stops at its 30m wall clock/u);
+		match(detail, /maxCostUsd=none no deadline minimumQuality/u);
+		match(detail, /task_preview="wait 5 ms here"/u, "the task's own words keep their bytes");
+		doesNotMatch(detail, /1800000|600 s|deadlineMs/u);
+	} finally {
+		process.chdir(originalCwd);
+		rmSync(base, { recursive: true, force: true });
+	}
 });
 
 test("a target the safety layer cut at its cap ends in an ellipsis on the card and the transcript row", () => {

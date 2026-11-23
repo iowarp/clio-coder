@@ -14,6 +14,7 @@ import type { ApprovalRequestView } from "../session-control/approval-request-vi
 import { CARD_CALLOUT_MAX_WIDTH, CARD_GUTTER } from "./card.js";
 import {
 	type PlanSummary,
+	planDetailText,
 	planHeadline,
 	planLimits,
 	planRoute,
@@ -853,8 +854,9 @@ function permissionCardParts(
 			tone: "warning",
 		});
 	}
-	// What the approval grants, from every task: never from the first alone.
-	const scope = plan === null ? null : planScope(plan);
+	// What the approval grants, from every task: never from the first alone. Write roots resolve against the session's
+	// working directory, the workspace the TUI runs in.
+	const scope = plan === null ? null : planScope(plan, process.cwd());
 	const limits = plan === null ? null : planLimits(plan);
 	const scopeFacts: Fact[] = [];
 	if (scope !== null)
@@ -1262,12 +1264,13 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				this.view.tool === "bash" ? "shell" : undefined,
 			);
 			this.lastLineCount = rows.length;
-			// The sealed plan text is what an approval covers, field for field; it leads the details the card summarizes.
+			// The sealed plan text is what an approval covers, field for field; it leads the details the card summarizes,
+			// a dispatch plan's durations in configured units.
 			const artifact = this.view.artifact;
 			if (artifact !== undefined) {
 				rows.unshift(
 					sectionRule(theme, content, artifact.kind === "settings-change" ? "Settings change" : "Resolved dispatch plan"),
-					...planTextRows(artifact.text, content),
+					...planTextRows(artifact.kind === "dispatch-plan" ? planDetailText(artifact.text) : artifact.text, content),
 					sectionRule(theme, content, "Exact invocation"),
 				);
 				this.lastLineCount = rows.length;

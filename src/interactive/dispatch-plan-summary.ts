@@ -11,6 +11,9 @@
  * Anything it cannot read leaves the card showing the plan text as before.
  */
 
+import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
 import { formatLimit } from "../core/format-time.js";
 
 export interface PlanMember {
@@ -182,13 +185,30 @@ export function planRoute(member: PlanMember): string {
 /** Where one task may write, read from its `writes:` line (`writeModeLine`). */
 type WriteBoundary = "read-only" | "workspace" | "outside" | "unstated";
 
-const OUTSIDE_ROOT = /^(?:\/|~|\.\.(?:\/|$)|[A-Za-z]:[\\/])/u;
+/** A path with its symlinks resolved through its nearest existing ancestor, so a root not yet created still resolves. */
+function realPath(path: string): string {
+	try {
+		return realpathSync(path);
+	} catch {
+		const parent = dirname(path);
+		return parent === path ? path : join(realPath(parent), basename(path));
+	}
+}
 
-function writeBoundary(writes: string | null): WriteBoundary {
+/** Whether one stated write root lands in the workspace once `~`, `..` and symlinks are resolved. */
+function rootInside(root: string, workspace: string): boolean {
+	// A drive or UNC root another platform's plan states never resolves under this workspace.
+	if (win32.isAbsolute(root) && !isAbsolute(root)) return false;
+	const expanded = root === "~" ? homedir() : root.startsWith("~/") ? join(homedir(), root.slice(2)) : root;
+	const path = relative(realPath(resolve(workspace)), realPath(resolve(workspace, expanded)));
+	return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+}
+
+function writeBoundary(writes: string | null, workspace: string): WriteBoundary {
 	if (writes === null) return "unstated";
 	if (writes.startsWith("none")) return "read-only";
 	const roots = /^(?:roots |own worktree, merges back only )(.+)$/u.exec(writes)?.[1];
-	return roots?.split(", ").some((root) => OUTSIDE_ROOT.test(root.trim())) === true ? "outside" : "workspace";
+	return roots?.split(", ").some((root) => !rootInside(root.trim(), workspace)) === true ? "outside" : "workspace";
 }
 
 const BOUNDARY_WORDS: Readonly<Record<WriteBoundary, string>> = {
@@ -215,8 +235,9 @@ export interface PlanScope {
 	routesDiffer: boolean;
 }
 
-export function planScope(summary: PlanSummary): PlanScope {
-	const boundaries = new Set(summary.members.map((member) => writeBoundary(member.writes)));
+/** `workspace` is the session's working directory, which relative roots resolve against. */
+export function planScope(summary: PlanSummary, workspace: string): PlanScope {
+	const boundaries = new Set(summary.members.map((member) => writeBoundary(member.writes, workspace)));
 	const boundary: WriteBoundary = boundaries.has("outside")
 		? "outside"
 		: boundaries.has("workspace")
@@ -261,6 +282,40 @@ function limitUnits(limits: string): string[] {
 	else if (stop !== undefined) units.push(`${stop} tool calls`);
 	else if (/cannot count/u.test(limits)) units.push("tool calls not counted");
 	return units;
+}
+
+/** Quoted previews are the task's own words and keep their bytes; only the fields before them are read for units. */
+const QUOTED_PREVIEW = / (?:task|briefing)_preview=/u;
+
+/**
+ * The sealed plan text for the every-field view, its durations in configured units: the plan states the wall clock in
+ * milliseconds and the response bound in seconds (`1800000 ms`, `deadlineMs=none`), which no card row shows. Every
+ * other field keeps its sealed words.
+ */
+export function planDetailText(text: string): string {
+	return text
+		.split(/(\r?\n)/u)
+		.map((line) => {
+			const cut = QUOTED_PREVIEW.exec(line)?.index ?? line.length;
+			let fields = line
+				.slice(0, cut)
+				.replace(
+					/^deadline: (\d+)ms whole-plan$/u,
+					(_match, ms: string) => `deadline: ${formatLimit(Number(ms))} whole-plan`,
+				)
+				.replace(/\bdeadlineMs=none\b/gu, "no deadline")
+				.replace(/\bdeadlineMs=(\d+)\b/gu, (_match, ms: string) => `deadline ${formatLimit(Number(ms))}`)
+				.replace(/\btimeout_ms=(\d+)$/u, (_match, ms: string) => `timeout ${formatLimit(Number(ms))}`);
+			// A limits line is prose the plan wrote; a command line keeps its literal argv.
+			if (LIMITS.test(fields)) {
+				fields = fields
+					.replace(/\b(\d+) ms\b/gu, (_match, ms: string) => formatLimit(Number(ms)))
+					.replace(/\bstops at (\d+) s\b/gu, (_match, s: string) => `stops at ${formatLimit(Number(s) * 1000)}`)
+					.replace(/the call's timeout_ms/gu, "the call's time limit");
+			}
+			return `${fields}${line.slice(cut)}`;
+		})
+		.join("");
 }
 
 /** The plan's limits row: one value when every task shares it, else one per task in plan order. */
