@@ -8,10 +8,9 @@
  * viewer would then read a different install's state root. This is the same
  * self-invocation shape `worker-spawn.ts:589` uses for the same reason.
  *
- * A per-run viewer command (`fleet view <runId> --follow`) used to live here
- * for the per-dispatch viewer panes; those panes are gone, and the one pane
- * that renders runs now follows a selection file so the TUI can retarget it
- * without respawning anything.
+ * The workers dock follows a selection file so the TUI can retarget it without
+ * respawning anything. The logs pane follows one run's feed through the same
+ * self-invocation (`fleet view <runId> --follow --pane`) on every platform.
  */
 
 import { join } from "node:path";
@@ -36,12 +35,17 @@ export interface ViewerCommandOptions {
 
 /** The argv the workers dock executes: the dashboard, following a selection file. */
 export function watchViewerCommand(selectionPath: string, options: ViewerCommandOptions = {}): ReadonlyArray<string> {
-	return viewerCommand("fleet", selectionPath, options);
+	return viewerCommand("fleet", ["--watch", selectionPath], options);
+}
+
+/** The argv the logs pane executes: one run's events, one clipped row each, at the pane's width. */
+export function logsViewerCommand(runId: string, options: ViewerCommandOptions = {}): ReadonlyArray<string> {
+	return viewerCommand("fleet", [runId, "--follow", "--pane"], options);
 }
 
 function viewerCommand(
 	command: "fleet" | "extensions",
-	frameFile: string,
+	target: ReadonlyArray<string>,
 	options: ViewerCommandOptions,
 ): ReadonlyArray<string> {
 	const layout =
@@ -63,13 +67,12 @@ function viewerCommand(
 		command,
 		"view",
 		...layout,
-		"--watch",
-		frameFile,
+		...target,
 		...(options.tapPath === undefined ? [] : ["--dock-taps", options.tapPath]),
 	];
 }
 
 /** The host-rendered extension dock, pinned to this installation and layout. */
 export function extensionViewerCommand(frameFile: string, options: ViewerCommandOptions = {}): ReadonlyArray<string> {
-	return viewerCommand("extensions", frameFile, options);
+	return viewerCommand("extensions", ["--watch", frameFile], options);
 }

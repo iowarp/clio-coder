@@ -24,9 +24,9 @@ import type { ClioSettings } from "../core/config.js";
 import { relaunchScript } from "../core/relaunch-script.js";
 import { clioStateDir, resolveClioDirs } from "../core/xdg.js";
 import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
-import { newestRunFeedRunId, runFeedPath } from "../domains/dispatch/run-feed.js";
+import { newestRunFeedRunId } from "../domains/dispatch/run-feed.js";
 import { clioPaneEnv } from "../domains/mux/child-env.js";
-import type { MuxContract, MuxPaneRecord } from "../domains/mux/index.js";
+import type { MuxContract, MuxOpenUtilityPaneRequest, MuxPaneRecord, MuxPaneRef } from "../domains/mux/index.js";
 import type { MusicState } from "../domains/mux/music-operations.js";
 import {
 	PANE_HANDOFF_LABEL_SUFFIX,
@@ -52,8 +52,8 @@ import {
 	resolvePanesPresetId,
 } from "../domains/mux/operations.js";
 import { deliverPeerPrompt, PEER_INBOX_TOKEN } from "../domains/mux/peer-inbox.js";
+import { logsViewerCommand } from "../domains/mux/viewer-command.js";
 import { isClioHostSocket } from "../domains/mux/workspace/platform.js";
-import { win32FollowArgv } from "../domains/mux/workspace/platform-win32.js";
 import { resolveBinary } from "../tools/executables.js";
 import { type PaneWatchSource, paneWatchDecision } from "./pane-policy.js";
 
@@ -216,12 +216,13 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	/**
 	 * The program a preset probes for, or null when it needs none. Windows has
 	 * no `tail`, its PATH `bash` is the WSL launcher, and herdr's pane shell
-	 * there is already PowerShell, which is what the shell preset opens.
+	 * there is already PowerShell, which is what the shell preset opens. The
+	 * logs pane runs this install's own viewer, so there is nothing to probe.
 	 */
 	const presetBinary = (presetId: string, binary: string): string | null => {
+		if (presetId === "logs") return null;
 		if (process.platform !== "win32") return binary;
 		if (presetId === "shell") return null;
-		if (presetId === "logs") return "powershell";
 		return binary;
 	};
 
@@ -231,13 +232,29 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		if (presetId === "logs") {
 			const runId = (deps.newestFeedRunId ?? (() => newestRunFeedRunId(stateDir())))();
 			if (runId === null) return null;
-			if (process.platform === "win32") return win32FollowArgv(binaryPath, runFeedPath(runId, stateDir()));
-			// `-F` rather than `-f`: the feed is recreated when its run's
-			// directory is pruned, and a viewer following an inode would silently
-			// stop at that point.
-			return [binaryPath, "-n", "200", "-F", runFeedPath(runId, stateDir())];
+			// The formatted viewer on every platform, pinned to this install and this session's directories, so the pane
+			// reads the same feed and the same outputDetail= the TUI writes.
+			return logsViewerCommand(runId, { dirs: { ...resolveClioDirs(), state: stateDir() } });
 		}
 		return null;
+	};
+
+	/**
+	 * One utility pane through the mux contract. A placement refusal (CLIO Coder would fall under its 60-column floor
+	 * with no dock column to stack under) comes back as the refusal's own words; any other null is the host's.
+	 */
+	const openUtility = async (
+		request: Omit<MuxOpenUtilityPaneRequest, "onRefused">,
+	): Promise<MuxPaneRef | { refused: string } | null> => {
+		let refused: string | null = null as string | null;
+		const ref = await deps.mux.openUtilityPane({
+			...request,
+			onRefused: (reason) => {
+				refused = reason;
+			},
+		});
+		if (ref !== null) return ref;
+		return refused === null ? null : { refused };
 	};
 
 	const show = async (target: string, source: PaneWatchSource): Promise<PanesShowResult> => {
@@ -429,8 +446,9 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				}
 				const pendingId = beginPendingOpen(preset.id);
 				try {
-					const ref = await deps.mux.openUtilityPane({ argv, cwd, label: preset.id });
+					const ref = await openUtility({ argv, cwd, label: preset.id });
 					if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${preset.id}` };
+					if ("refused" in ref) return { status: "refused", reason: ref.refused };
 					return { status: "opened", label: preset.id, paneId: ref.paneId };
 				} finally {
 					pendingOpens.delete(pendingId);
@@ -442,8 +460,9 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			const label = argv[0] ?? "pane";
 			const pendingId = beginPendingOpen(label);
 			try {
-				const ref = await deps.mux.openUtilityPane({ argv, cwd, label });
+				const ref = await openUtility({ argv, cwd, label });
 				if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${label}` };
+				if ("refused" in ref) return { status: "refused", reason: ref.refused };
 				return { status: "opened", label, paneId: ref.paneId };
 			} finally {
 				pendingOpens.delete(pendingId);
@@ -509,7 +528,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 			const label = `${request.peer}${PANE_HANDOFF_LABEL_SUFFIX}`;
 			const pendingId = beginPendingOpen(label);
 			try {
-				const ref = await deps.mux.openUtilityPane({
+				const ref = await openUtility({
 					argv,
 					...(brief ? { textArg: brief } : {}),
 					cwd,
@@ -519,6 +538,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					...(request.peer === "clio" ? { env: clioPaneEnv(process.env, deps.getSettings().targets) } : {}),
 				});
 				if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${label}` };
+				if ("refused" in ref) return { status: "refused", reason: ref.refused };
 				return { status: "opened", label, paneId: ref.paneId, cwd };
 			} finally {
 				pendingOpens.delete(pendingId);
