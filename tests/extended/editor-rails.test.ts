@@ -2,6 +2,7 @@ import { doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:asser
 import { test } from "node:test";
 import { stripTerminalSequences, type Terminal, TuiMainScreen, visibleWidth } from "../../src/engine/tui.js";
 import { ClioEditor } from "../../src/interactive/clio-editor.js";
+import { type DispatchBoardRow, dispatchWaitRuns } from "../../src/interactive/dispatch-board.js";
 import { renderEditorRail } from "../../src/interactive/editor-rails.js";
 import { contextRailGroup, contextRailUnit, thinkingRailUnit } from "../../src/interactive/footer/context-rail.js";
 import { compactionRailLabel, workerWaitRailLabel } from "../../src/interactive/footer/widgets.js";
@@ -161,6 +162,41 @@ test("rail content: worker waits name a count and a clock, and Esc stops outlast
 		ok(visibleWidth(label) <= room);
 	}
 	strictEqual(workerWaitRailLabel(2, 1_500, 60), "is waiting for 2 workers · Esc stops");
+	// Two shadow scouts the turn dispatched are the workers it waits on; the rail read `a worker` over them (FX-7b).
+	const scout = (
+		runId: string,
+		status: DispatchBoardRow["status"],
+		requestOrigin: NonNullable<DispatchBoardRow["requestOrigin"]>,
+	): DispatchBoardRow => ({
+		runId,
+		agentId: "scout",
+		agentAudience: "shadow",
+		requestOrigin,
+		runtimeKind: "http",
+		runtimeId: "native",
+		targetId: "copilot",
+		wireModelId: "gpt-6-luna",
+		status,
+		elapsedMs: 2_500,
+		usage: { kind: "pending" },
+		lastContextTokens: null,
+		ttft: null,
+	});
+	const awaited = dispatchWaitRuns([
+		scout("a", "running", "agent"),
+		scout("b", "enqueued", "agent"),
+		scout("c", "completed", "agent"),
+		scout("d", "running", "internal"),
+	]).length;
+	strictEqual(awaited, 2);
+	for (const [width, expected] of [
+		[80, "is waiting for 2 workers · 2s · Esc stops"],
+		[48, "waiting for 2 workers · 2s · Esc stops"],
+		[33, "waiting · 2s · Esc stops"],
+	] as const) {
+		const room = statusRailLabelRoom(width) - 2;
+		strictEqual(workerWaitRailLabel(awaited, 2_400, room, { name: "GPT-6-luna", shown: false }), expected);
+	}
 	for (const width of [120, 80, 48]) {
 		const label = compactionRailLabel({ phase: "summarize", startedAtMs: 0 }, statusRailLabelRoom(width) - 2, 5_200);
 		strictEqual(label, "is summarizing history · 5s · Esc stops");

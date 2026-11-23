@@ -63,6 +63,7 @@ import {
 	createDispatchBoardStore,
 	createDispatchBoardView,
 	dispatchStatusPresentation,
+	dispatchWaitRuns,
 	summaryFleetRuns,
 } from "./dispatch-board.js";
 import { dockTop, setDockFooterRows } from "./dock.js";
@@ -918,7 +919,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					reserved + beside,
 					runningCompaction(),
 					route?.target ?? undefined,
-					waiting ? live.workers.length : null,
+					// The count is every run the dispatch waits on, a shadow scout included, which the summary leaves out.
+					waiting ? dispatchWaitRuns(dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows()).length : null,
 				);
 				return {
 					...(name !== modelNickname(route?.model) ? { subject: name } : {}),

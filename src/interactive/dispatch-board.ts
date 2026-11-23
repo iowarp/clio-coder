@@ -2607,6 +2607,21 @@ export function summaryFleetRuns(rows: ReadonlyArray<DispatchBoardRow>): Dispatc
 	);
 }
 
+/**
+ * The runs a turn's dispatch wait stands behind: the summary's runs and the helper-audience runs the turn dispatched
+ * itself. A shadow recipe such as scout is the model's own worker, so leaving it out read `waiting for a worker` over
+ * two running scouts while the footer counted 2 (FX-7b).
+ */
+export function dispatchWaitRuns(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoardRow[] {
+	const summary = summaryFleetRuns(rows);
+	const counted = new Set(summary.map((row) => row.runId));
+	const dispatched = rows.filter(
+		(row) =>
+			!counted.has(row.runId) && isHelperRun(row) && row.requestOrigin === "agent" && !isTerminalStatus(row.status),
+	);
+	return [...summary, ...dispatched];
+}
+
 function parseOptionalDetail(value: unknown): string | null {
 	if (typeof value !== "string") return null;
 	const detail = value.replace(/\s+/g, " ").trim();
