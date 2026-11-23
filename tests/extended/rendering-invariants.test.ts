@@ -1809,7 +1809,10 @@ describe("Pi TUI compatibility", () => {
 			terminal.input(`\x1b[<32;72;${last}M`);
 			terminal.input(`\x1b[<0;72;${last}m`);
 			await new Promise((resolve) => setTimeout(resolve, 10));
-			strictEqual(copies.at(-1), `${paragraph}\n\nts\nconst result = await runTool(input);\nreturn result;`);
+			strictEqual(
+				copies.at(-1),
+				`${paragraph}\n\n${GLYPH.innerDivider}${GLYPH.innerDivider} ts\nconst result = await runTool(input);\nreturn result;`,
+			);
 			ok(!terminal.writes.join("").includes("\x1b_clio"), "copy marks never reach the terminal");
 		} finally {
 			tui.stop();
@@ -2651,13 +2654,14 @@ describe("transcript block grammar", () => {
 			const rows = panel.render(100).map(stripTerminalSequences);
 			const at = (pattern: RegExp) => rows.findIndex((row) => pattern.test(row));
 			const reading = at(/Reading first\./u);
-			const grep = at(/searched for `needle` in src/u);
+			const grep = at(style === "compact" ? /explored 1 search ✓/u : /searched for `needle` in src/u);
 			const git = at(/git status/u);
 			const found = at(/Found it\./u);
 			ok(reading > 0 && grep > reading && found > git, rows.join("\n"));
 			strictEqual(rows[reading - 1], "", "reasoning and prose are separated");
 			strictEqual(rows[grep - 1], "", "prose and the first action are separated");
-			strictEqual(git, grep + (style === "detailed" ? 5 : 1), rows.join("\n"));
+			// Compact folds the lone search into a counted row with its target nested beneath it.
+			strictEqual(git, grep + (style === "detailed" ? 5 : style === "compact" ? 2 : 1), rows.join("\n"));
 			strictEqual(rows[found - 1], "", "resumed prose is separated from the actions");
 			ok(rows[reading]?.startsWith(`${GLYPH.agent} `));
 			ok(rows[found]?.startsWith(`${GLYPH.agent} `), "every prose block carries the agent glyph");
@@ -4017,7 +4021,7 @@ describe("tool classes", () => {
 		}
 	});
 
-	it("folds explorations, lookups and changes by class in Compact and never folds commands or failures", () => {
+	it("folds clean explorations and lookups by class in Compact and never folds changes, commands or failures", () => {
 		const panel = createChatPanel({ getOutputStyle: () => "compact" });
 		const act = (id: string, toolName: string, args: unknown, result: unknown, isError = false) => {
 			panel.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName, args } as never);
@@ -4043,11 +4047,11 @@ describe("tool classes", () => {
 		);
 		match(
 			plain,
-			new RegExp(`${GLYPH.classMutate} edited 2 files · \\+2 -1 ✓\\n  │ a\\.ts \\+1 -1 · b\\.ts \\+1 -0`, "u"),
+			new RegExp(`${GLYPH.classMutate} edited a\\.ts · \\+1 -1 ✓.*\\n${GLYPH.classMutate} wrote b\\.ts · \\+1 -0 ✓`, "u"),
 		);
 		strictEqual(plain.match(new RegExp(`^\\${GLYPH.classExecute} CLIO Coder ran`, "gmu"))?.length, 2, plain);
 		match(plain, new RegExp(`${GLYPH.toolHeader} read gone\\.ts ✗`, "u"));
-		match(plain, new RegExp(`${GLYPH.toolHeader} read c\\.ts · lines 1-1 of 1 ✓`, "u"));
+		match(plain, new RegExp(`${GLYPH.toolHeader} explored 1 file ✓\\n  │ c\\.ts`, "u"));
 	});
 });
 
@@ -4242,8 +4246,9 @@ describe("agent invocations", () => {
 		dispatchEnd(panel, "fan", 3, 1);
 		const rows = plainRender(panel, 100).split("\n");
 		strictEqual(rows[0], `${GLYPH.workerAgent} delegated 3 tasks · 1 failed · 2 ok · 38s`);
-		strictEqual(rows[1], "", "the cards follow the call as the next entry");
-		const cards = rows.filter((row) => new RegExp(`^ {2}\\S ${GLYPH.workerAgent} scout`, "u").test(row));
+		const cardRow = new RegExp(`^ {2}\\S ${GLYPH.workerAgent} scout`, "u");
+		ok(cardRow.test(rows[1] ?? ""), `the cards nest under the call that spawned them\n${rows.join("\n")}`);
+		const cards = rows.filter((row) => cardRow.test(row));
 		strictEqual(cards.length, 3);
 		const lastCard = rows.lastIndexOf(cards[2] ?? "");
 		ok(!rows.slice(2, lastCard).includes(""), "sibling cards stack with no blank row between them");

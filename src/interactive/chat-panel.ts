@@ -4,6 +4,7 @@ import { outputLimitCutOffToolCallIds } from "../core/assistant-output.js";
 import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assistant-prose.js";
 import type { OutputStyle } from "../core/defaults.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
+import { type RunFacts, runIdentityWidth, runRow } from "../core/run-row.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { renderCalls } from "../core/telemetry/render.js";
 import { escapeTerminalControls } from "../core/terminal-controls.js";
@@ -53,6 +54,7 @@ import {
 } from "../session-control/chat-loop-messages.js";
 import { coldReasonList } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
+import { cardRail } from "./card.js";
 import { routeFirstOutput } from "./footer/silence-note.js";
 import { dateLocal, wallClockLocal } from "./format-time.js";
 import { keepRows, keptPieceRows, keptRows, type RowPiece } from "./kept-rows.js";
@@ -1224,10 +1226,14 @@ function fitMarkdownRow(padded: string, width: number, bareFences: boolean): str
 /** A fence row as Pi draws it, export-tagged or not; a list or a quote nests it behind its own indent. */
 const FENCE_ROW = /^( *)\uFDD0?```/u;
 
-/** The opening fence, given as plain text, as the block's language, or `code` when it names none, at the fence's own indent. */
-function fenceLabelRow(plain: string, fenceEnd: number, indent: string): string {
-	const lang = plain.slice(fenceEnd).trim().split(/\s+/u, 1)[0];
-	return `${indent}${clioTheme().fg("annotation", lang || "code")}`;
+/**
+ * The opening fence as a quiet `╌╌ python` label in the supporting role, at the fence's own indent. A fence that names
+ * no language, or names `text`, says nothing a reader needs, so it draws no label row (null).
+ */
+function fenceLabelRow(plain: string, fenceEnd: number, indent: string): string | null {
+	const lang = plain.slice(fenceEnd).trim().split(/\s+/u, 1)[0] ?? "";
+	if (lang.length === 0 || lang.toLowerCase() === "text") return null;
+	return `${indent}${clioTheme().fg("annotation", `${GLYPH.innerDivider}${GLYPH.innerDivider} ${lang}`)}`;
 }
 
 /**
@@ -1404,7 +1410,8 @@ function markdownRows(
 			if (!bareFences) {
 				// The reader needs where code starts and what language it is, not the Markdown that said so: the
 				// opening fence becomes the language as a quiet label and the closing fence draws nothing.
-				if (fenceIndent !== null) rows.push(fenceLabelRow(plainRow(row), fence[0].length, fenceIndent));
+				const label = fenceIndent === null ? null : fenceLabelRow(plainRow(row), fence[0].length, fenceIndent);
+				if (label !== null) rows.push(label);
 				continue;
 			}
 		} else if (fenceIndent !== null) {
@@ -2263,6 +2270,8 @@ function renderTurnUsageLine(
 	nowMs: number,
 ): string[] {
 	const outcome = usage.outcome ?? "Done";
+	// Every form leads with the outcome glyph and word; an operator's stop reads as one (`⊘ Stopped`).
+	const word = outcome === "Cancelled" ? "Stopped" : outcome;
 	// When the turn ended closes every receipt, after the outcome and duration a reader scans for first.
 	const ended = usage.endedAtMs === undefined ? null : wallClockLocal(usage.endedAtMs, nowMs);
 	const endedFact = ended === null ? [] : [ended];
@@ -2288,15 +2297,15 @@ function renderTurnUsageLine(
 		// A written call that did not run is news at every tier too, and the outcome receipt has no other row to carry it.
 		if (usage.ending?.kind === "call_not_run")
 			return [
-				`${glyph}${dimLine(joinFacts([`${outcome}${receiptDuration(usage)}`, writtenCallsFact(usage.ending.writtenTools), ...endedFact]), room)}`,
+				`${glyph}${dimLine(joinFacts([`${word}${receiptDuration(usage)}`, writtenCallsFact(usage.ending.writtenTools), ...endedFact]), room)}`,
 			];
 		// The outcome receipt states no spend, but a turn still ends visibly: its outcome word, how long it took, when,
 		// and why no answer came when none did.
-		return [`${glyph}${dimLine(joinFacts([`${outcome}${receiptDuration(usage)}`, ...endedFact]), room)}`, ...noAnswer];
+		return [`${glyph}${dimLine(joinFacts([`${word}${receiptDuration(usage)}`, ...endedFact]), room)}`, ...noAnswer];
 	}
 	const spend = usage.spend;
 	// A turn that left workers running states their spend apart and live, so its outcome drops their count frozen at its end.
-	const shownOutcome = spend?.workers !== undefined && outcome.startsWith(TURN_ENDED) ? TURN_ENDED : outcome;
+	const shownOutcome = spend?.workers !== undefined && outcome.startsWith(TURN_ENDED) ? TURN_ENDED : word;
 	const workersFact = spend?.workers === undefined ? null : turnWorkersFact(spend.workers);
 	// A wait the provider asked for spends no retry, so the receipt keeps it apart: a count of them approached no limit.
 	const retries =
@@ -2362,15 +2371,19 @@ function renderTurnUsageLine(
 		rowFacts.push(...(ordered.filter((fact, at) => fact != null && kept.has(at)) as string[]));
 		return [`${glyph}${dimLine(releaseSpaces(joinFacts([...rowFacts, ...endedFact])), room)}`, ...noAnswer];
 	}
-	const settled = `${shownOutcome}${quiet === null ? "" : ` · ${quiet}`}${retries === null ? "" : ` · ${retries}`}${moved === null ? "" : ` · ${moved}`}${receiptDuration(usage)}`;
+	const facts: string[] = [
+		shownOutcome,
+		...[quiet, retries, moved].filter((fact): fact is string => fact !== null),
+		...receiptDuration(usage).split(" · ").slice(1),
+	];
 	// Detailed states what the turn spent, one fact per field, as the read model
 	// folds the turn with its workers, so the line and the footer agree: the
 	// calls it made, input and output tokens in the compact token format, what
 	// the provider served from its prompt cache, the reasoning it reported (`≈`
 	// when Clio estimated it), and why the cache was expected to be cold when
 	// nothing was reused. A field with nothing to say is left out, and with no
-	// read model the line keeps only what the run itself knows.
-	const facts: string[] = [settled];
+	// read model the line keeps only what the run itself knows. It wraps only
+	// between facts, so no row ends inside one.
 	if (usage.promptRecall === true) facts.push(PROMPT_RECALL_FACT);
 	if (spend) {
 		if (spend.calls !== null && spend.calls > 1) facts.push(`${spend.calls} calls`);
@@ -2391,9 +2404,30 @@ function renderTurnUsageLine(
 	if (spend?.coverage) facts.push(spend.coverage);
 	facts.push(...endedFact);
 	return [
-		...hangProseLines(wrapTextWithAnsi(`${SECONDARY()}${joinFacts(facts)}${RESET}`, room).map(releaseSpaces), glyph),
+		...hangProseLines(
+			factRows(facts, room).map((row) => `${SECONDARY()}${row}${RESET}`),
+			glyph,
+		),
 		...noAnswer,
 	];
+}
+
+/**
+ * Facts packed into rows of `room` cells, broken only at ` · `: a row never ends inside a fact or on a separator. A
+ * fact wider than a whole row alone wraps at its own spaces, since nothing else can hold it.
+ */
+function factRows(facts: readonly string[], room: number): string[] {
+	const rows: string[] = [];
+	let row: string[] = [];
+	for (const fact of facts) {
+		if (row.length > 0 && visibleWidth(joinFacts([...row, fact])) > room) {
+			rows.push(releaseSpaces(joinFacts(row)));
+			row = [];
+		}
+		row.push(fact);
+	}
+	if (row.length > 0) rows.push(releaseSpaces(joinFacts(row)));
+	return rows.flatMap((line) => (visibleWidth(line) > room ? wrapTextWithAnsi(line, room) : [line]));
 }
 
 /**
@@ -2570,14 +2604,127 @@ function finishedCall(seg: ToolSegment, nameRequester = true): ToolExecutionFini
 	};
 }
 
-/** The Compact fold a settled tool segment joins, or null when it keeps its own row. */
+/**
+ * The Compact fold a settled tool segment joins, or null when it keeps its own row. Only clean reads fold: a failed,
+ * blocked or not-run call keeps its row and its reason, an operator-granted call keeps the grant a fold row cannot
+ * name, and a change is news rather than exploration, so a fold row only ever counts clean calls and ends in `✓`.
+ */
 function foldFamily(seg: AssistantSegment | undefined): ToolFoldFamily | null {
 	if (seg?.kind !== "tool" || !seg.finished) return null;
-	// A fold row cannot say which of its calls the operator allowed.
-	if (seg.operatorGrant !== undefined) return null;
+	if (
+		seg.operatorGrant !== undefined ||
+		seg.isError ||
+		seg.settlement !== undefined ||
+		seg.blockReason !== undefined ||
+		seg.notRun === true
+	)
+		return null;
 	if (seg.settledFamily === undefined) seg.settledFamily = toolFoldFamily(finishedCall(seg));
-	return seg.settledFamily;
+	return seg.settledFamily === "mutate" ? null : seg.settledFamily;
 }
+
+/**
+ * Whether a tool block opens a blank row on both sides. Compact stacks every tool row. Elsewhere a body (arguments,
+ * output, a diff) opens a gap, except a failure's own reason rows, which belong to its row as its wrap does.
+ */
+function toolBlockGap(
+	body: boolean,
+	lines: readonly string[],
+	failed: boolean,
+	detail: TranscriptDetailPolicy,
+): boolean {
+	if (!body || detail.style === "compact") return false;
+	if (!failed) return true;
+	const rail = cardRail();
+	return lines.some((line) => line.startsWith(rail));
+}
+
+/** A settled call that failed or was refused, whose reason rows hang under its row. */
+function failedCall(seg: ToolSegment): boolean {
+	return seg.finished && (seg.isError || seg.settlement !== undefined || seg.blockReason !== undefined);
+}
+
+/** A task a dispatch call names, for its row before its worker exists. */
+type DispatchTask = { agent: string; task: string };
+/** Modes whose workers are the call's tasks one for one; compete, council and review add or merge runs. */
+const ONE_RUN_PER_TASK: ReadonlySet<unknown> = new Set([undefined, "parallel", "sequential", "pipeline"]);
+/** Rows nested under a dispatch header indent 2 cells (2.2). */
+const NESTED_INDENT = "  ";
+
+/** The tasks a dispatch call's arguments name, in order, or none when their shape says nothing certain. */
+function dispatchTasks(seg: ToolSegment): DispatchTask[] {
+	const args = seg.args;
+	if (seg.name !== "dispatch" || args === null || typeof args !== "object") return [];
+	const record = args as Record<string, unknown>;
+	if (!ONE_RUN_PER_TASK.has(record.mode) || record.review !== undefined) return [];
+	const shared = typeof record.agent === "string" ? record.agent : undefined;
+	const items: unknown[] = Array.isArray(record.tasks)
+		? record.tasks
+		: typeof record.task === "string" && record.task.length > 0
+			? [record.task]
+			: [];
+	const tasks: DispatchTask[] = [];
+	for (const item of items) {
+		const fields = item !== null && typeof item === "object" ? (item as { agent?: unknown; task?: unknown }) : null;
+		const task = typeof item === "string" ? item : typeof fields?.task === "string" ? fields.task : null;
+		if (task === null) return [];
+		const agent = typeof fields?.agent === "string" ? fields.agent : shared;
+		tasks.push({ agent: agent === undefined || agent === "auto" ? "worker" : agent, task });
+	}
+	return tasks;
+}
+
+/**
+ * The call's tasks no placed worker answers for yet, while the call is past admission and still running: matched by
+ * task text, and never more than the tasks named minus the workers placed, so a task never shows as queued beside its
+ * own row. A call that is denied, fails or ends draws none.
+ */
+function unplacedTasks(seg: ToolSegment, placed: ReadonlyArray<WorkerEntryState>): DispatchTask[] {
+	if (
+		seg.name !== "dispatch" ||
+		seg.finished ||
+		!seg.executionStarted ||
+		!seg.argsComplete ||
+		seg.awaitingApproval === true ||
+		seg.judging === true
+	)
+		return [];
+	const tasks = dispatchTasks(seg);
+	const open = [...tasks];
+	for (const state of placed) {
+		const at = open.findIndex((candidate) => candidate.task === state.task);
+		if (at >= 0) open.splice(at, 1);
+	}
+	return open.slice(0, Math.max(0, tasks.length - placed.length));
+}
+
+/** Queued run rows for tasks whose workers have not started, in the run row grammar the worker rows use (6.1). */
+function queuedRunRows(tasks: ReadonlyArray<DispatchTask>, width: number): string[] {
+	if (tasks.length === 0) return [];
+	const theme = clioTheme();
+	const room = Math.max(1, width - NESTED_INDENT.length);
+	const facts: RunFacts[] = tasks.map((task) => ({
+		agent: sanitizeCallTargetText(task.agent),
+		origin: "model",
+		outcome: "queued",
+		task: `queued ${GLYPH.dot} ${redactSecretString(sanitizeCallTargetText(task.task)).replace(/\s+/gu, " ").trim()}`,
+	}));
+	const identityWidth = runIdentityWidth(facts, visibleWidth);
+	return facts.map(
+		(fact) =>
+			`${NESTED_INDENT}${runRow(fact, { width: room, identityWidth, measure: visibleWidth })
+				.cells.map(
+					(cell) => `${cell.lead}${theme.fg(cell.role, `${cell.glyph === undefined ? "" : GLYPH[cell.glyph]}${cell.text}`)}`,
+				)
+				.join("")}`,
+	);
+}
+
+/** Where a live dispatch's queued rows go: under its row until a worker is placed, then under the group's last card. */
+type QueuedRows = {
+	call(seg: ToolSegment, width: number, detail: TranscriptDetailPolicy): string[];
+	card(entry: WorkerTranscriptEntry, width: number, detail: TranscriptDetailPolicy): string[];
+};
 
 /**
  * One visual unit of an assistant turn: a stretch of reasoning, a prose
@@ -2682,12 +2829,33 @@ function stacksUnder(
 	previous: TranscriptEntry | undefined,
 	detail: TranscriptDetailPolicy,
 ): boolean {
-	if (entry.role !== "worker" || previous?.role !== "worker") return false;
+	if (entry.role !== "worker") return false;
+	// A dispatch's worker rows nest under the call that spawned them: the header and its rows are one card.
+	if (previous?.role === "assistant") return spawnedAtTail(entry, previous);
+	if (previous?.role !== "worker") return false;
 	if (detail.style === "compact") return true;
 	if (workerGroupPosition(entry, previous) === "continues") return true;
 	const parent = entry.state.parentToolCallId;
 	if (parent !== undefined && parent === previous.state.parentToolCallId) return true;
 	return detail.style !== "detailed" && entry.state.helper === true && previous.state.helper === true;
+}
+
+/**
+ * Whether a worker entry's spawning call is the last thing its assistant entry shows, so the worker's row reads as the
+ * next row of that call's card. Text after the call, or a receipt closing the entry, separates them again.
+ */
+function spawnedAtTail(
+	entry: WorkerTranscriptEntry,
+	previous: Extract<TranscriptEntry, { role: "assistant" }>,
+): boolean {
+	const parent = entry.state.parentToolCallId;
+	if (parent === undefined || (!previous.pending && previous.turnUsage !== undefined)) return false;
+	for (let index = previous.segments.length - 1; index >= 0; index -= 1) {
+		const seg = previous.segments[index];
+		if (seg === undefined || seg.kind === "thinking" || (seg.kind === "text" && seg.text.trim().length === 0)) continue;
+		return seg.kind === "tool" && seg.id === parent;
+	}
+	return false;
 }
 
 /**
@@ -2772,6 +2940,7 @@ function renderEntryLines(
 	workerOptions?: Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader" | "telemetry">,
 	stopRequestedAt: number | null = null,
 	split?: LiveSplit,
+	queued?: QueuedRows,
 ): string[] {
 	if (split !== undefined) split.head = undefined;
 	if (entry.role === "replayBlock") {
@@ -2784,7 +2953,7 @@ function renderEntryLines(
 		return renderRetryStatus(entry.status, width, detail, unboundedToolBodies, terminalRows);
 	}
 	if (entry.role === "worker") {
-		return renderWorkerEntryLines(entry.state, width, {
+		const rows = renderWorkerEntryLines(entry.state, width, {
 			...workerOptions,
 			detail,
 			terminalRows,
@@ -2792,6 +2961,8 @@ function renderEntryLines(
 			nowMs,
 			group: workerGroupPosition(entry, previous),
 		});
+		const waiting = queued?.card(entry, width, detail) ?? [];
+		return waiting.length === 0 ? rows : [...rows, ...waiting];
 	}
 	// A settled assistant entry that rendered nothing at all contributes nothing.
 	// A mid-turn notice splits the transcript, so the events after it open a
@@ -2928,7 +3099,7 @@ function renderEntryLines(
 					between = "";
 				}
 			}
-			if (family && grouped.length > 1) {
+			if (family) {
 				reasoning = joinReasoning(reasoning, absorbed);
 				flushReasoning("action");
 				let revisions = 0;
@@ -2955,7 +3126,7 @@ function renderEntryLines(
 					};
 					seg.settledFold = fold;
 				}
-				blocks.push({ kind: "tool", lines: fold.lines, body: fold.body });
+				blocks.push({ kind: "tool", lines: fold.lines, body: toolBlockGap(fold.body, fold.lines, false, detail) });
 				for (let member = segIndex + 1; headable && member <= end; member += 1) {
 					const covered = entry.segments[member];
 					if (covered !== undefined && !segmentSettled(covered)) headable = false;
@@ -2979,7 +3150,13 @@ function renderEntryLines(
 					rows = { key: settledKey, lines: markActionLead(lines, copyMarks), body: hasToolBody(lines) };
 					if (seg.finished) seg.settledRows = rows;
 				}
-				blocks.push({ kind: "tool", lines: rows.lines, body: rows.body });
+				// A live dispatch lists every task from its first frame: the ones no worker has started read as queued.
+				const waiting = seg.finished ? [] : (queued?.call(seg, width, detail) ?? []);
+				blocks.push({
+					kind: "tool",
+					lines: waiting.length === 0 ? rows.lines : [...rows.lines, ...waiting],
+					body: toolBlockGap(rows.body, rows.lines, failedCall(seg), detail),
+				});
 			}
 			continue;
 		}
@@ -3207,6 +3384,37 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			...(siblings ? { siblings: siblings.map((sibling) => sibling.state), showGroupHeader: siblings[0] === entry } : {}),
 		};
 	};
+	/**
+	 * A live dispatch's tasks that no worker has started yet. Compact shows no live worker row (6.2), so they draw at
+	 * standard and detailed only: under the call's row until its first worker is placed, then under its last card.
+	 */
+	const queuedRows: QueuedRows = {
+		call: (seg, width, detail) =>
+			detail.style === "compact" || (dispatchGroups.get(seg.id)?.length ?? 0) > 0
+				? []
+				: queuedRunRows(unplacedTasks(seg, []), width),
+		card: (entry, width, detail) => {
+			const parent = entry.state.parentToolCallId;
+			if (detail.style === "compact" || parent === undefined) return [];
+			const group = dispatchGroups.get(parent);
+			if (group === undefined || group[group.length - 1] !== entry) return [];
+			const call = findSpawningCall(parent)?.segment;
+			return call === undefined
+				? []
+				: queuedRunRows(
+						unplacedTasks(
+							call,
+							group.map((card) => card.state),
+						),
+						width,
+					);
+		},
+	};
+	/** A settled dispatch draws no queued rows, so the card that drew them under it renders again. */
+	const settleQueuedRows = (seg: ToolSegment): void => {
+		if (seg.name !== "dispatch") return;
+		for (const card of dispatchGroups.get(seg.id) ?? []) invalidateEntryCache(card);
+	};
 	let dirty = true;
 	let renderedSkinEpoch = skinEpoch();
 	let runStartedAt: number | undefined;
@@ -3362,6 +3570,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		// From the end: what changes is nearly always the live tail, and this runs per streamed delta.
 		const index = transcript.lastIndexOf(entry);
 		if (index >= 0) runs.release(index);
+		// A worker row's gap reads the entry above it (`spawnedAtTail`), so a change there lays the worker out again.
+		if (index >= 0 && entry.role === "assistant" && transcript[index + 1]?.role === "worker") runs.release(index + 1);
 		if (prerender !== null && index >= 0 && index < prerender.next) prerender.next = index;
 	};
 	/** Read one receipt's turn from the view; it stays live until the view holds all of the turn's spend. */
@@ -3466,6 +3676,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const settleUnfinishedToolSegment = (seg: ToolSegment, settlement: "aborted" | "orphaned" = "orphaned"): void => {
 		if (seg.finished) return;
 		seg.finished = true;
+		settleQueuedRows(seg);
 		seg.isError = true;
 		seg.settledWithoutResult = true;
 		if (seg.durationMs === undefined && seg.startedAtMs !== undefined) {
@@ -4252,6 +4463,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					workerRenderOptions(entry),
 					options.getStopRequestedAt?.() ?? null,
 					split,
+					queuedRows,
 				);
 				if (cacheable) rememberRender(entry, renderKey, rows);
 			}
@@ -4362,6 +4574,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						job.terminalRows,
 						previous,
 						workerRenderOptions(entry),
+						null,
+						undefined,
+						queuedRows,
 					);
 					if (index >= transcript.length - capacity) rememberRender(entry, key, rows);
 				}
@@ -4435,6 +4650,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					job.terminalRows,
 					transcript[index - 1],
 					workerRenderOptions(entry),
+					null,
+					undefined,
+					queuedRows,
 				);
 				const byKey = renders ?? new Map<string, string[]>();
 				byKey.set(key, lines);
@@ -5013,6 +5231,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					tool.settlement = settled?.settlement;
 					tool.blockReason = settled?.reason;
 					tool.finished = true;
+					settleQueuedRows(tool);
 					// The true result replaces a synthetic settle; from here on the
 					// segment is model-finished and immutable to later end events.
 					tool.settledWithoutResult = undefined;
