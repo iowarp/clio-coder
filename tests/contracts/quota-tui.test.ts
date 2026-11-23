@@ -104,7 +104,7 @@ test("quota feed shares one lazy read, refreshes detail-only changes, and stops 
 	strictEqual(updates, 2);
 });
 
-test("detailed welcome accounts wrap in the usage field list and fold in reduced layouts", () => {
+test("the detailed welcome usage row meters accounts and folds in reduced layouts", () => {
 	let quota = "Claude 5h 6%/wk 9% · Codex wk 76% · Antigravity wk 73% · Local $0.00";
 	let quotaReads = 0;
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -120,35 +120,33 @@ test("detailed welcome accounts wrap in the usage field list and fold in reduced
 	try {
 		for (const style of ["compact", "standard"] as const) {
 			settings.interface.outputDetail = style;
-			for (const width of [48, 120]) doesNotMatch(plain(banner.render(width)), /Accounts|AI usage/);
+			for (const width of [48, 120]) doesNotMatch(plain(banner.render(width)), /usage {2,}|Claude/);
 		}
 		strictEqual(quotaReads, 0, "reduced tiers do not read hidden subscription data");
 		settings.interface.outputDetail = "detailed";
 		for (const width of [48, 60, 80, 120, 160, 220]) {
 			const rendered = banner.render(width);
 			const text = plain(rendered);
-			match(text, /Accounts/, `Detailed at ${width} columns`);
-			const fields = text
-				.slice(text.indexOf("Accounts"))
-				.replace(/[│█\n]/g, " ")
-				.replace(/\s+/g, " ");
-			for (const name of ["Claude", "Codex", "Antigravity", "Local $0.00"])
-				ok(fields.includes(name), `${width}: ${fields}`);
-			ok(text.indexOf("Project") < text.indexOf("AI usage"));
-			ok(text.indexOf("AI usage") < text.indexOf("Accounts"));
+			// The usage row leads with a meter and names accounts until the row is full, dropping whole accounts.
+			match(text, /usage {6}\S+ Claude 5h 6%\/wk 9%/u, `Detailed at ${width} columns`);
+			const usageRow = text.split("\n").find((line) => /usage {6}/u.test(line)) ?? "";
+			ok(!usageRow.includes("…"), `${width}: no account is cut mid-word: ${usageRow}`);
+			if (width >= 220)
+				for (const name of ["Claude", "Codex", "Antigravity", "Local $0.00"]) ok(text.includes(name), `${width}: ${text}`);
+			ok(text.search(/project {4}/u) < text.search(/usage {6}/u), "usage follows the project fact");
 			ok(rendered.every((line) => visibleWidth(line) <= width));
 		}
 		for (const width of [36, 40]) {
 			const rendered = banner.render(width);
 			const text = plain(rendered);
-			doesNotMatch(text, /Accounts|AI usage/);
+			doesNotMatch(text, /usage {2,}|Claude/);
 			ok(rendered.every((line) => visibleWidth(line) <= width));
 		}
 		quota = "Codex wk 81% · Local $0.00";
 		match(plain(banner.render(120)), /81%/);
 		const readsBeforeFold = quotaReads;
 		settings.interface.outputDetail = "standard";
-		doesNotMatch(plain(banner.render(120)), /Accounts|81%/);
+		doesNotMatch(plain(banner.render(120)), /usage {2,}|81%/);
 		strictEqual(quotaReads, readsBeforeFold);
 	} finally {
 		banner.dispose();

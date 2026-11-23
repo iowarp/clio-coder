@@ -495,6 +495,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		...(deps.getProjectConfigReminder ? { getProjectConfigReminder: deps.getProjectConfigReminder } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		// The launchpad's `last here` fact; session history loads lazily, off the Stage 0 closure.
+		readLastSession: async (cwd, now) => {
+			const prior = (await import("../domains/session/history.js")).latestPriorSession(cwd, "", now);
+			return prior && { lastActiveAt: prior.lastActiveAt, preview: prior.firstMessagePreview, name: prior.name };
+		},
 	});
 	// A boot-time `--continue`/`--session` resume opens onto an existing
 	// conversation, so the launchpad's fresh-start onboarding would be a lie
