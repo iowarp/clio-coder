@@ -613,7 +613,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			title: "Fleet Runs",
 			footerHint: dispatchBoardHint,
 			anchor: "center",
-			width: Math.max(44, Math.min(96, deps.terminal.columns - 4)),
+			width: Math.max(1, deps.terminal.columns - 4),
 		});
 		deps.startDispatchBoardTicker();
 		deps.requestRender();
