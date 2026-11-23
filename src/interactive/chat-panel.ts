@@ -63,7 +63,7 @@ import { holdInlineMath, mathFenceAfter } from "./renderers/inline-math.js";
 import { LiveToolView } from "./renderers/live-tool-view.js";
 import { settledMarkdownHead } from "./renderers/markdown-blocks.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
-import { renderNoticeRow } from "./renderers/notice.js";
+import { renderNoticeRow, renderTranscriptNotice } from "./renderers/notice.js";
 import { previewBudget, previewRows } from "./renderers/preview.js";
 import {
 	type ProviderFailureRoute,
@@ -4778,7 +4778,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const source = event.source;
 				appendRow({
 					role: "replayBlock",
-					renderBlock: (width, _detail, unbounded) => renderNoticeRow(text, mark, width, source, unbounded === true),
+					renderBlock: (width, _detail, unbounded) => renderTranscriptNotice(text, mark, width, source, unbounded === true),
 					at: stamp(),
 				});
 				markDirty();

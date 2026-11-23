@@ -80,6 +80,7 @@ export const ContextOperation = Type.Object(
 		),
 		warnings: Type.Optional(Type.Array(text)),
 		tokens: Type.Optional(Type.Object({ before: count, after: count, basis: Type.Literal("runtime-estimate") }, closed)),
+		notice: Type.Optional(text),
 	},
 	closed,
 );

@@ -1,32 +1,11 @@
 /**
- * Renderers for CompactionSummary session entries.
+ * The compaction lines the chat loop raises, re-exported for the interactive surfaces.
  *
- * Two output shapes live here:
- *   1. `renderCompactionSummaryLine` is the inline one-liner chat-loop
- *      emits after an auto-compaction or `/context compact` run. It uses the same
- *      `[context engine] <verb>` shape as the observation-mask notice.
- *   2. `renderCompactionSummaryEntry` renders a persisted
- *      `CompactionSummaryEntry` as a framed, indented block the chat panel
- *      can splice into a replayed transcript. The block visually marks the
- *      compaction boundary so a resumed or forked session opens with a
- *      clear "here is the summary; the real conversation starts below"
- *      delimiter rather than reading as ordinary chat.
- *
- * Pure functions: no TUI dependency beyond pi-tui's Markdown renderer and
- * the shared ANSI wrap helper. Callers read `SessionEntry` from disk and
- * splice the returned `string[]` into chat-panel's render loop.
+ * `renderCompactionSummaryLine` is the one-liner the chat loop raises after an automatic or `/compact` run; the
+ * settled operation keeps it as its notice. A persisted `CompactionSummaryEntry` is the model's checkpoint, not a
+ * transcript row: the settled context operation card (`renderContextOperationResult`) is the one place a compaction
+ * shows, live and on resume, so a resumed session reads the same rows the live one did.
  */
-
-import type { CompactionSummaryEntry } from "../../domains/session/entries.js";
-import { Markdown, type MarkdownTheme, wrapTextWithAnsi } from "../../engine/tui.js";
-import { footerTokens } from "../../session-control/compaction-lines.js";
-import { clioTheme, markdownTheme, screenTitle } from "../theme/index.js";
-
-const LABEL = "compaction summary";
-const BODY_INDENT = "  ";
-
-const theme = clioTheme();
-const COMPACTION_SUMMARY_THEME: MarkdownTheme = markdownTheme(theme);
 
 export type {
 	CompactionSummaryLineInput,
@@ -34,70 +13,3 @@ export type {
 	EvictionSkipReason,
 } from "../../session-control/compaction-lines.js";
 export { renderCompactionSummaryLine, renderEvictionSkipLine } from "../../session-control/compaction-lines.js";
-
-export interface RenderCompactionSummaryOptions {
-	/** Override the default markdown theme. Defaults to the local theme above. */
-	theme?: MarkdownTheme;
-	/** Drop the `[compaction summary]` header so the caller can draw its own label. */
-	hideLabel?: boolean;
-}
-
-/**
- * Render a single header line announcing a compaction boundary. Format:
- *   [compaction summary] compacted 12.3K → 9.1K tokens, cont. at turn <id>
- * Used on its own for placeholder replays and as the first line of
- * `renderCompactionSummaryEntry` when the body is included too.
- */
-function renderCompactionSummaryHeader(entry: CompactionSummaryEntry, width: number): string[] {
-	const label = screenTitle(theme, `[${LABEL}]`);
-	const tokens = Number.isFinite(entry.tokensBefore) ? entry.tokensBefore.toLocaleString() : "0";
-	const trigger = entry.trigger ? ` via ${entry.trigger}` : "";
-	// A resumed session states the same `compacted <before> → <after>` fact the live row did (p9/D3).
-	const reduction =
-		entry.tokensAfter !== undefined && Number.isFinite(entry.tokensBefore)
-			? `compacted ${footerTokens(entry.tokensBefore)} → ${footerTokens(entry.tokensAfter)} tokens`
-			: `~${tokens} tokens before`;
-	const meta = theme.fg("toolMetadata", `${reduction}, cont. at turn ${entry.firstKeptTurnId}${trigger}`);
-	return wrapTextWithAnsi(`${label} ${meta}`, width);
-}
-
-/**
- * Render a persisted CompactionSummary entry as a framed, indented block
- * suitable for chat-panel's render loop. Returns `[]` when the entry has no
- * summary text so an empty entry does not punch a blank block into the
- * chat.
- *
- * Layout:
- *   [compaction summary] compacted 12.3K → 9.1K tokens, cont. at turn <firstKeptTurnId>
- *     <markdown body line 1>
- *     <markdown body line 2>
- *     ...
- *
- * `width` is the usable chat-pane width; the body is rendered at
- * `width - BODY_INDENT.length` so the indent never forces a line past the
- * pane edge. The Markdown renderer right-pads each line to its requested
- * width; we trim that trailing pad before applying the indent so visible
- * width stays within the pane.
- */
-export function renderCompactionSummaryEntry(
-	entry: CompactionSummaryEntry,
-	width: number,
-	options: RenderCompactionSummaryOptions = {},
-): string[] {
-	const summary = entry.summary.trim();
-	if (summary.length === 0) return [];
-
-	const out: string[] = [];
-	if (!options.hideLabel) {
-		out.push(...renderCompactionSummaryHeader(entry, width));
-	}
-
-	const bodyWidth = Math.max(1, width - BODY_INDENT.length);
-	const theme = options.theme ?? COMPACTION_SUMMARY_THEME;
-	const md = new Markdown(summary, 0, 0, theme);
-	for (const line of md.render(bodyWidth)) {
-		const trimmed = line.replace(/ +$/, "");
-		out.push(`${BODY_INDENT}${trimmed}`);
-	}
-	return out;
-}

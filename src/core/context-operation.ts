@@ -36,6 +36,8 @@ export interface ContextOperation {
 	warnings?: readonly string[];
 	/** Estimates from the same runtime accounting on both sides; not provider measurements. */
 	tokens?: { before: number; after: number; basis: "runtime-estimate" };
+	/** The notice the operation raised when it settled, so a resumed card states what the live one did. */
+	notice?: string;
 }
 export const ACP_CONTEXT_STATUS_METHOD = "_clio-coder/context/status";
 /** Invocation reuses commands/invoke with command=context and the existing argv grammar. */
@@ -70,7 +72,7 @@ export function createContextOperation(
 		finish(
 			outcome: ContextOperationOutcome,
 			message: string,
-			evidence: Pick<ContextOperation, "facts" | "warnings" | "tokens"> = {},
+			evidence: Pick<ContextOperation, "facts" | "warnings" | "tokens" | "notice"> = {},
 		): ContextOperation {
 			if (settled) return operation;
 			Object.assign(operation, evidence, {
@@ -170,6 +172,7 @@ export function readContextOperation(value: unknown): ContextOperation | null {
 			op.tokens.basis !== "runtime-estimate")
 	)
 		return null;
+	if (op.notice !== undefined && typeof op.notice !== "string") return null;
 	return {
 		version: 1,
 		id: op.id,
@@ -199,5 +202,6 @@ export function readContextOperation(value: unknown): ContextOperation | null {
 		...(op.tokens === undefined
 			? {}
 			: { tokens: { before: op.tokens.before, after: op.tokens.after, basis: op.tokens.basis } }),
+		...(op.notice === undefined ? {} : { notice: boundedExternalDiagnostic(op.notice, 1024) }),
 	};
 }

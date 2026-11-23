@@ -677,7 +677,7 @@ test("a memory note renders as a titled callout without refs at 40 through 200 c
 		const legacy = createChatPanel();
 		rehydrateChatPanelFromTurns(legacy, [entry({ message, severity: "advisory" })]);
 		const text = rows(live).join("\n");
-		assert.match(rows(live)[0] ?? "", /┌─ i Memory ─+┐$/u, `${width}`);
+		assert.match(rows(live)[0] ?? "", /^i Memory ─+$/u, `${width}`);
 		const sentence = text.replace(/[│┌┐└┘─]/gu, " ").replace(/\s+/gu, " ");
 		assert.match(
 			sentence,

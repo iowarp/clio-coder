@@ -1092,7 +1092,7 @@ test("a provider failure leads with a plain sentence and the rail gives the bloc
 	doesNotMatch(presentProviderError("Provider stream ended before a finish reason was received."), /finish reason/u);
 });
 
-test("what just happened borrows the footer slot from a standing warning, never from an error", () => {
+test("a standing warning keeps the footer slot over what just happened, and compact shows neither info nor success", () => {
 	const notice = (
 		id: string,
 		level: Notification["level"],
@@ -1108,8 +1108,10 @@ test("what just happened borrows the footer slot from a standing warning, never 
 	});
 	const standing = notice("standing", "warning", 1_000, 121_000);
 	const applied = notice("applied", "success", 5_000, 17_000);
-	strictEqual(topNotification([standing, applied], 6_000)?.id, "applied");
+	strictEqual(topNotification([standing, applied], 6_000)?.id, "standing");
 	strictEqual(topNotification([standing, applied], 18_000)?.id, "standing");
+	strictEqual(topNotification([applied], 6_000, "info")?.id, "applied");
+	strictEqual(topNotification([applied], 6_000, "warning"), undefined);
 	strictEqual(topNotification([standing, notice("older", "info", 500, 12_000)], 6_000)?.id, "standing");
 	strictEqual(topNotification([standing, notice("tip: keys", "info", 5_000, 17_000)], 6_000)?.id, "standing");
 	strictEqual(topNotification([notice("fault", "error", 1_000, null), applied], 6_000)?.id, "fault");

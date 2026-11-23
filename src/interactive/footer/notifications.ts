@@ -14,6 +14,7 @@
  * color lives in `theme/**`; every emitted line is width-clamped.
  */
 
+import { type NoticeFloor, tierPolicy } from "../../core/presentation-tier.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { fitFooterText } from "../footer-panel.js";
@@ -361,26 +362,27 @@ function bySeverityThenRecency(a: Notification, b: Notification): number {
 }
 
 /**
- * The one notice a one-slot surface shows: the head of the center's own order.
- * The compact footer sorted by recency alone, so a fresh info notice hid an
- * unresolved error that the notice panel still ranked first. A warning stands
- * for minutes, though, so what just happened borrows the slot from it for as long
- * as that word lasts, and the warning comes back when it ends (J1-F13).
+ * The one notice a one-slot surface shows: the head of the center's own order, error over warning over success and
+ * info, newest first within a level, so a fresh info notice never hides a standing warning or error. Below the tier's
+ * notice floor (`noticeFloor`: compact shows warnings and errors only) an info or success notice does not take the
+ * slot; it still counts in the row's `+N`. Setting feedback is the operator's own change and always shows.
  */
-export function topNotification(notices: ReadonlyArray<Notification>, now: number): Notification | undefined {
+export function topNotification(
+	notices: ReadonlyArray<Notification>,
+	now: number,
+	floor: NoticeFloor = tierPolicy().noticeFloor,
+): Notification | undefined {
 	let top: Notification | undefined;
 	for (const entry of notices) {
-		if (isLive(entry, now) && (top === undefined || bySeverityThenRecency(entry, top) < 0)) top = entry;
+		if (!isLive(entry, now) || belowFloor(entry, floor)) continue;
+		if (top === undefined || bySeverityThenRecency(entry, top) < 0) top = entry;
 	}
-	if (top?.level !== "warning") return top;
-	const standing = top;
-	let newer: Notification | undefined;
-	for (const entry of notices) {
-		const brief = (entry.level === "info" || entry.level === "success") && entry.expiresAt !== null;
-		if (!brief || !isLive(entry, now) || entry.text.startsWith("tip: ") || entry.addedAt <= standing.addedAt) continue;
-		if (newer === undefined || entry.addedAt > newer.addedAt) newer = entry;
-	}
-	return newer ?? top;
+	return top;
+}
+
+function belowFloor(entry: Notification, floor: NoticeFloor): boolean {
+	if (floor === "info" || entry.presentation === "setting") return false;
+	return entry.level === "info" || entry.level === "success";
 }
 
 export interface NotificationCenterOptions {
