@@ -171,6 +171,77 @@ test("FX-19 ASCII mode: tool cards and the Fleet Runs board draw only ASCII chro
 	deepStrictEqual(unicode, []);
 });
 
+test("FX-19b ASCII mode: the framed Fleet Runs board keeps its rail, counts, fact rows and bounds ASCII", () => {
+	const probe = `
+		import { setPresentationTier } from "./src/core/presentation-tier.ts";
+		import { stripTerminalSequences } from "./src/engine/tui.ts";
+		import { createDispatchBoardView, dispatchBoardEscapeEntry, dispatchBoardHintEntries } from "./src/interactive/dispatch-board.ts";
+		import { buildResponsiveHint, ClioOverlayFrame } from "./src/interactive/overlay-frame.ts";
+		import { footerState } from "./tests/harness/footer-fixture.ts";
+		import { runUsageOf } from "./tests/harness/telemetry-view.ts";
+		const base = footerState().dispatchRows[0];
+		// One call reported nothing, so every token figure is a lower bound.
+		const usage = runUsageOf("r-1", [{ usage: { input: 10000, output: 150 }, usd: null }, { usage: { input: null, output: null }, usd: null }]);
+		const task = Array.from({ length: 30 }, (_, i) => "step " + i + " reads the files and reports").join(" ");
+		const lines = [];
+		for (const tier of ["compact", "detailed"]) {
+			setPresentationTier(tier);
+			for (const status of ["running", "completed"]) {
+				const rows = [
+					{ ...base, runId: "r-1", status, usage, ttft: "3.83s", taskSummary: task, endpoint: { label: "copilot", limit: 4 } },
+					...Array.from({ length: 16 }, (_, i) => ({ ...base, runId: "r-" + (i + 2), status: i % 2 === 0 ? "completed" : "enqueued" })),
+				];
+				const board = createDispatchBoardView(() => rows, () => undefined);
+				const hint = (inner) => buildResponsiveHint(dispatchBoardHintEntries(board), dispatchBoardEscapeEntry(board))(inner);
+				const frame = new ClioOverlayFrame(board, "Fleet Runs", hint, 76);
+				frame.setRowBudget(23);
+				lines.push(...frame.render(80));
+				board.toggleDetail();
+				for (let page = 0; page < 3; page += 1) {
+					frame.invalidate();
+					lines.push(...frame.render(80));
+					board.scrollDetail(1);
+				}
+			}
+		}
+		console.log(JSON.stringify(lines.map(stripTerminalSequences)));
+	`;
+	const draw = (env: Record<string, string>): string[] => {
+		const inherited = { ...process.env };
+		delete inherited.CLIO_CODER_ASCII;
+		delete inherited.NO_COLOR;
+		const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", probe], {
+			env: { ...inherited, TERM: "xterm-256color", ...env },
+			encoding: "utf8",
+			timeout: 20_000,
+		});
+		strictEqual(result.status, 0, result.stderr);
+		return JSON.parse(result.stdout) as string[];
+	};
+	const ascii = draw({ NO_COLOR: "1", CLIO_CODER_ASCII: "1" });
+	// Each chrome source is drawn, so the check covers it: the key rail, a position row, the overflowing status row
+	// closing on its cut mark, and the read model's lower bound in the table and the detail.
+	ok(ascii.some((line) => line.includes("[^v] select | [Enter] detail | [m] steer | [x] cancel | [Esc] close")));
+	ok(ascii.some((line) => /\| 1-9 of 17 runs +\|/u.test(line)));
+	ok(ascii.some((line) => line.includes("1 of 17 runs | 16 hidden while the detail is open")));
+	ok(ascii.some((line) => /status +@ running \| slots 1\/4 copilot \| first output after 3\.83s ~/u.test(line)));
+	ok(ascii.some((line) => /\d-\d+ of \d+ detail rows/u.test(line)));
+	ok(ascii.some((line) => / >=10\.0k +>=150 /u.test(line)));
+	ok(ascii.some((line) => line.includes("prompt >=10,000 | out >=150")));
+	deepStrictEqual(
+		ascii.filter((line) => /[^\x20-\x7e]/u.test(line)),
+		[],
+	);
+	// The Unicode board keeps every spelling it had.
+	const unicode = draw({});
+	ok(unicode.some((line) => line.includes("[↑↓] select · [Enter] detail · [m] steer · [x] cancel · [Esc] close")));
+	ok(unicode.some((line) => line.includes("1–9 of 17 runs")));
+	ok(unicode.some((line) => line.includes("1 of 17 runs · 16 hidden while the detail is open")));
+	ok(unicode.some((line) => /status +● running · slots 1\/4 copilot · first output after 3\.83s …/u.test(line)));
+	ok(unicode.some((line) => / ≥10\.0k +≥150 /u.test(line)));
+	ok(unicode.some((line) => line.includes("prompt ≥10,000 · out ≥150")));
+});
+
 test("demo-off skips welcome-only readers and live toggles restore the full welcome", () => {
 	process.env.TERM = "xterm-256color";
 	delete process.env.CLIO_CODER_SCREEN_READER;

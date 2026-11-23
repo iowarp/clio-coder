@@ -538,13 +538,16 @@ function isCriticalEntry(entry: HintEntry): boolean {
 /** Every label short (`true`), every label full (`false`), or every label short but the Esc entry's (`"keep-esc"`). */
 type HintSpelling = boolean | "keep-esc";
 
+/** Between two `[key] verb` entries of a key rail; the rail is split on the same string it is joined with. */
+const HINT_SEP = ` ${GLYPH.sep} `;
+
 function renderHintEntries(entries: ReadonlyArray<HintEntry>, short: HintSpelling): string {
 	return entries
 		.map((entry) => {
 			const shortened = short === true || (short === "keep-esc" && canonicalizeKey(entry.key) !== "Esc");
 			return `[${canonicalizeKey(entry.key)}] ${shortened ? (entry.short ?? entry.verb) : entry.verb}`;
 		})
-		.join(" · ");
+		.join(HINT_SEP);
 }
 
 /**
@@ -603,12 +606,20 @@ export function fitHintEntryList(
  */
 export const FILTER_HINT: HintEntry = { key: "type", verb: "filter" };
 
+/** Every way the arrow pair is spelled, the glyph table's own included, reads as the one arrow-pair key. */
 function canonicalizeKey(key: string): string {
 	const trimmed = key.trim();
 	if (trimmed === "R") return "R";
 	const lower = trimmed.toLowerCase();
-	if (lower === "up/down" || lower === "updown" || lower === "↑/↓" || lower === "up/down/j/k" || lower === "↑↓")
-		return "↑↓";
+	if (
+		lower === "up/down" ||
+		lower === "updown" ||
+		lower === "↑/↓" ||
+		lower === "up/down/j/k" ||
+		lower === "↑↓" ||
+		trimmed === GLYPH.upDown
+	)
+		return GLYPH.upDown;
 	if (lower === "enter/space") return "Enter/Space";
 	if (lower === "enter") return "Enter";
 	if (lower === "esc" || lower === "escape") return "Esc";
@@ -624,7 +635,7 @@ export function buildHint(entries: ReadonlyArray<HintEntry>, esc: OverlayEscVerb
 		...entries.map((e) => ({ key: canonicalizeKey(e.key), verb: e.verb })),
 		{ key: "Esc", verb: esc },
 	];
-	return finalEntries.map((e) => `[${e.key}] ${e.verb}`).join(" · ");
+	return finalEntries.map((e) => `[${e.key}] ${e.verb}`).join(HINT_SEP);
 }
 
 /**
@@ -654,7 +665,7 @@ export function buildResponsiveHint(
  * needs, so a plain-string overlay gets the same protection as a structured one.
  */
 function fitHint(hint: string, maxCleanWidth: number): string {
-	const parts = hint.split(" · ");
+	const parts = hint.split(HINT_SEP);
 	// Two entries narrow too: a fixed `[Enter] fork after this reply · [Esc] close`
 	// used to be cut at the edge with both keys inside the cut, so a 40-column
 	// rail named neither. Narrowed, the way out is what stands.
@@ -679,7 +690,7 @@ function brandedBottomBorder(innerWidth: number, hint?: string, tone?: ClioToken
 	}
 	let clean = hint.trim();
 	const maxCleanWidth = innerWidth - 3;
-	if (clean.includes(" · ") && visibleWidth(`─ ${clean} `) > innerWidth) {
+	if (clean.includes(HINT_SEP) && visibleWidth(`─ ${clean} `) > innerWidth) {
 		clean = fitHint(clean, maxCleanWidth);
 	}
 	const formatted = `${GLYPH.rule} ${clean} `;
@@ -947,7 +958,7 @@ export class ClioOverlayFrame implements Component {
 		if (hint === undefined || hint.trim().length === 0) return undefined;
 		const clean = hint.trim();
 		if (visibleWidth(clean) <= maxWidth) return clean;
-		const fitted = clean.includes(" · ") ? fitHint(clean, maxWidth) : clean;
+		const fitted = clean.includes(HINT_SEP) ? fitHint(clean, maxWidth) : clean;
 		return visibleWidth(fitted) <= maxWidth ? fitted : truncateToWidth(fitted, maxWidth, GLYPH.ellipsis, false);
 	}
 

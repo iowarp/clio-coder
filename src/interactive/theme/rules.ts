@@ -47,15 +47,15 @@ function fitUnitsPlan(
 	units: readonly string[],
 	maxWidth: number,
 ): { line: string; kept: number } {
-	const sep = " · ";
+	const sep = ` ${GLYPH.sep} `;
 	let line = prefix;
 	for (let index = 0; index < units.length; index += 1) {
 		const candidate = index === 0 ? `${line}${units[index]}` : `${line}${sep}${units[index]}`;
 		// Reserve two columns for the ` …` marker unless this is the last unit.
 		const reserve = index < units.length - 1 ? 2 : 0;
 		if (visibleWidth(candidate) + reserve > maxWidth) {
-			if (index === 0) return { line: truncateToWidth(candidate, Math.max(0, maxWidth), "…", false), kept: 0 };
-			return { line: `${line} ${theme.fg("annotation", "…")}`, kept: index };
+			if (index === 0) return { line: truncateToWidth(candidate, Math.max(0, maxWidth), GLYPH.ellipsis, false), kept: 0 };
+			return { line: `${line} ${theme.fg("annotation", GLYPH.ellipsis)}`, kept: index };
 		}
 		line = candidate;
 	}
