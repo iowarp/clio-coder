@@ -1130,7 +1130,7 @@ const turnPreparationSubmenu: SettingSubmenuBuilder = (currentValue, done) => {
 		const choices = [
 			...TURN_CONTROL_WORKFLOWS.map((workflow) => ({
 				value: workflow as string,
-				label: `${selected.has(workflow) ? GLYPH.ok : "○"} ${TURN_PREPARATION_LABELS[workflow]}`,
+				label: `${selected.has(workflow) ? GLYPH.ok : GLYPH.hollow} ${TURN_PREPARATION_LABELS[workflow]}`,
 			})),
 			{ value: "apply", label: "Apply these choices" },
 		];
@@ -2018,10 +2018,11 @@ function routeBreakerSegment(routes: ReadonlyArray<RouteBreakerView>): SettingsV
 	const open = routes.filter((route) => route.state === "open");
 	if (open.length > 0) {
 		const remainingMs = Math.max(...open.map((route) => route.remainingMs));
-		return { text: `○ paused ${Math.ceil(remainingMs / 1000)}s`, tone: "unhealthy" };
+		return { text: `${GLYPH.hollow} paused ${Math.ceil(remainingMs / 1000)}s`, tone: "unhealthy" };
 	}
-	if (routes.some((route) => route.state === "probing")) return { text: "◐ probing", tone: "degraded" };
-	if (routes.some((route) => route.state === "half-open")) return { text: "◐ recovering", tone: "degraded" };
+	if (routes.some((route) => route.state === "probing")) return { text: `${GLYPH.degraded} probing`, tone: "degraded" };
+	if (routes.some((route) => route.state === "half-open"))
+		return { text: `${GLYPH.degraded} recovering`, tone: "degraded" };
 	return null;
 }
 
@@ -2041,7 +2042,7 @@ export function targetRows(
 		].filter((role) => role !== null);
 		const health = status?.health.status ?? "unknown";
 		const operation = options?.getTargetOperation?.(target.id) ?? null;
-		const roleText = roles.length > 0 ? roles.join("+") : "—";
+		const roleText = roles.length > 0 ? roles.join("+") : GLYPH.none;
 		const healthSegment = targetHealthSegment(health);
 		const activitySegment: SettingsValueSegment | null = operation
 			? {
@@ -2056,7 +2057,7 @@ export function targetRows(
 		// A down target's latency is how fast the connection was refused, which read as a healthy `2 ms` beside `down`.
 		const latency =
 			status?.health.latencyMs === null || status?.health.latencyMs === undefined || status.health.status === "down"
-				? "—"
+				? GLYPH.none
 				: `${status.health.latencyMs} ms`;
 		const lastProbe = status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never";
 		const failureReason = status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : null);
@@ -2098,9 +2099,9 @@ function targetHealthSegment(status: TargetHealth["status"]): SettingsValueSegme
 		case "healthy":
 			return { text: `${GLYPH.running} healthy`, tone: "healthy" };
 		case "degraded":
-			return { text: "◐ degraded", tone: "degraded" };
+			return { text: `${GLYPH.degraded} degraded`, tone: "degraded" };
 		case "down":
-			return { text: "○ down", tone: "unhealthy" };
+			return { text: `${GLYPH.hollow} down`, tone: "unhealthy" };
 		case "unknown":
 			return { text: "? unknown", tone: "unknown" };
 	}
@@ -2134,7 +2135,7 @@ export function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>, ui?: Flee
 			presentationKind: "status",
 			valueSegments: [
 				{
-					text: `${node.state === "online" && (node.kind === "local" || node.verification?.ok) ? GLYPH.running : "○"} ${readiness}`,
+					text: `${node.state === "online" && (node.kind === "local" || node.verification?.ok) ? GLYPH.running : GLYPH.hollow} ${readiness}`,
 					tone: node.state === "online" && (node.kind === "local" || node.verification?.ok) ? "healthy" : "unhealthy",
 				},
 				{ text: ` ${GLYPH.sep} ${busy}`, tone: "neutral" },
@@ -3776,7 +3777,7 @@ export class SettingsCenter implements Component {
 			);
 			// `Esc clears` only while the filter is the next thing Esc backs out of; under an open edit or scope card Esc means that layer.
 			const escClears = innermostEscapeLayer(this.escapeLayers())?.verb === "clear filter";
-			const text = `filter “${this.filterQuery}” ${GLYPH.sep} ${matches} ${matches === 1 ? "match" : "matches"}${escClears ? ` ${GLYPH.sep} Esc clears` : ""} ${GLYPH.sep} / starts over`;
+			const text = `filter ${GLYPH.quoteOpen}${this.filterQuery}${GLYPH.quoteClose} ${GLYPH.sep} ${matches} ${matches === 1 ? "match" : "matches"}${escClears ? ` ${GLYPH.sep} Esc clears` : ""} ${GLYPH.sep} / starts over`;
 			return [truncateToWidth(clioTheme().fg("searchQuery", text), width, GLYPH.ellipsis, false)];
 		}
 		// The editor draws its own caret, so the row stops faking one with `_`.
@@ -3791,9 +3792,14 @@ export class SettingsCenter implements Component {
 
 	private emptyFilterLines(width: number, height: number): string[] {
 		return fitRows(
-			emptyState(clioTheme(), `No settings match “${this.effectiveFilterQuery()}”`, width, {
-				remedy: `/ edits the filter ${GLYPH.sep} an empty Enter clears it. Not every setting has a row. Edit settings file lists them all.`,
-			}),
+			emptyState(
+				clioTheme(),
+				`No settings match ${GLYPH.quoteOpen}${this.effectiveFilterQuery()}${GLYPH.quoteClose}`,
+				width,
+				{
+					remedy: `/ edits the filter ${GLYPH.sep} an empty Enter clears it. Not every setting has a row. Edit settings file lists them all.`,
+				},
+			),
 			width,
 			height,
 		);
@@ -4062,7 +4068,7 @@ export class SettingsCenter implements Component {
 					: section && !this.submenuComponent
 						? this.sectionCount(section)
 						: "";
-		return titleRow(theme, trail.join(" › "), width, meta.length > 0 ? { meta } : {});
+		return titleRow(theme, trail.join(` ${GLYPH.crumb} `), width, meta.length > 0 ? { meta } : {});
 	}
 
 	private renderSectionsPage(width: number, height: number): string[] {

@@ -317,7 +317,10 @@ function formatRewindConfirmBody(
 	const height = all.length > budget ? Math.max(1, budget - 1) : budget;
 	const { window, position } = windowRows(all, scroll, height);
 	if (position === null) return window;
-	return [...window, positionRow(clioTheme(), { ...position, keys: ["↑↓ scroll"] }, Math.max(1, Math.floor(width)))];
+	return [
+		...window,
+		positionRow(clioTheme(), { ...position, keys: [`${GLYPH.upDown} scroll`] }, Math.max(1, Math.floor(width))),
+	];
 }
 
 export interface OpenRewindConfirmOptions {
@@ -397,7 +400,7 @@ export function openRewindConfirmOverlay(tui: TUI, options: OpenRewindConfirmOpt
 		title: `Rewind files to snapshot #${options.record.n}`,
 		...(actionable ? { approval: true, awaitingInput: true, tone: "decisionCue" as const } : {}),
 		footerHint: buildResponsiveHint(
-			[...(actionable ? [{ key: "Enter", verb: "restore files" }] : []), { key: "↑↓", verb: "scroll" }],
+			[...(actionable ? [{ key: "Enter", verb: "restore files" }] : []), { key: GLYPH.upDown, verb: "scroll" }],
 			{ key: "Esc", verb: "back to snapshots, nothing changed", short: "back" },
 		),
 	});

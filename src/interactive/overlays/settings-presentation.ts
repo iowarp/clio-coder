@@ -670,7 +670,9 @@ export function renderDetailLane(theme: ClioTheme, context: InspectorContext, wi
 			...wrapTextWithAnsi(theme.fg("body", context.sectionDescription), safe),
 			...(compact ? [] : ["", chipRow(theme, sectionFacts(theme, context.counts), safe)]),
 		];
-		const note = compact ? [] : wrapTextWithAnsi(theme.fg("annotation", "Tab or → opens its settings"), safe);
+		const note = compact
+			? []
+			: wrapTextWithAnsi(theme.fg("annotation", `Tab or ${GLYPH.right} opens its settings`), safe);
 		return pinNote(rows, note, safe, height);
 	}
 	// When a change lands is provenance: the title states it at the detailed tier only.
