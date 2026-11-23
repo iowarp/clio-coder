@@ -321,6 +321,7 @@ describe("settings and migration boundary", () => {
 		const ids = listMigrations().map((migration) => migration.id);
 		deepStrictEqual(ids, [
 			"2026-11-21-retired-settings",
+			"2026-11-23-exit-summary-on-off",
 			PLAYBOOKS_MIGRATION_ID,
 			ACP_ADAPTERS_MIGRATION_ID,
 			CLAUDE_SUBSCRIPTION_MIGRATION_ID,
@@ -368,7 +369,7 @@ describe("settings and migration boundary", () => {
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(scratch.dir, "config", "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-retire-fleet-locks","2026-11-21-writer-set-lease-clock"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent","2026-11-21-retire-fleet-locks","2026-11-21-writer-set-lease-clock","2026-11-23-exit-summary-on-off"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");

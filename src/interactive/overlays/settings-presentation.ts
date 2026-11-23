@@ -59,6 +59,7 @@ const SETTINGS_CHOICE_LABELS: Readonly<Record<string, Readonly<Record<string, st
 	"interface.mode": { regular: "Scrollback", fullscreen: "Full screen" },
 	"interface.fullscreenScrollbar": { hidden: "Hidden", auto: "Automatic", always: "Always" },
 	"interface.smoothStreaming": { off: "Off", auto: "Automatic", on: "On" },
+	"interface.exitSummary": { on: "On", off: "Off" },
 	"interface.panes.notifications": { failures: "Failures only", all: "All updates", off: "Off" },
 	"interface.panes.layout": { off: "Off", workers: "Workers", cockpit: "Workers and files" },
 	"interface.panes.files.mode": { companion: "Stay open", chooser: "Choose once" },

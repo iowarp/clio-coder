@@ -10,6 +10,7 @@ import { clioStateDir, resolveClioDirs } from "../../../core/xdg.js";
  */
 export const REGISTERED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
 	"2026-11-21-retired-settings",
+	"2026-11-23-exit-summary-on-off",
 	"2026-10-06-playbooks-and-packages",
 	"2026-10-07-acp-adapters",
 	"2026-10-07-claude-subscription",
@@ -63,8 +64,8 @@ export const APPLY_MIGRATIONS_COMMAND = "clio-coder upgrade --post-install";
 
 /**
  * What to tell an operator whose settings.yaml fails on a key or value the
- * unrecorded `2026-11-21-retired-settings` migration rewrites:
- * {@link APPLY_MIGRATIONS_COMMAND} applies it. The caller decides whether an issue is one; no other
+ * unrecorded `2026-11-21-retired-settings` or `2026-11-23-exit-summary-on-off`
+ * migration rewrites: {@link APPLY_MIGRATIONS_COMMAND} applies it. The caller decides whether an issue is one; no other
  * migration repairs a validation failure, so none is advised for one. A home
  * upgraded by a package manager, or a settings file provisioned with no
  * manifest, reaches the strict reader without that run. This only names the
@@ -85,6 +86,9 @@ export function pendingMigrationAdvice(): string | null {
 	if (!Array.isArray(applied)) return null;
 	const recorded = new Set(applied);
 	const pending = REGISTERED_MIGRATION_IDS.filter((id) => !recorded.has(id));
-	if (!pending.includes("2026-11-21-retired-settings")) return null;
-	return `run \`${APPLY_MIGRATIONS_COMMAND}\`: its pending migration 2026-11-21-retired-settings rewrites retired keys and old value spellings`;
+	// `2026-11-21-retired-settings` rewrites every value spelling the later exit summary migration does, so while it is
+	// pending it alone is named.
+	const repair = ["2026-11-21-retired-settings", "2026-11-23-exit-summary-on-off"].find((id) => pending.includes(id));
+	if (repair === undefined) return null;
+	return `run \`${APPLY_MIGRATIONS_COMMAND}\`: its pending migration ${repair} rewrites retired keys and old value spellings`;
 }

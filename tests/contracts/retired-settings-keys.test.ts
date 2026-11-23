@@ -75,7 +75,7 @@ test("the retired-settings migration rewrites a home's settings, reports each ch
 	deepStrictEqual(validateSettingsFile().issues, []);
 	const settings = readSettings();
 	deepStrictEqual(settings.turnControl.workflows, ["detached-collection"]);
-	strictEqual(settings.interface.exitSummary, "standard");
+	strictEqual(settings.interface.exitSummary, "on");
 	strictEqual(settings.interface.outputDetail, "detailed");
 	strictEqual(settings.fleet.nodes[0]?.clioCoderEntry, "/opt/clio");
 	strictEqual(settings.integrations.externalAgents.entries[0]?.command, "peer");
@@ -95,7 +95,7 @@ test("the retired-settings migration rewrites a home's settings, reports each ch
 		"Removed fleet.decisionProfiles:",
 		"Removed systemOne.engines.fast.mode:",
 		"Removed integrations.externalAgents.entries[0].labels:",
-		"interface.exitSummary: full → standard",
+		"interface.exitSummary: full → on",
 		"interface.outputDetail: verbose → detailed",
 		"Renamed fleet.nodes[0].clioEntry to fleet.nodes[0].clioCoderEntry",
 	])
@@ -125,7 +125,7 @@ test("with the read path gone, a retired key is an ordinary unknown key and an o
 			"fleet.speculativeDispatch: unknown key",
 			"context.memory.observations: unknown key",
 			"interface.outputDetail: expected compact, standard, or detailed",
-			"interface.exitSummary: expected auto, brief, standard, report, or off",
+			"interface.exitSummary: expected on or off",
 		],
 	);
 });
