@@ -88,7 +88,10 @@ test("production Stage 0 static closure stays within its measured bundle budget"
 	// Keep vendor bytes visible, with a separate cap so they cannot hide Clio growth.
 	ok(closure.size <= 32, `Stage 0 chunks: ${closure.size} > 32`);
 	ok(totalBytes <= 1_400_000, `Stage 0 bytes: ${totalBytes} > 1,400,000`);
-	ok(clioBytes <= 350_000, `Stage 0 Clio source bytes: ${clioBytes} > 350,000`);
+	// 0.9.0 raised the Clio cap from 350,000 to 400,000 by maintainer ruling: the TUI elevation adds color depth,
+	// 16-color pairs, NO_COLOR rules and redesigned first-frame chrome. First-frame speed is still the goal; the cap
+	// only catches a leak.
+	ok(clioBytes <= 400_000, `Stage 0 Clio source bytes: ${clioBytes} > 400,000`);
 });
 
 test("CLI entry static closure loads no Effect", () => {
