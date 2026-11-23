@@ -1,4 +1,4 @@
-import { inlineShellScript, type ShellToken, scanShellLikeDeep } from "./protected-artifacts.js";
+import { inlineShellScript, type ShellToken, scanShellLike, scanShellLikeDeep } from "./protected-artifacts.js";
 
 /**
  * Clio's own settings, credentials and trust are the operator's. A model that
@@ -18,6 +18,21 @@ const LAUNCHER_PATH =
 const PACKAGE_SPEC = /^@iowarp\/clio-coder(?:@\S*)?$/u;
 const HELP = new Set(["--help", "-h"]);
 const REDIRECT = /^(?:\d*[<>]{1,2}[&|]?|&>>?|<<<?-?)$/u;
+/**
+ * FX-9: a word that may hand a here-document body to a shell the body scan does not see as its reader: a shell named
+ * as an argument (`docker exec -i c sh`), a remote, login or privileged shell (`ssh node`, `su`, `sudo -s`).
+ */
+const BODY_SHELL_RUNNER =
+	/^(?:(?:ba|da|z|k|mk|c|tc|a|fi|y|r)?sh|busybox|source|\.|eval|exec|xargs|ssh|su|runuser|sudo|doas|pkexec|docker|podman|kubectl|lxc|chroot|nsenter|machinectl|script|expect)$/u;
+
+/** Whether a quoted here-document body may be skipped: no word outside the bodies may run one as shell. */
+function bodiesStayData(script: string): boolean {
+	return !scanShellLike(script, true).some((token) => {
+		if (token.operator) return false;
+		const word = token.value.replace(/^['"]|['"]$/gu, "");
+		return BODY_SHELL_RUNNER.test(word.slice(word.lastIndexOf("/") + 1));
+	});
+}
 
 function isLauncher(token: ShellToken): boolean {
 	const word = token.value.replace(/^['"]|['"]$/gu, "");
@@ -89,7 +104,8 @@ export function invokesSettingsMutation(command: string): boolean {
 			return hit;
 		};
 		let redirectTarget = false;
-		for (const token of scanShellLikeDeep(script)) {
+		// FX-9: a quoted here-document body only a non-shell reads (`python3 - <<'EOF'`) is that program's text, not a launch.
+		for (const token of scanShellLikeDeep(script, 0, bodiesStayData(script))) {
 			if (token.operator && REDIRECT.test(token.value)) {
 				// `2>&1` and `>out.json` belong to the command: drop the fd number and the target word.
 				if (/^\d+$/u.test(segment.at(-1)?.value ?? "")) segment.pop();
