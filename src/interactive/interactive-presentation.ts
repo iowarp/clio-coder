@@ -1333,16 +1333,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			...(deps.workspaceSurfaces ? { workspace: deps.workspaceSurfaces.board } : {}),
 			pending,
 			fleet: createFleetDock({
-				getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 				getRows: () => dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows(),
-				getQuotaSnapshots: () => {
-					quotaSummary.peekSnapshots();
-					return deps.telemetry.read?.quota().providers ?? [];
-				},
 				...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
 				isFooterExpanded: () => footer.isExpanded(),
 				isFleetBoardOpen: () => deps.getOverlayState?.() === "dispatch-board",
 				getTerminalRows: () => deps.terminal.rows ?? process.stdout.rows ?? 40,
+				isMainTurnLive: () => deps.chat.isStreaming(),
 			}),
 			editor,
 			contextProgress: createContextProgressRail(

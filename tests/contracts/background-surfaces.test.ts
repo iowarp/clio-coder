@@ -30,7 +30,6 @@ const fits = (lines: string[], width: number) => {
 test("fleet dock follows live tiers, prioritizes approval waits, and does not render discarded detail", () => {
 	const fixture = footerState().dispatchRows[0];
 	ok(fixture);
-	let style: OutputStyle = "compact";
 	let rows: DispatchBoardRow[] = [
 		{
 			...fixture,
@@ -38,70 +37,75 @@ test("fleet dock follows live tiers, prioritizes approval waits, and does not re
 			taskSummary: "Inspect the parser",
 		},
 	];
-	const dock = createFleetDock({ getRows: () => rows, getOutputStyle: () => style, getTerminalRows: () => 40 });
-	for (const width of [24, 40, 80, 120, 200]) {
-		style = "compact";
-		const compact = dock.render(width);
-		doesNotMatch(plain(compact), /Inspect the parser|Fleet Runs/);
-		style = "standard";
-		const standard = dock.render(width);
-		match(plain(standard), /Inspect the parser/);
-		style = "detailed";
-		const detailed = dock.render(width);
-		match(plain(detailed), /Fleet Runs/);
-		ok(compact.length < standard.length);
-		ok(standard.length < detailed.length);
-		for (const lines of [compact, standard, detailed]) fits(lines, width);
-	}
-	const first = rows[0];
-	ok(first);
-	const waiting: DispatchBoardRow = {
-		...first,
-		runId: "approval",
-		agentId: "waiting-worker",
-		progress: {
-			...createWorkerProgressFold().snapshot(),
-			awaitingApproval: true,
-			phase: "tool",
-			tailText: "",
-			recentActions: [],
-			currentAction: null,
-		},
+	const dock = createFleetDock({ getRows: () => rows, getTerminalRows: () => 40 });
+	const at = (tier: OutputStyle, width: number) => {
+		setPresentationTier(tier);
+		return dock.render(width);
 	};
-	rows = [first, waiting];
-	style = "compact";
-	const minimal = plain(dock.render(120));
-	match(minimal, /waiting-worker.*approval/);
-	ok(waiting.progress);
-	match(
-		plain(
-			renderWorkerEntryLines(
-				{
-					runId: "approval",
-					assignmentId: "approval",
-					origin: "user",
-					agentId: "waiting-worker",
-					runtime: { kind: "clio" },
-					text: "",
-					droppedLines: 0,
-					pending: true,
-					tools: [],
-					attempts: [],
-					progress: waiting.progress,
-				},
-				120,
-				{ detail: transcriptDetail("compact") },
+	try {
+		for (const width of [24, 40, 80, 120, 200]) {
+			const compact = at("compact", width);
+			doesNotMatch(plain(compact), /Inspect the parser|Fleet/);
+			const standard = at("standard", width);
+			if (width >= 80) match(plain(standard), /Inspect the parser/);
+			const detailed = at("detailed", width);
+			match(plain(detailed), /^Fleet /);
+			ok(compact.length < standard.length);
+			ok(standard.length < detailed.length);
+			for (const lines of [compact, standard, detailed]) fits(lines, width);
+		}
+		const first = rows[0];
+		ok(first);
+		const waiting: DispatchBoardRow = {
+			...first,
+			runId: "approval",
+			agentId: "waiting-worker",
+			progress: {
+				...createWorkerProgressFold().snapshot(),
+				awaitingApproval: true,
+				phase: "tool",
+				tailText: "",
+				recentActions: [],
+				currentAction: null,
+			},
+		};
+		rows = [first, waiting];
+		// The wait on the operator leads the counts at compact and the run rows from standard.
+		match(plain(at("compact", 120)), /^‖ 1 waiting/);
+		match(plain(at("standard", 120)).split("\n")[1] ?? "", /^‖ .*waiting-worker.*approval/);
+		ok(waiting.progress);
+		match(
+			plain(
+				renderWorkerEntryLines(
+					{
+						runId: "approval",
+						assignmentId: "approval",
+						origin: "user",
+						agentId: "waiting-worker",
+						runtime: { kind: "clio" },
+						text: "",
+						droppedLines: 0,
+						pending: true,
+						tools: [],
+						attempts: [],
+						progress: waiting.progress,
+					},
+					120,
+					{ detail: transcriptDetail("compact") },
+				),
 			),
-		),
-		/waiting-worker.*approval/,
-	);
-	// A strip has no use for usage details; computing them on every paint was wasted work.
-	Object.defineProperty(waiting, "usage", {
-		get() {
-			throw new Error("summary read full telemetry");
-		},
-	});
-	dock.render(120);
+			/waiting-worker.*approval/,
+		);
+		// A strip has no use for usage details; computing them on every paint was wasted work.
+		Object.defineProperty(waiting, "usage", {
+			get() {
+				throw new Error("summary read full telemetry");
+			},
+		});
+		at("compact", 120);
+	} finally {
+		setPresentationTier("standard");
+	}
 });
 
 test("a run waiting for the verification slot says so on its worker card and Fleet Runs row until its checks start", () => {
