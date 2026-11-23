@@ -1,5 +1,4 @@
 import type { OutputStyle } from "../core/defaults.js";
-import { asciiOnly, colorDisabled, nerdFontEnabled } from "../core/terminal-preferences.js";
 import {
 	Editor,
 	getKeybindings,
@@ -15,7 +14,7 @@ import { type DockEntry, dockAdaptiveRows, dockBodyRows, dockGrowthRows, dockTop
 import { guardPastedEditorOperator } from "./editor-bash.js";
 import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
 import { steerDraftToken } from "./editor-steer.js";
-import { type ContextOccupancyFacts, contextRailHint } from "./footer/context-rail.js";
+import { type ContextOccupancyFacts, contextRailGroup, contextRailUnit } from "./footer/context-rail.js";
 import { centeredWindow, fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, type PermissionTermsHint, permissionHintEntries } from "./permission-hint.js";
 import type { SlashCompletionItem } from "./slash-autocomplete.js";
@@ -269,58 +268,8 @@ function confirmRailHint(
 	);
 }
 
-// Stable meaning across providers: ordinary effort occupies one through four
-// brains; an admitted maximum is four brains with explicit attention ink.
-// Minimal shares the lowest graphical step; settings retain the exact choice.
-const THINKING_BRAINS: Readonly<Record<string, number>> = {
-	off: 0,
-	minimal: 1,
-	low: 1,
-	medium: 2,
-	high: 3,
-	xhigh: 4,
-	max: 4,
-	ultra: 4,
-};
-const THINKING_BRAIN_SLOTS = 4;
-
-/** Four static marks; textual fallback preserves exact state when graphics cannot. */
 /** Under this the current task's title is a stub, and the rail says nothing rather than half a name. */
 const TASK_RAIL_MIN_ROOM = 20;
-
-function thinkingRailHint(
-	theme: ClioTheme,
-	thinking: ReturnType<NonNullable<EditorChrome["getThinking"]>>,
-	width: number,
-): string {
-	if (thinking.quiet) return "";
-	const level = thinking.label;
-	const levels = thinking.supportedLevels ?? [];
-	const count = Object.hasOwn(THINKING_BRAINS, level) ? THINKING_BRAINS[level] : undefined;
-	const glyph = nerdFontEnabled() ? GLYPH.brain : GLYPH.running;
-	const glyphWidth = visibleWidth(glyph);
-	const graphicalWidth = THINKING_BRAIN_SLOTS * glyphWidth + THINKING_BRAIN_SLOTS - 1;
-	if (thinking.note) {
-		const plain = `think ${level}`;
-		const explained = `${plain} (${thinking.note})`;
-		return theme.fg("thinkingLevel", visibleWidth(explained) <= width ? explained : plain);
-	}
-	if (
-		!thinking.hasLevels ||
-		levels.length === 0 ||
-		count === undefined ||
-		(level !== "off" && !levels.includes(level)) ||
-		process.env.CLIO_CODER_SCREEN_READER === "1" ||
-		colorDisabled() ||
-		asciiOnly() ||
-		width < graphicalWidth
-	)
-		return theme.fg("thinkingLevel", `think ${level}`);
-	const activeRole = level === "max" || level === "ultra" ? "thinkingMaximum" : "thinkingActive";
-	return Array.from({ length: THINKING_BRAIN_SLOTS }, (_, index) =>
-		theme.fg(index < count ? activeRole : "thinkingInactive", index < count || nerdFontEnabled() ? glyph : "○"),
-	).join(" ");
-}
 
 /** The line the empty composer shows for the mode it is in. */
 function emptyPromptFor(mode: ComposerMode): string {
@@ -841,34 +790,23 @@ export class ClioEditor extends Editor {
 		lead?: { shell: readonly string[]; lines: string | null },
 	): string {
 		const separator = theme.fg("separator", ` ${GLYPH.dot} `);
+		const context = this.chrome.getContextUsage?.();
+		const facts = {
+			context,
+			thinking: this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
+		};
+		// The group draws context first; with no context reading it is the thinking unit alone.
+		const hasContext = context !== undefined && contextRailUnit(context, theme, { bar: 0, pair: false }) !== "";
 		const group = (room: number): { hint: string; thinking: string; usage: string } => {
 			const fittedRight = truncateToWidth(right, Math.max(0, room), GLYPH.ellipsis, false);
 			const groupRoom =
 				keysOnlyRoom !== undefined ? 0 : Math.max(0, room - visibleWidth(fittedRight) - (fittedRight ? 3 : 0));
-			// The status after the keys fits whole or is dropped whole: a menu's
-			// keys own the room and `think high` cut to `th…` told the operator nothing.
-			const thinkingText =
-				groupRoom > 0
-					? thinkingRailHint(
-							theme,
-							this.chrome.getThinking?.() ?? { label: this.chrome.getThinkingLabel(), hasLevels: false },
-							groupRoom,
-						)
-					: "";
-			const thinking = visibleWidth(thinkingText) <= groupRoom ? thinkingText : "";
-			// The occupancy bar is drawn at its full width or not at all: a bar
-			// shrunk to one cell beside a menu's keys is a fragment, not a reading.
-			const context = this.chrome.getContextUsage?.();
-			const cells = width >= 100 ? 10 : 6;
-			const usageRoom = Math.max(0, groupRoom - visibleWidth(thinking) - (thinking ? 3 : 0));
-			const usageLabel = "ctx ";
-			const usageBar =
-				context && usageRoom >= cells + usageLabel.length
-					? contextRailHint(context, cells, usageRoom - usageLabel.length, theme)
-					: "";
-			// The bar alone is a shape to guess at; the word says what fills it.
-			const usage = usageBar ? `${theme.fg("annotation", usageLabel)}${usageBar}` : "";
-			return { hint: [fittedRight, usage, thinking].filter(Boolean).join(separator), thinking, usage };
+			// The status after the keys fits whole or is dropped whole, and its units leave in the group's own order.
+			const status = groupRoom > 0 ? contextRailGroup(theme, facts, groupRoom, width) : "";
+			const cut = status.indexOf(separator);
+			const usage = cut >= 0 ? status.slice(0, cut) : hasContext ? status : "";
+			const thinking = cut >= 0 ? status.slice(cut + separator.length) : hasContext ? "" : status;
+			return { hint: [fittedRight, status].filter(Boolean).join(separator), thinking, usage };
 		};
 		if (lead !== undefined && keysOnlyRoom === undefined && (lead.shell.length > 0 || lead.lines !== null)) {
 			const leftOf = (shell: string | undefined): string =>
