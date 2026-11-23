@@ -196,6 +196,12 @@ function kvBlock(
 	});
 }
 
+/** A titled rule whose meta drops before the title would be cut, so a narrow tab still names its block whole. */
+function titledRule(contentWidth: number, label: string, meta: string): string {
+	const fits = visibleWidth(label) + visibleWidth(meta) + 6 <= contentWidth;
+	return sectionRule(clioTheme(), contentWidth, label, fits ? { meta } : {});
+}
+
 /** A figure for the number column; one nothing measured is the dash there and says `not measured` in the note. */
 function figureRow(label: string, figure: string, note?: string): FactRow {
 	if (figure === USAGE_NOT_MEASURED)
@@ -801,7 +807,7 @@ class UsageOverlayBody implements Component {
 			];
 		else if (this.tab === 2)
 			body = [
-				sectionRule(theme, contentWidth, "Session", { meta: "this session, every branch" }),
+				titledRule(contentWidth, "Session", "this session, every branch"),
 				...(data.view
 					? sessionLines(
 							summaryRows(
@@ -830,7 +836,7 @@ class UsageOverlayBody implements Component {
 			];
 		else if (this.tab === 3) {
 			body = [
-				sectionRule(theme, contentWidth, "Models", { meta: "this session, every branch" }),
+				titledRule(contentWidth, "Models", "this session, every branch"),
 				...(sections === "provenance"
 					? [
 							theme.fg(

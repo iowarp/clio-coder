@@ -150,7 +150,7 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 		const frame = dockTop(tui)?.frame;
 		(frame as unknown as { handleInput?: (data: string) => void } | undefined)?.handleInput?.("3");
 		const text = stripTerminalSequences(frame?.renderDockBody(200, 30).join("\n") ?? "");
-		ok(/cache read\s+100\s*\n.*cache write\s+40\s*\n.*processed\s+155 tokens/u.test(text), text);
+		ok(/cache read\s+100\s*\n.*cache write\s+40\s*\n.*processed\s+155\s+tokens/u.test(text), text);
 	} finally {
 		writtenUsage.hide();
 	}
