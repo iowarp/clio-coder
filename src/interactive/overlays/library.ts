@@ -13,6 +13,7 @@
  * separates the write, the resources and the session refresh.
  */
 
+import { onPresentationTierChange } from "../../core/presentation-tier.js";
 import type { LibraryImportPlan } from "../../domains/interop/index.js";
 import { applyLibraryImport, planLibraryImport, releaseLibraryImport } from "../../domains/interop/index.js";
 import type { PluginScope } from "../../domains/plugins/types.js";
@@ -32,7 +33,7 @@ import {
 } from "../../domains/resources/index.js";
 import { type OverlayHandle, stripTerminalSequences, type TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
-import { clioTheme, fitUnits, keyCap } from "../theme/index.js";
+import { clioTheme, fitUnits, GLYPH, keyCap } from "../theme/index.js";
 import type { LibraryLifecyclePlan, LibraryLifecyclePort, LibraryOperation } from "./library-lifecycle.js";
 import {
 	buildLibraryRows,
@@ -256,6 +257,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		const scoped: LibraryView = { ...view, category };
 		const set = buildLibraryRows({
 			inventory: selectForCategory(inventory(), scoped),
+			catalog: inventory(),
 			view: scoped,
 			pairs: pairs(),
 			...(scoped.category === view.category && view.member ? { inspection: inspection() } : {}),
@@ -639,7 +641,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			// `o` adopts from another local agent; a path is imported only by command, so a footer wide enough to spell
 			// every entry in full names that command too (FX-14). A narrowing footer spells every entry short, and there `o`
 			// takes no more room than the `[o] import` it replaced, so it drops where it always did.
-			{ key: "o", verb: "adopt · /library import <path>", short: "adopt" },
+			{ key: "o", verb: `adopt ${GLYPH.sep} /library import <path>`, short: "adopt" },
 			{ key: "r", verb: "refresh" },
 		],
 		globalActions: {
@@ -689,6 +691,12 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 	// its existing toggle; wide layouts already draw detail beside the list.
 	handle.toggleDetail();
 
+	// The rows and the pane are bounded by the tier, so a tier change while the
+	// Library is open rebuilds them in place, keeping the cursor and the filter.
+	const unsubscribeTier = onPresentationTierChange(() => {
+		if (!closed) handle.refreshTabs();
+	});
+
 	/**
 	 * What `/library <verb> <ref>` asked for, run after the caller has this
 	 * handle.
@@ -727,6 +735,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		...handle,
 		hide(): void {
 			closed = true;
+			unsubscribeTier();
 			// A pending review dies with the browser that opened it, and its staged
 			// source is released rather than left behind in the temp tree.
 			const pending = child;
