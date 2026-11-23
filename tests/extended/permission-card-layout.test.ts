@@ -331,7 +331,7 @@ test("a dispatch card reads write roots against the workspace, and its every-fie
 						"advisory session cost baseline: unavailable",
 						"deadline: none (advisory planning)",
 						'  1. agent=coder target=copilot model=gpt-6-luna node=local posture=balanced maxCostUsd=none deadlineMs=none minimumQuality=none locality=any task_bytes=14 task_sha256=00 task_preview="wait 5 ms here"',
-						"    limits: unpriced route: each response stops at 600 s, and the run stops at its 1800000 ms wall clock; planned for about 150 tool calls",
+						"    limits: unpriced route: each response stops at 10m, and the run stops at its 30m wall clock; planned for about 150 tool calls",
 						`    writes: ${writes}`,
 					].join("\n"),
 				},
@@ -363,6 +363,10 @@ test("a dispatch card reads write roots against the workspace, and its every-fie
 		body.scrollInspect(-1000);
 		const detail = plain(body.render(200)).join("\n");
 		match(detail, /each response stops at 10m, and the run stops at its 30m wall clock/u);
+		match(
+			plain(card(`roots ${workspace}/src/math.js`).render(76)).join("\n"),
+			/10m per response · 30m per run · about 150 tool calls/u,
+		);
 		match(detail, /maxCostUsd=none no deadline minimumQuality/u);
 		match(detail, /task_preview="wait 5 ms here"/u, "the task's own words keep their bytes");
 		doesNotMatch(detail, /1800000|600 s|deadlineMs/u);

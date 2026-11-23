@@ -1,3 +1,4 @@
+import { formatLimit } from "../../core/format-time.js";
 import { renderUsdEstimate } from "../../core/telemetry/render.js";
 import { budgetLimitWords, type RunToolBudgetEnvelope } from "./budget-envelope.js";
 import { HANDBACK_CONTEXT_SHARE, HANDBACK_NOTE_SHARE, WALL_HANDBACK_SHARE } from "./handback.js";
@@ -99,7 +100,21 @@ export interface PlanCardLimitsInput {
 	wallMs: number;
 }
 
-const WALL_CLAUSE = /the run stops at its (\d+) ms wall clock/;
+const WALL_CLAUSE = /the run stops at its (\S+) wall clock/;
+const LIMIT_TOKEN = /^(?:\d+(?:\.\d+)?(?:ms|h|m|s))+$/u;
+const LIMIT_PART = /(\d+(?:\.\d+)?)(ms|h|m|s)/gu;
+const LIMIT_UNIT_MS: Readonly<Record<string, number>> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+
+/**
+ * A wall clock the plan wrote through `formatLimit` (`30m`, `90s`, `1m07s`), read back in ms; a whole-second wall
+ * reads back exactly. A form it cannot read (`100h+`) is longer than any call's timeout.
+ */
+function limitTokenMs(token: string): number {
+	if (!LIMIT_TOKEN.test(token)) return Number.POSITIVE_INFINITY;
+	let ms = 0;
+	for (const [, value, unit] of token.matchAll(LIMIT_PART)) ms += Number(value) * (LIMIT_UNIT_MS[unit ?? ""] ?? 0);
+	return ms;
+}
 
 /**
  * The bounds one dispatched run has, as its plan card states them (ruling 13). A priced route names its estimate and
@@ -113,17 +128,17 @@ export function planCardLimits(input: PlanCardLimitsInput): string {
 		input.budget.enforcement.classification === "external-one-shot"
 			? "one launch whose tool calls CLIO Coder cannot count, so no tool ceiling applies"
 			: budgetLimitWords(input.budget);
-	const wall = `the run stops at its ${input.wallMs} ms wall clock`;
+	const wall = `the run stops at its ${formatLimit(input.wallMs)} wall clock`;
 	if (input.priced) {
 		return `cost ${renderUsdEstimate(input.costUpperBoundUsd)} per model call at a ${input.outputBoundTokens}-token output bound; ${wall}; ${tools}`;
 	}
-	const response = input.nativeWorker ? `each response stops at ${input.responseSeconds} s, and ` : "";
+	const response = input.nativeWorker ? `each response stops at ${formatLimit(input.responseSeconds * 1000)}, and ` : "";
 	return `unpriced route: ${response}${wall}; ${tools}`;
 }
 
 /** The card's limits once the dispatch call sets `timeout_ms`, which lowers every run's wall clock to it. */
 export function planCardLimitsUnderTimeout(limits: string, timeoutMs: number): string {
-	return limits.replace(WALL_CLAUSE, (clause, ms: string) =>
-		Number(ms) <= timeoutMs ? clause : `the call's timeout_ms stops the run within ${timeoutMs} ms`,
+	return limits.replace(WALL_CLAUSE, (clause, wall: string) =>
+		limitTokenMs(wall) <= timeoutMs ? clause : `the call's time limit stops the run within ${formatLimit(timeoutMs)}`,
 	);
 }

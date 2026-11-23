@@ -264,18 +264,18 @@ export function planScope(summary: PlanSummary, workspace: string): PlanScope {
 }
 
 /**
- * One task's limits line as configured limits (`10m per response · 30m per run · about 18 tool calls`): the
- * plan states them in milliseconds and seconds, which no card row shows.
+ * One task's limits line as card units (`10m per response · 30m per run · about 18 tool calls`), read from the
+ * durations the plan wrote through `formatLimit`.
  */
 function limitUnits(limits: string): string[] {
 	const units: string[] = [];
 	const cost = /^cost (\S+) per model call/u.exec(limits)?.[1];
 	if (cost !== undefined) units.push(`${cost} per model call`);
-	const response = /each response stops at (\d+) s\b/u.exec(limits)?.[1];
-	if (response !== undefined) units.push(`${formatLimit(Number(response) * 1000)} per response`);
+	const response = /each response stops at (\S+), and /u.exec(limits)?.[1];
+	if (response !== undefined) units.push(`${response} per response`);
 	const wall =
-		/the run stops at its (\d+) ms wall clock/u.exec(limits)?.[1] ?? /stops the run within (\d+) ms/u.exec(limits)?.[1];
-	if (wall !== undefined) units.push(`${formatLimit(Number(wall))} per run`);
+		/the run stops at its (\S+) wall clock/u.exec(limits)?.[1] ?? /stops the run within ([^\s;]+)/u.exec(limits)?.[1];
+	if (wall !== undefined) units.push(`${wall} per run`);
 	const planned = /planned for about (\d+) tool calls/u.exec(limits)?.[1];
 	const stop = /stops it at (\d+) tool calls/u.exec(limits)?.[1];
 	if (planned !== undefined) units.push(`about ${planned} tool calls`);
@@ -288,16 +288,16 @@ function limitUnits(limits: string): string[] {
 const QUOTED_PREVIEW = / (?:task|briefing)_preview=/u;
 
 /**
- * The sealed plan text for the every-field view, its durations in configured units: the plan states the wall clock in
- * milliseconds and the response bound in seconds (`1800000 ms`, `deadlineMs=none`), which no card row shows. Every
- * other field keeps its sealed words.
+ * The sealed plan text for the every-field view, its deadline fields in configured units: the plan states them in
+ * milliseconds (`deadlineMs=none`, `timeout_ms=120000`), which no card row shows. Its limits lines already carry
+ * `formatLimit` durations, and every other field keeps its sealed words.
  */
 export function planDetailText(text: string): string {
 	return text
 		.split(/(\r?\n)/u)
 		.map((line) => {
 			const cut = QUOTED_PREVIEW.exec(line)?.index ?? line.length;
-			let fields = line
+			const fields = line
 				.slice(0, cut)
 				.replace(
 					/^deadline: (\d+)ms whole-plan$/u,
@@ -306,13 +306,6 @@ export function planDetailText(text: string): string {
 				.replace(/\bdeadlineMs=none\b/gu, "no deadline")
 				.replace(/\bdeadlineMs=(\d+)\b/gu, (_match, ms: string) => `deadline ${formatLimit(Number(ms))}`)
 				.replace(/\btimeout_ms=(\d+)$/u, (_match, ms: string) => `timeout ${formatLimit(Number(ms))}`);
-			// A limits line is prose the plan wrote; a command line keeps its literal argv.
-			if (LIMITS.test(fields)) {
-				fields = fields
-					.replace(/\b(\d+) ms\b/gu, (_match, ms: string) => formatLimit(Number(ms)))
-					.replace(/\bstops at (\d+) s\b/gu, (_match, s: string) => `stops at ${formatLimit(Number(s) * 1000)}`)
-					.replace(/the call's timeout_ms/gu, "the call's time limit");
-			}
 			return `${fields}${line.slice(cut)}`;
 		})
 		.join("");

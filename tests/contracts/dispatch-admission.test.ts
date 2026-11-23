@@ -446,7 +446,7 @@ describe("dispatch admission boundary", () => {
 		const unpriced = await planText(copilotSdkRuntime, "gpt-6-luna");
 		match(
 			unpriced,
-			/limits: unpriced route: each response stops at 600 s, and the run stops at its 1800000 ms wall clock; CLIO Coder stops it at 300 tool calls/u,
+			/limits: unpriced route: each response stops at 10m, and the run stops at its 30m wall clock; CLIO Coder stops it at 300 tool calls/u,
 		);
 		// The approval card's Plan rows carry the same limits text the plan signs, once when both workers share it.
 		const card = readDispatchPlan(unpriced);
@@ -466,7 +466,7 @@ describe("dispatch admission boundary", () => {
 		);
 		match(
 			await planText(copilotSdkRuntime, "gpt-6-luna", 0, { timeout_ms: 120000 }),
-			/limits: unpriced route: each response stops at 600 s, and the call's timeout_ms stops the run within 120000 ms; CLIO Coder stops it at 300 tool calls/u,
+			/limits: unpriced route: each response stops at 10m, and the call's time limit stops the run within 2m; CLIO Coder stops it at 300 tool calls/u,
 		);
 		// An external one-shot worker's tool calls are not counted, so no tool ceiling is promised.
 		const external = await planText(claudeCodeRuntime, "claude-haiku-5-5");
