@@ -1562,7 +1562,10 @@ describe("Pi TUI compatibility", () => {
 			ok(current.length > 0 && other.length > 0, "the test theme paints colour");
 			strictEqual(frame.split(`${current}needle`).length - 1, 1, "one current match in the badge pair");
 			ok(frame.includes(`${other}needle`), "other matches on the selection background");
-			ok(!frame.includes("\x1b[1;7mneedle"), "not pi's uncoloured inverse");
+			// On an unknown background the badge pair is itself bold inverse; its own close tells it from pi's default.
+			const { close } = clioTheme().sgr({ fg: "onSelection", bg: "selectionBadge", bold: true });
+			ok(frame.includes(`${current}needle\x1b[${close}m`), "the current match closes the theme's own pair");
+			ok(!frame.includes("\x1b[1;7mneedle\x1b[22;27m"), "not pi's default current-match style");
 		} finally {
 			tui.stop();
 		}

@@ -139,7 +139,8 @@ export const TERMINAL_PALETTE = {
 	successSupporting: [
 		["#409075", 65],
 		["#78bda1", 108],
-		["#326e53", 29],
+		// 29 measured 4.20:1 on #fdf6e3 and 4.21:1 on paper #f3eee4; 22 holds 7.38 and 6.89.
+		["#326e53", 22],
 	],
 	success: [
 		["#248750", 29],
@@ -164,7 +165,8 @@ export const TERMINAL_PALETTE = {
 	errorSupporting: [
 		["#b66c6c", 131],
 		["#d49393", 174],
-		["#934747", 131],
+		// 131 measured 3.92:1 and 3.93:1 on the same grounds; 124 holds 6.90 and 6.43.
+		["#934747", 124],
 	],
 	error: [
 		["#ca4c4c", 131],
@@ -210,6 +212,55 @@ export const TERMINAL_PALETTE = {
 } as const satisfies Record<string, RampColor>;
 
 export type PaletteColor = keyof typeof TERMINAL_PALETTE;
+
+/**
+ * Depth 16 foregrounds, one per palette family. Indexes 0 to 15 belong to the terminal's theme and its contrast cannot
+ * be measured, so readable steps are the terminal's own foreground (39), quiet steps are that foreground dimmed
+ * (never bright black, which falls under 3:1 on dark themes), and hues tint only words and marks a plain neighbour
+ * repeats. Bright 90 to 97 are never used. Owned surfaces and the badge ink are backgrounds or inverse at this depth,
+ * so as a foreground they are the terminal's own.
+ */
+const DIM_FOREGROUND = { sgr: "39;2" } as const;
+const FOREGROUND = { sgr: "39" } as const;
+const CYAN = { sgr: "36" } as const;
+const YELLOW = { sgr: "33" } as const;
+export const ANSI16: Readonly<Record<PaletteColor, { readonly sgr: string }>> = {
+	neutralSubdued: DIM_FOREGROUND,
+	neutralSupporting: DIM_FOREGROUND,
+	neutralReading: FOREGROUND,
+	neutralFocal: FOREGROUND,
+	neutralStrong: FOREGROUND,
+	ivorySubdued: DIM_FOREGROUND,
+	ivorySupporting: DIM_FOREGROUND,
+	ivoryReading: FOREGROUND,
+	ivoryFocal: FOREGROUND,
+	ivoryStrong: FOREGROUND,
+	cyanSupporting: CYAN,
+	cyanReading: CYAN,
+	cyanFocal: CYAN,
+	cyanStrong: CYAN,
+	turquoise: CYAN,
+	cyanDeep: CYAN,
+	syntaxLiteral: CYAN,
+	// Copper has no closer ANSI entry; it shares yellow with warning, whose glyph and word carry the state.
+	orangeSupporting: YELLOW,
+	orangeReading: YELLOW,
+	orangeFocal: YELLOW,
+	orangeStrong: YELLOW,
+	successSupporting: { sgr: "32" },
+	success: { sgr: "32" },
+	warningSupporting: YELLOW,
+	warning: YELLOW,
+	errorSupporting: { sgr: "31" },
+	error: { sgr: "31" },
+	border: DIM_FOREGROUND,
+	meterTrack: DIM_FOREGROUND,
+	divider: DIM_FOREGROUND,
+	surface: FOREGROUND,
+	selectionSurface: FOREGROUND,
+	yoloSurface: FOREGROUND,
+	onAccent: FOREGROUND,
+};
 
 export function paletteProjection(color: PaletteColor, background: ThemeBackground | null = null): Projection {
 	return TERMINAL_PALETTE[color][background === "dark" ? 1 : background === "light" ? 2 : 0];

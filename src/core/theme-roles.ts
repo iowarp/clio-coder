@@ -107,7 +107,7 @@ export const TEXT_ROLES = {
 	branch: text("supporting"),
 	guidance: text("focal", "cyan"),
 	counter: text("reading"),
-	metricValue: text("focal", "ivory"),
+	metricValue: text("focal", "ivory", { bold: true }),
 	metricUnit: text("supporting"),
 	legend: text("supporting"),
 	unknownValue: text("supporting"),
@@ -278,6 +278,24 @@ export function resolveRole(
 }
 export function isSemanticRole(value: string): value is SemanticRole {
 	return Object.hasOwn(NORMAL, value);
+}
+
+/** A text role's place on the intensity ladder; structural roles have none. Painters dim by it when there is no color. */
+export function roleIntensity(role: SemanticRole): TextIntensity | null {
+	return Object.hasOwn(TEXT_ROLES, role) ? TEXT_ROLES[role as keyof typeof TEXT_ROLES].intensity : null;
+}
+
+/** Rules, rails and the quiet parts of a meter: chrome that recedes as dim text when there is no color. */
+const CHROME_ROLES: ReadonlySet<SemanticRole> = new Set<SemanticRole>([
+	"border",
+	"divider",
+	"separator",
+	"gutter",
+	"meterFree",
+	"meterReserve",
+]);
+export function isChromeRole(role: SemanticRole): boolean {
+	return CHROME_ROLES.has(role);
 }
 export function roleHex(
 	role: SemanticRole,

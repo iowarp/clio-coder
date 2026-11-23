@@ -1,16 +1,28 @@
 import { terminalBackground, terminalBackgroundColor, terminalColorVersion } from "../../core/terminal-background.js";
-import { colorDisabled } from "../../core/terminal-preferences.js";
+import { type ColorDepth, colorDepth } from "../../core/terminal-preferences.js";
 import { adaptPalette, type ProjectedColor } from "../../core/theme-contrast.js";
 import {
 	DEFAULT_THEME_CONTEXT,
+	isChromeRole,
 	isSemanticRole,
 	projectsYolo,
 	type RoleState,
 	resolveRole,
+	roleIntensity,
 	type SemanticRole,
 	type ThemeContext,
 } from "../../core/theme-roles.js";
 import {
+	hexRgb,
+	OWNED_BACKGROUNDS,
+	rgbXterm,
+	type Sgr,
+	type SgrColor,
+	sgrFor,
+	TERMINAL_FOREGROUND_ON_UNKNOWN,
+} from "../../core/theme-sgr.js";
+import {
+	ANSI16,
 	LEGACY_TOKEN_COLOR,
 	type ClioToken as LegacyToken,
 	type PaletteColor,
@@ -19,23 +31,14 @@ import {
 	type ThemeBackground,
 } from "../../core/theme-token-hex.js";
 
+export type { ColorDepth } from "../../core/terminal-preferences.js";
 export * from "../../core/theme-roles.js";
+export type { Sgr } from "../../core/theme-sgr.js";
 export type { ThemeBackground } from "../../core/theme-token-hex.js";
 /** Semantic roles plus explicit compatibility names for configured roster colors. */
 export type ClioToken = SemanticRole | LegacyToken;
 
 type TokenColor = ProjectedColor & { readonly terminalForeground?: boolean };
-// With no background reported, primary text is the terminal's own default
-// foreground, the one color certain to read. Secondary text and accents stay in
-// the mid-luminance band so the hierarchy survives.
-const TERMINAL_FOREGROUND_ON_UNKNOWN = new Set<PaletteColor>([
-	"neutralReading",
-	"neutralFocal",
-	"neutralStrong",
-	"ivoryReading",
-	"ivoryFocal",
-	"ivoryStrong",
-]);
 const PALETTES = new Map<ThemeBackground | null, Record<PaletteColor, TokenColor>>();
 let palettesVersion = terminalColorVersion();
 let overrides: Record<string, { dark: string; light: string }> | undefined;
@@ -52,25 +55,6 @@ export function setPaletteSkin(palette: typeof overrides): void {
 	PALETTES.clear();
 	epoch += 1;
 }
-// The cube's levels are not evenly spaced, so rounding on a linear scale lands a shade lighter and can lose the contrast
-// the color was chosen to hold.
-const XTERM_CUBE_LEVELS = [0, 95, 135, 175, 215, 255] as const;
-function rgbXterm(rgb: readonly number[]): number {
-	const cube = (channel: number): number => {
-		let nearest = 0;
-		let best = Number.POSITIVE_INFINITY;
-		for (const [index, level] of XTERM_CUBE_LEVELS.entries()) {
-			const away = Math.abs(level - channel);
-			if (away < best) {
-				best = away;
-				nearest = index;
-			}
-		}
-		return nearest;
-	};
-	return 16 + 36 * cube(rgb[0] ?? 0) + 6 * cube(rgb[1] ?? 0) + cube(rgb[2] ?? 0);
-}
-
 /** Any SGR sequence; built from the escape code so the source carries no control character. */
 const SGR_SEQUENCE = new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "gu");
 function palette(background: ThemeBackground | null): Record<PaletteColor, TokenColor> {
@@ -84,7 +68,7 @@ function palette(background: ThemeBackground | null): Record<PaletteColor, Token
 			(Object.keys(TERMINAL_PALETTE) as PaletteColor[]).map((name): [PaletteColor, TokenColor] => {
 				const override = overrides?.[name]?.[background ?? "dark"];
 				const [hex, xterm] = override === undefined ? paletteProjection(name, background) : [override, 0];
-				const rgb = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16)) as [number, number, number];
+				const rgb = hexRgb(hex);
 				if (override !== undefined) return [name, { rgb, xterm: rgbXterm(rgb) }];
 				return [name, { rgb, xterm, terminalForeground: background === null && TERMINAL_FOREGROUND_ON_UNKNOWN.has(name) }];
 			}),
@@ -158,9 +142,13 @@ export interface PaintMods {
 }
 
 export interface ClioTheme {
+	readonly depth: ColorDepth;
+	/** `depth === "truecolor"`, for painters that blend their own ramps. */
 	readonly truecolor: boolean;
 	readonly context: ThemeContext;
 	paint(text: string, mods: PaintMods): string;
+	/** The parameters `paint` opens with and the exact ones that close them, for spans that must not reset a row. */
+	sgr(mods: PaintMods): Sgr;
 	fg(token: ClioToken, text: string, state?: RoleState): string;
 	bg(token: ClioToken, text: string): string;
 	style(token: ClioToken, text: string, mods?: Omit<PaintMods, "fg">): string;
@@ -169,32 +157,86 @@ export interface ClioTheme {
 	base(role: SemanticRole, text: string): string;
 }
 
-function detectTruecolor(env: NodeJS.ProcessEnv = process.env): boolean {
-	const colorTerm = (env.COLORTERM ?? "").toLowerCase();
-	if (colorTerm.includes("truecolor") || colorTerm.includes("24bit")) return true;
-	const term = (env.TERM ?? "").toLowerCase();
-	return term.includes("truecolor") || term.includes("24bit");
+interface DepthOptions {
+	depth?: ColorDepth;
+	/** Picks 24-bit color (`true`) or indexed color (`false`) at the terminal's declared depth. */
+	truecolor?: boolean;
+	/** `false` paints without color; `true` paints color even where the environment declines it. */
+	color?: boolean;
 }
 
-function fgCode(color: TokenColor, truecolor: boolean): string {
-	if (color.terminalForeground) return "39";
-	return truecolor ? `38;2;${color.rgb[0]};${color.rgb[1]};${color.rgb[2]}` : `38;5;${color.xterm}`;
+function resolveDepth(options: DepthOptions): ColorDepth {
+	if (options.depth !== undefined) return options.depth;
+	if (options.color === false) return "none";
+	let depth = colorDepth();
+	if (depth === "none" && options.color === true) {
+		const term = process.env.TERM;
+		depth = colorDepth({ ...process.env, NO_COLOR: "", TERM: term === "dumb" || term === "unknown" ? "" : term });
+	}
+	if (options.truecolor === true) return "truecolor";
+	return options.truecolor === false && depth === "truecolor" ? "256" : depth;
 }
 
-function bgCode(color: TokenColor, truecolor: boolean): string {
-	return truecolor ? `48;2;${color.rgb[0]};${color.rgb[1]};${color.rgb[2]}` : `48;5;${color.xterm}`;
+/** Things the operator must act on or read as a state stay at normal intensity without color. */
+const NEVER_DIM = new Set<SemanticRole>([
+	"keyboardHint",
+	"decisionConsequence",
+	"commandHint",
+	"success",
+	"warning",
+	"error",
+	"validationError",
+]);
+/** Supporting and subdued text and chrome dim when there is no color; bold text never does. */
+function dimsWithoutColor(token: ClioToken, state: RoleState | undefined): boolean {
+	if (!isSemanticRole(token)) return ANSI16[LEGACY_TOKEN_COLOR[token]].sgr.endsWith(";2");
+	if (NEVER_DIM.has(token)) return false;
+	if (state !== undefined && state !== "normal") return state === "disabled";
+	if (isChromeRole(token)) return true;
+	const intensity = roleIntensity(token);
+	return intensity === "subdued" || intensity === "supporting";
 }
 
-export function fgSequence(token: ClioToken, truecolor: boolean = detectTruecolor()): string {
-	if (colorDisabled()) return "";
-	return `\u001b[${fgCode(palette(terminalBackground())[tokenStyle(token, DEFAULT_THEME_CONTEXT).color], truecolor)}m`;
+/** Frames, dividers and meter tracks measured 2.69 to 3.66:1 over an owned background; this step holds 4.54 or more. */
+const RECEDING = new Set<PaletteColor>(["border", "divider", "meterTrack"]);
+
+/** SGR parameter groups, so `38;2;r;g;b` stays whole while repeated attributes collapse. */
+function sgrGroups(parameters: string): string[] {
+	if (parameters.length === 0) return [];
+	const values = parameters.split(";");
+	const groups: string[] = [];
+	for (let index = 0; index < values.length; index += 1) {
+		const value = values[index] ?? "";
+		const size =
+			value === "38" || value === "48" ? (values[index + 1] === "2" ? 5 : values[index + 1] === "5" ? 3 : 1) : 1;
+		groups.push(values.slice(index, index + size).join(";"));
+		index += size - 1;
+	}
+	return groups;
+}
+const joinGroups = (...lists: string[][]): string => [...new Set(lists.flat())].join(";");
+
+/** An intensity reset ends a dim that `base` must then resume. */
+function sgrResetsIntensity(code: string): boolean {
+	const parameters = code.slice(2, -1);
+	return parameters === "" || sgrGroups(parameters).some((group) => group === "0" || group === "22");
+}
+
+function named(colors: Record<PaletteColor, TokenColor>, name: PaletteColor): SgrColor {
+	return { ...colors[name], name };
+}
+
+export function fgSequence(token: ClioToken, depth: ColorDepth = colorDepth()): string {
+	const background = terminalBackground();
+	const color = named(palette(background), tokenStyle(token, DEFAULT_THEME_CONTEXT).color);
+	const { open } = sgrFor({ fg: color }, depth, background);
+	return open.length > 0 ? `\u001b[${open}m` : "";
 }
 
 export function createClioTheme(
-	options: { truecolor?: boolean; color?: boolean; background?: ThemeBackground | null; context?: ThemeContext } = {},
+	options: DepthOptions & { background?: ThemeBackground | null; context?: ThemeContext } = {},
 ): ClioTheme {
-	const truecolor = options.truecolor ?? detectTruecolor();
-	const color = options.color ?? !colorDisabled();
+	const depth = resolveDepth(options);
 	// Shared themes outlive a light and dark switch, so a theme with no pinned
 	// background reads the live one, once per reported change.
 	let followed = options.background === undefined ? terminalBackground() : options.background;
@@ -207,36 +249,69 @@ export function createClioTheme(
 		return followed;
 	};
 	const context = () => options.context ?? renderContext;
-	const colorFor = (token: ClioToken, state?: RoleState): TokenColor => {
-		const scope = context();
+	/** The background the palette is projected for: a declared composer surface always has one. */
+	const projectedBackground = (): ThemeBackground | null => {
 		const background = currentBackground();
-		return palette(projectsYolo(scope) ? (background ?? "dark") : background)[tokenStyle(token, scope, state).color];
+		return projectsYolo(context()) ? (background ?? "dark") : background;
+	};
+	const colorFor = (token: ClioToken, state?: RoleState, overOwned = false): SgrColor => {
+		const scope = context();
+		let name = tokenStyle(token, scope, state).color;
+		if ((overOwned || projectsYolo(scope)) && RECEDING.has(name)) name = "neutralSubdued";
+		return named(palette(projectedBackground()), name);
+	};
+	const sgr = (mods: PaintMods): Sgr => {
+		const bold = mods.bold ?? (mods.fg === undefined ? false : tokenStyle(mods.fg, context(), mods.state).bold);
+		const dim =
+			mods.dim === true || (depth === "none" && !bold && mods.fg !== undefined && dimsWithoutColor(mods.fg, mods.state));
+		const bg = mods.bg === undefined ? undefined : colorFor(mods.bg);
+		const overOwned = bg?.name !== undefined && OWNED_BACKGROUNDS.has(bg.name);
+		const pair = sgrFor(
+			{
+				...(mods.fg === undefined ? {} : { fg: colorFor(mods.fg, mods.state, overOwned) }),
+				...(bg === undefined ? {} : { bg }),
+			},
+			depth,
+			projectedBackground(),
+		);
+		const open = [bold ? "1" : "", dim ? "2" : "", mods.italic ? "3" : "", mods.underline ? "4" : ""].filter(Boolean);
+		const close = [bold || dim ? "22" : "", mods.italic ? "23" : "", mods.underline ? "24" : ""].filter(Boolean);
+		return { open: joinGroups(open, sgrGroups(pair.open)), close: joinGroups(sgrGroups(pair.close), close) };
 	};
 	const paint = (text: string, mods: PaintMods): string => {
-		const codes: string[] = [];
-		if (mods.bold ?? (mods.fg ? tokenStyle(mods.fg, context(), mods.state).bold : false)) codes.push("1");
-		if (mods.dim) codes.push("2");
-		if (mods.italic) codes.push("3");
-		if (mods.underline) codes.push("4");
-		if (color && mods.fg) codes.push(fgCode(colorFor(mods.fg, mods.state), truecolor));
-		if (color && mods.bg) codes.push(bgCode(colorFor(mods.bg), truecolor));
-		if (codes.length === 0) return text;
-		return `\u001b[${codes.join(";")}m${text}${SGR_RESET}`;
+		const { open } = sgr(mods);
+		return open.length === 0 ? text : `\u001b[${open}m${text}${SGR_RESET}`;
+	};
+	const fgOpen = (token: ClioToken): string => {
+		const { open } = sgrFor({ fg: colorFor(token) }, depth, projectedBackground());
+		return open.length > 0 ? `\u001b[${open}m` : "";
 	};
 	return {
-		truecolor,
+		depth,
+		truecolor: depth === "truecolor",
 		get context() {
 			return context();
 		},
 		paint,
+		sgr,
 		fg: (token, text, state) => paint(text, { fg: token, ...(state === undefined ? {} : { state }) }),
 		bg: (token, text) => paint(text, { bg: token }),
 		style: (token, text, mods = {}) => paint(text, { ...mods, fg: token }),
-		fgSequence: (token) => (color ? `\u001b[${fgCode(colorFor(token), truecolor)}m` : ""),
+		fgSequence: fgOpen,
 		base: (role, text) => {
-			if (!color || text.length === 0) return text;
-			const foreground = `\u001b[${fgCode(colorFor(role), truecolor)}m`;
-			return `${foreground}${text.replace(SGR_SEQUENCE, (code) => (sgrResetsForeground(code) ? `${code}${foreground}` : code))}${SGR_RESET}`;
+			if (text.length === 0) return text;
+			// Without color a quiet role's dim is its place on the ladder, resumed after an inner intensity reset.
+			if (depth === "none") {
+				if (!dimsWithoutColor(role, undefined)) return text;
+				const resumed = text.replace(SGR_SEQUENCE, (code) => (sgrResetsIntensity(code) ? `${code}${SGR_DIM}` : code));
+				return `${SGR_DIM}${resumed}${SGR_RESET}`;
+			}
+			const foreground = fgOpen(role);
+			const dims = foreground.endsWith(";2m");
+			const resumed = text.replace(SGR_SEQUENCE, (code) =>
+				sgrResetsForeground(code) || (dims && sgrResetsIntensity(code)) ? `${code}${foreground}` : code,
+			);
+			return `${foreground}${resumed}${SGR_RESET}`;
 		},
 	};
 }
@@ -246,7 +321,7 @@ export function isClioToken(value: string): value is ClioToken {
 	return isSemanticRole(value) || Object.hasOwn(LEGACY_TOKEN_COLOR, value);
 }
 
-const HEX_COLOR = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/u;
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/u;
 
 /**
  * Paint text in a configured `#rrggbb` color.
@@ -255,17 +330,13 @@ const HEX_COLOR = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/u;
  * choice rather than a token from the palette, which is why a literal color
  * reaches the screen here and nowhere else. Returns the text unchanged when
  * color is disabled or the value is not a six-digit hex color, so a caller can
- * fall back to a token without inspecting the string twice. A terminal without
- * truecolor gets the nearest color in the 6x6x6 xterm cube.
+ * fall back to a token without inspecting the string twice. Indexed color gets
+ * the nearest entry in the 6x6x6 xterm cube, and a 16-color terminal the
+ * nearest ANSI hue.
  */
-export function paintHex(text: string, hex: string, options: { truecolor?: boolean; color?: boolean } = {}): string {
-	const match = HEX_COLOR.exec(hex);
-	if (match === null) return text;
-	if (!(options.color ?? !colorDisabled())) return text;
-	const truecolor = options.truecolor ?? detectTruecolor();
-	const red = Number.parseInt(match[1] ?? "0", 16);
-	const green = Number.parseInt(match[2] ?? "0", 16);
-	const blue = Number.parseInt(match[3] ?? "0", 16);
-	if (truecolor) return `\u001b[38;2;${red};${green};${blue}m${text}${SGR_RESET}`;
-	return `\u001b[38;5;${rgbXterm([red, green, blue])}m${text}${SGR_RESET}`;
+export function paintHex(text: string, hex: string, options: Omit<DepthOptions, "depth"> = {}): string {
+	if (!HEX_COLOR.test(hex)) return text;
+	const rgb = hexRgb(hex);
+	const { open } = sgrFor({ fg: { rgb, xterm: rgbXterm(rgb) } }, resolveDepth(options), terminalBackground());
+	return open.length === 0 ? text : `\u001b[${open}m${text}${SGR_RESET}`;
 }
