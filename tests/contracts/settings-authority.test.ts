@@ -35,6 +35,8 @@ test("Clio's settings, credential and trust CLI is recognized however it is laun
 		"clio-coder reset --settings --force",
 		"clio-coder config set nope.key 1",
 		"clio-coder config --scope project unset safety.scratchRoots",
+		// FX-9: a body a shell reads, here or on a remote host, is still a launch.
+		"ssh node <<'EOF'\nclio-coder configure --id x\nEOF",
 	];
 	for (const command of mutating) strictEqual(invokesSettingsMutation(command), true, command);
 	const reads = [
@@ -52,6 +54,8 @@ test("Clio's settings, credential and trust CLI is recognized however it is laun
 		"./configure --prefix=/usr && make",
 		"git config user.name x",
 		"git commit -m 'clio-coder configure --id x'",
+		// FX-9: a quoted body only a non-shell reads is that program's text.
+		"python3 -B - <<'EOF'\n// run clio-coder configure --id x to fix the model's settings\nEOF",
 	];
 	for (const command of reads) strictEqual(invokesSettingsMutation(command), false, command);
 });
