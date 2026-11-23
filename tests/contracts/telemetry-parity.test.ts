@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { Quantity } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { renderCompactCount } from "../../src/core/telemetry/render.js";
@@ -150,7 +151,7 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 		const frame = dockTop(tui)?.frame;
 		(frame as unknown as { handleInput?: (data: string) => void } | undefined)?.handleInput?.("3");
 		const text = stripTerminalSequences(frame?.renderDockBody(200, 30).join("\n") ?? "");
-		ok(/cache read\s+100\s*\n.*cache write\s+40\s*\n.*processed\s+155 tokens/u.test(text), text);
+		ok(/cache read\s+100\s*\n.*cache write\s+40\s*\n.*processed\s+155\s+tokens/u.test(text), text);
 	} finally {
 		writtenUsage.hide();
 	}
@@ -165,6 +166,8 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 			compactionThreshold: 0.9,
 			compactionAuto: true,
 		});
+	// Prompt cache rows are provenance: `/context` shows them at detailed only.
+	setPresentationTier("detailed");
 	const context = openContextOverlay(tui, ledger, { telemetry });
 	try {
 		const text = stripTerminalSequences(dockTop(tui)?.frame.renderDockBody(200, 60).join("\n") ?? "");
@@ -174,6 +177,7 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 		ok(text.includes(`uncached prefill ${newest.cache.uncachedPrefill.display}`), text);
 	} finally {
 		context.hide();
+		setPresentationTier("standard");
 	}
 });
 

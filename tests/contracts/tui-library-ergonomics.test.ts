@@ -1,6 +1,7 @@
 import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
 import { it } from "node:test";
 import { stripVTControlCharacters as plain } from "node:util";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type {
 	LibraryComponent,
 	LibraryCopy,
@@ -160,7 +161,10 @@ it("separates eight diagnostic notices from package counts across Plugins, Agent
 	}
 });
 
-it("identifies provider packages and limits their catalog hints to the selected component kind", () => {
+it("identifies provider packages and limits their catalog hints to the selected component kind", (t) => {
+	// The kind and the hint names are detailed facts; standard counts the hints.
+	setPresentationTier("detailed");
+	t.after(() => setPresentationTier("standard"));
 	for (const category of ["agent", "playbook"] as const) {
 		const view = { category, mode: "browse" as const, scope: "user" as const };
 		const rows = buildLibraryRows({ view, inventory: selectForCategory(inventory(), view) });
@@ -246,7 +250,10 @@ it("neutralizes terminal controls while preserving Unicode identity and full ins
 	ok(collapse(rows.items[0]?.detail?.(40).join("\n") ?? "").includes(collapse(record.description)));
 });
 
-it("neutralizes terminal controls in every catalog field a row or its detail prints", () => {
+it("neutralizes terminal controls in every catalog field a row or its detail prints", (t) => {
+	// Detailed prints every field, the requirements section included.
+	setPresentationTier("detailed");
+	t.after(() => setPresentationTier("standard"));
 	const data = inventory();
 	const record = data.packages[0];
 	ok(record);
@@ -257,7 +264,7 @@ it("neutralizes terminal controls in every catalog field a row or its detail pri
 	const view = { category: "plugin" as const, mode: "browse" as const, scope: "user" as const };
 	const item = buildLibraryRows({ view, inventory: selectForCategory(data, view) }).items[0];
 	ok(item);
-	const painted = [item.label, item.meta ?? "", ...(item.detail?.(80) ?? [])].join("\n");
+	const painted = [item.label, item.cells?.text ?? "", item.meta ?? "", ...(item.detail?.(80) ?? [])].join("\n");
 	ok(!painted.includes("\u001b]0;"), "no OSC title reaches the terminal");
 	ok(!painted.includes("\u001b[2J"), "no erase-display reaches the terminal");
 	ok(!painted.includes("\u001b[35m"), "no foreign SGR reaches the terminal");
@@ -265,7 +272,10 @@ it("neutralizes terminal controls in every catalog field a row or its detail pri
 	match(plain(painted), /plugin:dep/);
 });
 
-it("keeps the pane on screen when Enter asks for an uninstalled package's catalog hints", () => {
+it("keeps the pane on screen when Enter asks for an uninstalled package's catalog hints", (t) => {
+	// The detailed pane is the one long enough to scroll in a stacked pane at 56 columns.
+	setPresentationTier("detailed");
+	t.after(() => setPresentationTier("standard"));
 	const state = browser("plugin");
 	state.view.setRailRoom(41);
 	match(plain(state.view.render(56).join("\n")), /PgUp\/PgDn scroll/, "the browser opens with its pane stacked");
@@ -353,10 +363,12 @@ it("preserves semantic colors while stripping external controls before metadata 
 				owner: { ref: `plugin:${hostile}`, scope: "user" },
 			},
 		];
-		const meta = buildLibraryRows({ view, inventory: selectForCategory(data, view) }).items[0]?.meta ?? "";
-		ok(meta.includes(statusChip(theme, status, availability)));
-		ok(!meta.includes("\u001b[2J") && !meta.includes("\u001b[35m") && !meta.includes("spoof"));
-		match(plain(meta), /lab text/);
+		const row = buildLibraryRows({ view, inventory: selectForCategory(data, view) }).items[0];
+		// The state is the row's status cell; the owner the hostile text rides on is a pane fact.
+		ok(row?.cells?.text.includes(statusChip(theme, status, availability)));
+		const painted = [row?.cells?.text ?? "", row?.meta ?? "", ...(row?.detail?.(80) ?? [])].join("\n");
+		ok(!painted.includes("\u001b[2J") && !painted.includes("\u001b[35m") && !painted.includes("spoof"));
+		match(plain(painted), /lab text/);
 	}
 	for (const [state, status, words] of [
 		["loadable", "ok", "active"],
@@ -383,11 +395,15 @@ it("preserves semantic colors while stripping external controls before metadata 
 		};
 		data.copies = [copy];
 		const copyView = { ...view, category: "plugin" as const };
-		const meta = buildLibraryRows({ view: copyView, inventory: selectForCategory(data, copyView) }).items[0]?.meta ?? "";
-		ok(meta.includes(statusChip(theme, status, `user: ${words}`)));
-		ok(meta.includes(statusChip(theme, "warning", "foreign")));
-		ok(!meta.includes("\u001b[2J") && !meta.includes("\u001b[35m") && !meta.includes("spoof"));
-		match(plain(meta), /lab text/);
+		const row = buildLibraryRows({ view: copyView, inventory: selectForCategory(data, copyView) }).items[0];
+		// At standard the scope has its own column, so the state cell carries the state words alone.
+		const cell = row?.cells?.text ?? "";
+		ok(cell.includes(statusChip(theme, status, words)));
+		ok(cell.includes(statusChip(theme, "warning", "foreign")));
+		match(plain(row?.meta ?? ""), /^user/);
+		const painted = [cell, row?.meta ?? "", ...(row?.detail?.(80) ?? [])].join("\n");
+		ok(!painted.includes("\u001b[2J") && !painted.includes("\u001b[35m") && !painted.includes("spoof"));
+		match(plain(painted), /lab text/);
 	}
 });
 

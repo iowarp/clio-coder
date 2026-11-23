@@ -14,6 +14,7 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { readSettings, updateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { loadDomains } from "../../src/core/domain-loader.js";
+import { presentationTier, setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
 import { ConfigDomainModule } from "../../src/domains/config/index.js";
@@ -949,7 +950,15 @@ describe("provider transport boundary", () => {
 			undefined,
 			() => undefined,
 		);
-		const text = view.render(240).join("\n").replace(ANSI_PATTERN, "");
-		ok(text.includes(" · provider catalog, not verified live: HTTP 503"), text);
+		// The runtime fact, where the source is named, is part of the picker's full detail pane.
+		const tier = presentationTier();
+		setPresentationTier("detailed");
+		try {
+			const text = view.render(240).join("\n").replace(ANSI_PATTERN, "");
+			ok(text.includes(" · provider catalog, not verified live: HTTP 503"), text);
+		} finally {
+			setPresentationTier(tier);
+			view.dispose();
+		}
 	});
 });

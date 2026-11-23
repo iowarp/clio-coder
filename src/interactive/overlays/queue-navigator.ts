@@ -7,8 +7,9 @@
  * message the engine takes mid-view simply leaves the list.
  */
 
+import { type PickerDetail, tierPolicy } from "../../core/presentation-tier.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
-import { isKeyRelease, matchesKey, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { isKeyRelease, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { QueuedChatMessage } from "../../session-control/chat-loop.js";
 import {
 	centeredWindow,
@@ -80,13 +81,17 @@ export function queueSlotWord(entry: Pick<QueuedChatMessage, "kind">): "steer" |
 export function queueEntryMarks(entry: Pick<QueuedChatMessage, "labels" | "pinned">): string {
 	let marks = "";
 	if (entry.labels?.urgency === "now") marks += "!";
-	if (entry.labels?.producer === "triage" && entry.pinned !== true) marks += "·t";
+	if (entry.labels?.producer === "triage" && entry.pinned !== true) marks += `${GLYPH.dot}t`;
 	return marks;
 }
 
-/** Rows the message under the cursor may take beneath the list: its rule and six lines of text. */
-const QUEUE_DETAIL_ROWS = 7;
+/**
+ * Rows the message under the cursor may take beneath the list, by `pickerDetail`: one status row at compact, its rule
+ * and three lines of text at standard, its rule and six lines at detailed.
+ */
+const QUEUE_DETAIL_ROWS: Readonly<Record<PickerDetail, number>> = { status: 1, facts: 4, pane: 7 };
 const QUEUE_MIN_LIST_ROWS = 3;
+const SELECT_KEY = `${GLYPH.up}${GLYPH.down}`;
 
 /**
  * The queue as selection rows: the position and the first line of the
@@ -163,6 +168,8 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			);
 		}
 		const now = (this.deps.now ?? Date.now)();
+		const detail = tierPolicy().pickerDetail;
+		const detailRows = QUEUE_DETAIL_ROWS[detail];
 		const slotChip = (entry: QueuedChatMessage): string => {
 			const slot = queueSlotWord(entry);
 			return chip(theme, `${slot}${queueEntryMarks(entry)}`, slot === "steer" ? "action" : "neutral");
@@ -184,7 +191,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 						safeWidth,
 					);
 		const bodyRows = this.rows > 0 ? Math.max(1, this.rows - keyRows.length - takenRows.length) : 0;
-		const listBudget = bodyRows > 0 ? Math.max(QUEUE_MIN_LIST_ROWS, bodyRows - QUEUE_DETAIL_ROWS) : entries.length;
+		const listBudget = bodyRows > 0 ? Math.max(QUEUE_MIN_LIST_ROWS, bodyRows - detailRows) : entries.length;
 		const visible = Math.min(entries.length, listBudget);
 		const windowed = visible < entries.length;
 		const [start, end] = centeredWindow(entries.length, this.selected, windowed ? Math.max(1, visible - 1) : visible);
@@ -205,7 +212,8 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			rows.push(positionRow(theme, { start: start + 1, end, total: entries.length, unit: "messages" }, safeWidth));
 		const selected = entries[this.selected];
 		if (selected) {
-			const detailBudget = bodyRows > 0 ? Math.max(2, bodyRows + takenRows.length - rows.length) : QUEUE_DETAIL_ROWS;
+			const room = bodyRows > 0 ? Math.max(2, bodyRows + takenRows.length - rows.length) : detailRows;
+			const detailBudget = Math.min(room, detailRows);
 			const slot = queueSlotWord(selected);
 			// The row's own word leads, so `later` in the list and the slot it means read as one thing.
 			const slotSentence =
@@ -216,14 +224,23 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 						: "later, CLIO Coder reads it when the turn ends";
 			const waiting = `waiting ${formatQueueAge(now - selected.enqueuedAt)}`;
 			const label = `Message ${this.selected + 1}`;
-			// A narrow rule cut the sentence mid-clause with no mark; it then takes its own wrapped row under the rule.
-			const inline = visibleWidth(label) + visibleWidth(slotSentence) + visibleWidth(waiting) + 12 <= safeWidth;
-			rows.push(sectionRule(theme, safeWidth, label, { meta: inline ? `${slotSentence} · ${waiting}` : waiting }));
-			const slotRows = inline ? [] : wrapTextWithAnsi(theme.fg("annotation", slotSentence), safeWidth);
-			rows.push(...slotRows);
 			const notice = this.sendNotice(selected).flatMap((line) =>
 				wrapTextWithAnsi(theme.fg("annotation", line), safeWidth),
 			);
+			if (detail === "status") {
+				// Compact keeps one status row: the list row already shows the text, and the wait leads so a cut takes the sentence.
+				const status = [label, waiting, slotSentence].join(` ${GLYPH.sep} `);
+				rows.push(truncateToWidth(theme.fg("annotation", status), safeWidth, GLYPH.ellipsis, false), ...notice);
+				rows.push(...keyRows);
+				return rows;
+			}
+			// A narrow rule cut the sentence mid-clause with no mark; it then takes its own wrapped row under the rule.
+			const inline = visibleWidth(label) + visibleWidth(slotSentence) + visibleWidth(waiting) + 12 <= safeWidth;
+			rows.push(
+				sectionRule(theme, safeWidth, label, { meta: inline ? `${slotSentence} ${GLYPH.sep} ${waiting}` : waiting }),
+			);
+			const slotRows = inline ? [] : wrapTextWithAnsi(theme.fg("annotation", slotSentence), safeWidth);
+			rows.push(...slotRows);
 			rows.push(...notice);
 			const text = selected.text.split("\n").flatMap((line) => wrapTextWithAnsi(theme.fg("body", line), safeWidth));
 			const kept = text.slice(0, Math.max(1, detailBudget - 1 - slotRows.length - notice.length));
@@ -268,12 +285,12 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		const send = this.sendEntry(selected);
 		return [
 			...(send ? [send] : []),
-			{ key: "↑↓", verb: "select" },
+			{ key: SELECT_KEY, verb: "select" },
 			{ key: "a", verb: "all to editor" },
-			{ key: "Shift+↑↓", verb: "move" },
+			{ key: `Shift+${SELECT_KEY}`, verb: "move" },
 			{ key: "t", verb: "steer/later" },
 			{ key: "x", verb: "remove" },
-			...(selected?.origin === undefined ? [{ key: "e", verb: "to editor" }] : []),
+			...(selected?.origin === undefined ? [{ key: "e", verb: "edit" }] : []),
 			esc,
 		];
 	}
@@ -283,7 +300,7 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		if (this.railRoom <= 0) return [];
 		const all = this.railEntries();
 		const { kept } = fitHintEntryList(all, this.railRoom);
-		return all.filter((entry) => !kept.includes(entry) && entry.key !== "↑↓");
+		return all.filter((entry) => !kept.includes(entry) && entry.key !== SELECT_KEY);
 	}
 
 	footerHint(innerWidth: number): string {
@@ -369,7 +386,7 @@ export function openQueueNavigatorOverlay(tui: TUI, deps: QueueNavigatorDeps): O
 		markerId: "queue-navigator",
 		title: () => {
 			const count = deps.entries().length;
-			return `Steering Queue (${count})${count > 0 && deps.isHeld?.() === true ? " · held, nothing sent" : ""}`;
+			return `Steering Queue (${count})${count > 0 && deps.isHeld?.() === true ? ` ${GLYPH.sep} held, nothing sent` : ""}`;
 		},
 		footerHint: (innerWidth) => body.footerHint(innerWidth),
 	});

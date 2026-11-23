@@ -56,7 +56,8 @@ import { fitDashboardLine, formatToolTally } from "./widgets.js";
 
 export type { ToolTallySnapshot } from "./widgets.js";
 
-export type FooterDashboardMode = "compact" | "expanded";
+/** Whether Alt+U has opened the dashboard; never a presentation tier. */
+export type FooterDashboardMode = "closed" | "open";
 
 export interface FooterDashboardDeps {
 	/** Suppress idle teaching when the welcome already owns it. */
@@ -178,7 +179,6 @@ export interface FooterDashboardPanel extends FooterPanel {
 	isExpanded(): boolean;
 	setExpanded(expanded: boolean): void;
 	toggleExpanded(): FooterDashboardMode;
-	scroll(delta: number): boolean;
 	dispose(): void;
 }
 
@@ -268,10 +268,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	);
 	const demoHints = createDemoHints();
 	let branchSlot: string | null = null;
-	let dashboardMode: FooterDashboardMode = "compact";
-	let scrollOffset = 0;
-	let maxScrollOffset = 0;
-	let scrollRows = 8;
+	let dashboardMode: FooterDashboardMode = "closed";
 	let disposed = false;
 	const state = (width: number): FooterDashboardRenderState => {
 		const now = deps.now?.() ?? Date.now();
@@ -402,7 +399,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				onShown: (id) => setImmediate(() => recordLessonShown(`footer:${id}`)),
 				now,
 				quiet:
-					dashboardMode !== "compact" ||
+					dashboardMode !== "closed" ||
 					(keyContext !== undefined && keyContext !== "idle") ||
 					compactionActive ||
 					["tool_blocked", "retrying", "stuck"].includes(status?.phase ?? "") ||
@@ -445,29 +442,26 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const lifecycleLine = lifecycleHint ? [fitDashboardLine(clioTheme().fg("annotation", lifecycleHint), width)] : [];
 		const contributed = deps.getExtensionStatus?.() ?? [];
 		const extensionLine =
-			dashboardMode === "expanded" && contributed.length
+			dashboardMode === "open" && contributed.length
 				? [fitDashboardLine(`Extensions: ${contributed.join(" | ")}`, width)]
 				: [];
 		const workspace = deps.getWorkspaceLine?.(width);
 		const workspaceLine = workspace ? [fitDashboardLine(workspace, width)] : [];
-		// Keep the highest-priority notice readable in full; the dismiss hint exposes the next.
-		const supplementary = [...workspaceLine, ...extensionLine, ...lifecycleLine];
-		const grid =
-			dashboardMode === "expanded"
-				? dashboardPageViewport(
-						current,
-						width,
-						terminalRows() - supplementary.length,
-						actionKeyLabel("clio-coder.status.toggle") ?? "",
-						scrollOffset,
-					)
-				: renderCompactDashboard(current, width, terminalRows());
-		if (!Array.isArray(grid)) {
-			scrollOffset = grid.offset;
-			maxScrollOffset = grid.maxOffset;
-			scrollRows = Math.max(1, grid.rows.length - 4);
-		}
-		const lines = [...(Array.isArray(grid) ? grid : grid.rows), ...supplementary];
+		// The open dashboard sits above the footer's own rows, so the status line and its `>C_` mark stay under it and
+		// opening it moves the composer by its height alone.
+		const panel =
+			dashboardMode === "open"
+				? [
+						...dashboardPageViewport(current, width, terminalRows(), actionKeyLabel("clio-coder.status.toggle") ?? ""),
+						...extensionLine,
+					]
+				: [];
+		const lines = [
+			...panel,
+			...renderCompactDashboard(current, width, terminalRows()),
+			...workspaceLine,
+			...lifecycleLine,
+		];
 		// The footer's own height per tier (1, 2 or 3 rows, a notice adds one), so the dock above it sizes to what is left.
 		deps.onHeightChange?.(Math.max(1, lines.length));
 		return lines.join("\n");
@@ -477,8 +471,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		view.composeAt(deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80);
 	};
 	const setExpanded = (expanded: boolean): void => {
-		dashboardMode = expanded ? "expanded" : "compact";
-		scrollOffset = 0;
+		dashboardMode = expanded ? "open" : "closed";
 		refresh();
 	};
 	refresh();
@@ -496,18 +489,11 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			return dashboardMode;
 		},
 		isExpanded() {
-			return dashboardMode === "expanded";
+			return dashboardMode === "open";
 		},
 		setExpanded,
-		scroll(delta) {
-			if (dashboardMode !== "expanded") return false;
-			const step = Math.sign(delta) * Math.min(Math.abs(delta), scrollRows);
-			scrollOffset = Math.max(0, Math.min(maxScrollOffset, scrollOffset + step));
-			refresh();
-			return true;
-		},
 		toggleExpanded() {
-			setExpanded(dashboardMode === "compact");
+			setExpanded(dashboardMode === "closed");
 			return dashboardMode;
 		},
 		dispose() {

@@ -1,13 +1,14 @@
+import { tierPolicy, tierRevision } from "../../core/presentation-tier.js";
 import { collectSessionEntries } from "../../domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import { buildTurnPreview } from "../../domains/session/tree/preview.js";
 import { openSession, sessionPaths } from "../../engine/session.js";
-import { type Component, matchesKey, type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
-import { stampLocal } from "../format-time.js";
-import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, emptyState } from "../theme/index.js";
+import { type Component, matchesKey, type OverlayHandle, Text, type TUI, truncateToWidth } from "../../engine/tui.js";
+import { clockLocal, dateLocal, stampLocal } from "../format-time.js";
+import { buildResponsiveHint, FocusBox, type RowBudgetedBody, showClioOverlayFrame } from "../overlay-frame.js";
+import { type ClioTheme, clioTheme, emptyState, type Fact, factRows, GLYPH, sectionRule } from "../theme/index.js";
 import { type ChoiceItem, ChoiceList } from "./settings-submenus.js";
 
 export const MESSAGE_PICKER_OVERLAY_WIDTH = 88;
@@ -97,14 +98,107 @@ function formatTimestampForRow(timestamp: string): string {
  * The preview is the label, because turn ids in a session share their
  * time-ordered prefix and say nothing; the time sits at the right as the
  * row's metadata, where the selection row compacts it before the preview.
+ * The reply line under each row shows from standard up; compact keeps one
+ * row per prompt and says the selection's reply on the status row.
  */
-function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): ChoiceItem[] {
+function rowsToItems(rows: ReadonlyArray<MessagePickerRow>, describe: boolean): ChoiceItem[] {
 	return rows.map((row) => ({
 		value: row.turnId,
 		label: row.asked ? `after “${row.asked.replaceAll("**", "")}”` : row.preview.replaceAll("**", ""),
-		...(row.asked ? { description: `CLIO Coder: ${row.preview.replaceAll("**", "")}` } : {}),
+		...(row.asked && describe ? { description: replyLine(row) } : {}),
 		meta: formatTimestampForRow(row.at),
 	}));
+}
+
+function replyLine(row: MessagePickerRow): string {
+	return `CLIO Coder: ${row.preview.replaceAll("**", "")}`;
+}
+
+/**
+ * What the tier adds for the selected row under the list: at compact one status row naming the reply the fork
+ * keeps; at detailed a titled pane with the turn id, the full time, the prompt and the reply.
+ */
+function forkDetail(theme: ClioTheme, row: MessagePickerRow, width: number): string[] {
+	const detail = tierPolicy().pickerDetail;
+	if (detail === "status") {
+		const status = row.asked ? replyLine(row) : `forks after this reply ${GLYPH.sep} ${formatTimestampForRow(row.at)}`;
+		return [truncateToWidth(theme.fg("annotation", status), width, GLYPH.ellipsis, false)];
+	}
+	if (detail !== "pane") return [];
+	const millis = Date.parse(row.at);
+	const facts: Fact[] = [
+		{ label: "turn", value: row.turnId, fit: "clip" },
+		...(Number.isFinite(millis) ? [{ label: "at", value: `${dateLocal(row.at)} ${clockLocal(row.at)}` }] : []),
+		...(row.asked ? [{ label: "asked", value: row.asked.replaceAll("**", "") }] : []),
+		{ label: "reply", value: row.preview.replaceAll("**", "") },
+		{ label: "keeps", value: "every turn up to this reply; later turns stay in this session" },
+	];
+	return [
+		sectionRule(theme, width, "Fork point", { meta: row.turnId.length > 6 ? row.turnId.slice(-6) : row.turnId }),
+		...factRows(theme, facts, width, { stack: "never" }),
+	];
+}
+
+/**
+ * The list and what the tier shows for its selection. The list is rebuilt when the tier changes, keeping the
+ * selected row, so its reply lines follow the tier; the frame's row budget is shared out after the detail rows.
+ */
+class ForkPickerBody implements Component, RowBudgetedBody {
+	private list: ChoiceList;
+	private builtRevision: number;
+	private bodyRows = 0;
+
+	constructor(
+		private readonly rows: ReadonlyArray<MessagePickerRow>,
+		private readonly onFork: (parentTurnId: string) => void,
+		private readonly onClose: () => void,
+		selectedIndex: number,
+	) {
+		this.builtRevision = tierRevision();
+		this.list = this.buildList(selectedIndex);
+	}
+
+	private buildList(selectedIndex: number): ChoiceList {
+		const list = new ChoiceList(rowsToItems(this.rows, tierPolicy().pickerDetail !== "status"));
+		list.setSelectedIndex(selectedIndex);
+		list.onSelect = (item: ChoiceItem): void => {
+			this.onFork(item.value);
+			this.onClose();
+		};
+		list.onCancel = (): void => {
+			this.onClose();
+		};
+		return list;
+	}
+
+	private selectedIndex(): number {
+		const value = this.list.getSelectedItem()?.value;
+		return Math.max(
+			0,
+			this.rows.findIndex((row) => row.turnId === value),
+		);
+	}
+
+	setBodyRows(rows: number): void {
+		this.bodyRows = Math.max(0, Math.floor(rows));
+	}
+
+	render(width: number): string[] {
+		if (this.builtRevision !== tierRevision()) {
+			this.builtRevision = tierRevision();
+			this.list = this.buildList(this.selectedIndex());
+		}
+		const row = this.rows[this.selectedIndex()];
+		const detail = row ? forkDetail(clioTheme(), row, Math.max(1, width)) : [];
+		this.list.setBodyRows(this.bodyRows > 0 ? Math.max(1, this.bodyRows - detail.length) : 0);
+		return [...this.list.render(width), ...detail];
+	}
+
+	handleInput(data: string): void {
+		this.list.handleInput(data);
+	}
+
+	invalidate(): void {}
 }
 
 function createMessagePickerContent(
@@ -123,23 +217,17 @@ function createMessagePickerContent(
 			},
 		});
 	}
-	// The list is the overlay's own child so the frame hands it the dock's
-	// rows and it windows itself.
-	const list = new ChoiceList(rowsToItems(rows));
-	list.setSelectedIndex(
+	// The body is the overlay's own child so the frame hands it the dock's
+	// rows; it gives the list what its detail rows leave and the list windows itself.
+	return new ForkPickerBody(
+		rows,
+		onFork,
+		onClose,
 		Math.max(
 			0,
 			rows.findIndex((row) => row.turnId === selectedTurnId),
 		),
 	);
-	list.onSelect = (item: ChoiceItem): void => {
-		onFork(item.value);
-		onClose();
-	};
-	list.onCancel = (): void => {
-		onClose();
-	};
-	return list;
 }
 
 export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverlayDeps): OverlayHandle {

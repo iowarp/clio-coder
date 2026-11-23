@@ -1,4 +1,5 @@
 import type { OutputStyle } from "../core/defaults.js";
+import { tierPolicy } from "../core/presentation-tier.js";
 import {
 	Editor,
 	getKeybindings,
@@ -10,7 +11,7 @@ import {
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
 import type { TurnPreparationPhase } from "../session-control/turn-state.js";
-import { type DockEntry, dockAdaptiveRows, dockBodyRows, dockGrowthRows, dockTop } from "./dock.js";
+import { type DockEntry, decisionRows, dockAdaptiveRows, dockBodyRows, dockGrowthRows, dockTop } from "./dock.js";
 import { guardPastedEditorOperator } from "./editor-bash.js";
 import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
 import { steerDraftToken } from "./editor-steer.js";
@@ -193,6 +194,8 @@ interface RuleUnit {
  * space and `━` on each side of the right units. Without right units the title keeps `━ `, its space and one fill cell.
  */
 const OVERLAY_RULE_CHROME = 7;
+/** Draft rows a decision card leaves visible under itself. */
+const APPROVAL_DRAFT_ROWS = 2;
 const OVERLAY_RULE_BARE = 4;
 
 /**
@@ -589,12 +592,18 @@ export class ClioEditor extends Editor {
 			.join(theme.fg("border", " › "));
 		const unavailable = item.disabledReason ? theme.fg("emptyState", "  unavailable") : "";
 		const rows = [`${gutter}${truncateToWidth(`${crumb}${unavailable}`, room, GLYPH.ellipsis, false)}`];
-		// A sentence that outgrows its two lines ends in an ellipsis rather than a silent cut.
+		// A sentence that outgrows the rows under the breadcrumb ends in an ellipsis rather than a silent cut.
+		const bodyRows = SUGGESTION_PANEL_ROWS - 1;
 		const wrapClamped = (text: string, paint: (line: string) => string): string[] => {
 			const wrapped = wrapTextWithAnsi(text, room);
-			const shown = wrapped.slice(0, 2);
-			if (wrapped.length > 2)
-				shown[1] = truncateToWidth(`${shown[1] ?? ""} ${wrapped[2] ?? ""}`, room, GLYPH.ellipsis, false);
+			const shown = wrapped.slice(0, bodyRows);
+			if (wrapped.length > bodyRows)
+				shown[bodyRows - 1] = truncateToWidth(
+					`${shown[bodyRows - 1] ?? ""} ${wrapped[bodyRows] ?? ""}`,
+					room,
+					GLYPH.ellipsis,
+					false,
+				);
 			return shown.map((line) => `${gutter}${paint(line)}`);
 		};
 		const effect = item.effectDescription ?? item.description ?? "";
@@ -602,7 +611,14 @@ export class ClioEditor extends Editor {
 		const nextRows = item.nextAction ? wrapClamped(item.nextAction, (line) => theme.fg("keyboardHint", line)) : [];
 		// A refused row's reason is why Enter did nothing, so a short panel keeps it over the description.
 		rows.push(...(item.disabledReason ? [...nextRows, ...effectRows] : [...effectRows, ...nextRows]));
-		return rows.slice(0, SUGGESTION_PANEL_ROWS);
+		const shown = rows.slice(0, SUGGESTION_PANEL_ROWS);
+		// The usage example belongs to the full detail pane, so it joins the detail rows only at detailed, and only
+		// when it says more than the breadcrumb.
+		if (item.usage && tierPolicy().pickerDetail === "pane" && item.usage !== parts.join(" ")) {
+			const usage = `${theme.fg("annotation", "usage ")}${theme.fg("commandHint", item.usage)}`;
+			shown.push(`${gutter}${truncateToWidth(usage, room, GLYPH.ellipsis, false)}`);
+		}
+		return shown;
 	}
 
 	/** Two-column gutter on each side of a docked body, the autocomplete's own indent. */
@@ -1076,11 +1092,11 @@ export class ClioEditor extends Editor {
 	}
 
 	/**
-	 * A permission card inside the editor's own rails. It used to be a second,
-	 * boxed frame above a composer that repeated its keys; now the rails take the
-	 * attention tone, the top one names the decision and the bottom one carries
-	 * the card's keys once. The operator's draft, when there is one, stays
-	 * editable under the card because Enter is inert while it exists (#186).
+	 * A permission card inside the editor's own rails, decisions first (7.4). The top rule is titled `Approval` and its
+	 * right end says what waits and its clock (`‖ needs approval · 3:32 · <actor>`); the bottom rail carries the card's
+	 * keys once. The card gets every row the rails, the footer and a sliver of transcript leave, with no shared ceiling.
+	 * The operator's draft stays editable under it, at most 2 rows and its divider, because Enter is inert while it
+	 * exists (#186).
 	 */
 	private renderApproval(
 		entry: DockEntry,
@@ -1095,35 +1111,48 @@ export class ClioEditor extends Editor {
 		const room = this.approvalLabelRoom(width);
 		const route = this.chrome.getModelLabel();
 		const cue = GLYPH.phaseBlocked;
-		const up = draft.hiddenAbove > 0 ? `${GLYPH.up}${draft.hiddenAbove}` : "";
 		const tone = entry.frame.dockTone() ?? "decisionCue";
 		const actor = modelNickname(typeof route === "string" ? route.split("·").at(-1) : route.modelId);
-		// The decision's mark leads its title; draft rows hidden above the card are its own position, kept before the run.
-		const label = {
-			plain: (titleRoom: number) =>
-				`${cue} ${entry.frame.dockTitle({ room: Math.max(1, titleRoom - visibleWidth(cue) - 1), actor })}`,
-			paint: (text: string) =>
-				`${theme.fg("attentionRail", cue)} ${theme.style(tone, text.slice(cue.length + 1), { bold: true })}`,
-		};
-		const position: RuleUnit | null = up ? { text: up, paint: (text) => theme.fg("positionCount", text) } : null;
-		// The draft's rows and its divider come out of the card's budget, so the whole surface keeps the dock's height.
+		// The draft's rows and its divider come out of the card's budget, so the whole surface keeps its height.
 		const draftRows = draft.rows.length > 0 ? draft.rows.length + 1 : 0;
 		const down = draft.hiddenBelow > 0 ? theme.fg("positionCount", `${GLYPH.down}${draft.hiddenBelow}`) : "";
 		entry.frame.setRailRoom?.(room - (down ? visibleWidth(down) + 3 : 0));
-		const rendered = entry.frame.renderDockBody(contentWidth, Math.max(1, dockBodyRows(this.dockHost) - draftRows));
+		// The body renders before the rule reads its title, so the rule states the clock this frame draws.
+		const rendered = entry.frame.renderDockBody(contentWidth, Math.max(1, decisionRows(this.dockHost) - draftRows));
 		// The frame pads every body to its budget; a card owes no blank rows above its keys.
 		let bodyEnd = rendered.length;
 		while (bodyEnd > 1 && stripTerminalSequences(rendered[bodyEnd - 1] ?? "").trim() === "") bodyEnd -= 1;
+		const title = "Approval";
+		const label = {
+			plain: (titleRoom: number) =>
+				visibleWidth(title) <= titleRoom ? title : truncateToWidth(title, titleRoom, GLYPH.ellipsis, false),
+			paint: (text: string) => theme.style(tone, text, { bold: true }),
+		};
+		// The decision keeps its unit on the rule: it shortens to the clock alone before the title gives way.
+		const decisionRoom = Math.max(1, width - OVERLAY_RULE_CHROME - visibleWidth(title) - visibleWidth(cue) - 1);
+		const decision = entry.frame.dockTitle({ room: decisionRoom, actor });
+		const pending: RuleUnit = {
+			text: `${cue} ${decision}`,
+			paint: (text) =>
+				`${theme.fg("attentionRail", cue)} ${theme.style(tone, text.slice(cue.length + 1), { bold: true })}`,
+		};
 		const hint = entry.frame.dockHint(room - (down ? visibleWidth(down) + 3 : 0) + 4);
 		const keys = [down, hint?.trim().length ? theme.fg("decisionKey", hint) : ""]
 			.filter(Boolean)
 			.join(theme.fg("separator", ` ${GLYPH.dot} `));
+		// Draft rows hidden above the two shown are the divider's own position.
+		const up = draft.hiddenAbove > 0 ? `${GLYPH.up}${draft.hiddenAbove}` : "";
 		return {
 			card: [
-				this.overlayRule(width, theme, rail, label, position),
+				this.overlayRule(width, theme, rail, label, pending),
 				...rendered.slice(0, bodyEnd).map((row) => padAnsi(`${pad}${row}${pad}`, width)),
 				...(draft.rows.length > 0
-					? [padAnsi(`${pad}${rule(theme, contentWidth, { left: "Your draft", leftToken: "annotation" })}`, width)]
+					? [
+							padAnsi(
+								`${pad}${rule(theme, contentWidth, { left: "Your draft", leftToken: "annotation", ...(up ? { right: up } : {}) })}`,
+								width,
+							),
+						]
 					: []),
 			],
 			composer: [...draft.rows, this.bottomRail(width, theme, rail, keys, room)],
@@ -1154,18 +1183,103 @@ export class ClioEditor extends Editor {
 		const suggestions = lines.slice(this.autocompleteSourceStart);
 		const last = suggestions.at(-1);
 		const hasCount = last !== undefined && /^\s*\(\d+\/\d+\)\s*$/u.test(stripTerminalSequences(last));
-		const items = hasCount ? suggestions.slice(0, -1) : suggestions;
+		const engineItems = hasCount ? suggestions.slice(0, -1) : suggestions;
 		const selectedItem = this.selectedSuggestion();
 		const panel = selectedItem ? this.suggestionPanel(selectedItem, width, theme) : [];
-		const wanted = rows.length + items.length + (hasCount ? 1 : 0) + panel.length;
+		const wanted = rows.length + engineItems.length + (hasCount ? 1 : 0) + panel.length;
 		const bodyRows = dockAdaptiveRows(this.dockHost, wanted - 1);
 		const room = Math.max(1, bodyRows + 1 - rows.length);
 		// A short dock keeps a few list rows and gives the panel what is left.
 		const panelRows = Math.min(
 			panel.length,
-			Math.max(0, room - Math.min(items.length + (hasCount ? 1 : 0), SUGGESTION_MIN_LIST_ROWS)),
+			Math.max(0, room - Math.min(engineItems.length + (hasCount ? 1 : 0), SUGGESTION_MIN_LIST_ROWS)),
 		);
 		const listRoom = room - panelRows;
+		// Slash rows are composed here from the engine's own list, so the tier applies on the next frame, the group word
+		// sits at the row end where room allows, and a cut description ends in an ellipsis instead of a silent cut.
+		const policy = tierPolicy();
+		const list = this.suggestionEngine().autocompleteList as
+			| {
+					filteredItems?: ReadonlyArray<Partial<SlashCompletionItem>>;
+					selectedIndex?: number;
+					getVisibleRange?(): { startIndex: number; endIndex: number };
+					getPrimaryColumnWidth?(): number;
+			  }
+			| undefined;
+		// An unarmed list has no focused row: the engine drew its window with no selection, so the range is read the same way.
+		const armed = this.syncSuggestionArming();
+		const keptIndex = list?.selectedIndex;
+		if (!armed && list !== undefined) list.selectedIndex = -1;
+		let range: { startIndex: number; endIndex: number } | undefined;
+		try {
+			range = list?.getVisibleRange?.();
+		} finally {
+			if (!armed && list !== undefined && keptIndex !== undefined) list.selectedIndex = keptIndex;
+		}
+		const focused = armed ? keptIndex : undefined;
+		const visible = range ? (list?.filteredItems ?? []).slice(range.startIndex, range.endIndex) : [];
+		const composed =
+			range !== undefined &&
+			visible.length > 0 &&
+			visible.length === engineItems.length &&
+			visible.every((item) => item.kind !== undefined && typeof item.value === "string");
+		const rowRoom = Math.max(1, width - 4);
+		const column = list?.getPrimaryColumnWidth?.() ?? 32;
+		const minDescription = 10;
+		// The group words share one right-hand slot, shown on every row or none: descriptions keep this many cells first.
+		const groupFloor = 40;
+		const groupSlot =
+			policy.listDescriptions === "all" ? Math.max(0, ...visible.map((item) => visibleWidth(item.group ?? ""))) : 0;
+		const groupsFit = groupSlot > 0 && rowRoom - 2 - Math.min(column, rowRoom - 4) - groupSlot - 2 >= groupFloor;
+		const fit = (text: string, cells: number): string => {
+			if (visibleWidth(text) <= cells) return text;
+			const cut = truncateToWidth(text, Math.max(0, cells - visibleWidth(GLYPH.ellipsis)), "", false).trimEnd();
+			return `${cut}${GLYPH.ellipsis}`;
+		};
+		// The focused row states its description inline at compact only when the detail rows cannot carry it.
+		const focusedInline = panelRows < SUGGESTION_PANEL_ROWS;
+		const slashRow = (item: Partial<SlashCompletionItem>, selected: boolean): string => {
+			const lead = selected ? `${GLYPH.cursor} ` : "  ";
+			const cells = Math.max(1, rowRoom - visibleWidth(lead));
+			// A refused row keeps its reason at every tier, and a row without detail rows keeps its own description.
+			const described =
+				policy.listDescriptions === "all" ||
+				item.disabledReason !== undefined ||
+				item.path === undefined ||
+				(selected && focusedInline);
+			const description = described ? (item.description ?? "").replace(/[\r\n]+/gu, " ").trim() : "";
+			const group = groupsFit ? (item.group ?? "") : "";
+			const cell = Math.max(1, Math.min(column, cells - 2));
+			const name = item.label || item.value || "";
+			let label = fit(name, cells);
+			let gap = "";
+			let shown = "";
+			let showGroup = false;
+			const groupCells = group ? visibleWidth(group) + 2 : 0;
+			if (description && cells - cell >= minDescription) {
+				label = fit(name, Math.max(1, cell - 2));
+				gap = " ".repeat(Math.max(1, cell - visibleWidth(label)));
+				let descriptionRoom = cells - visibleWidth(label) - gap.length;
+				showGroup = group !== "" && descriptionRoom - groupCells >= minDescription;
+				if (showGroup) descriptionRoom -= groupCells;
+				shown = fit(description, descriptionRoom);
+			} else if (description && item.disabledReason !== undefined) {
+				// Too narrow for the description column: a refused row keeps its reason right after its name.
+				const reasonCells = Math.min(visibleWidth(description), Math.max(minDescription, cells - visibleWidth(name) - 2));
+				label = fit(name, Math.max(1, cells - 2 - reasonCells));
+				gap = "  ";
+				shown = fit(description, Math.max(1, cells - visibleWidth(label) - 2));
+			}
+			const head = shown ? `${label}${gap}${shown}` : label;
+			const tail = showGroup
+				? `${" ".repeat(Math.max(2, cells - visibleWidth(head) - visibleWidth(group)))}${theme.fg("annotation", group)}`
+				: "";
+			if (selected) return `${theme.style("selectedOption", `${lead}${head}`, { bold: true })}${tail}`;
+			return `${lead}${label}${shown ? theme.fg("menuDescription", `${gap}${shown}`) : ""}${tail}`;
+		};
+		const items = composed
+			? visible.map((item, index) => slashRow(item, range !== undefined && range.startIndex + index === focused))
+			: engineItems;
 		const selected = Math.max(
 			0,
 			items.findIndex((line) => stripTerminalSequences(line).trimStart().startsWith(`${GLYPH.cursor} `)),
@@ -1192,7 +1306,7 @@ export class ClioEditor extends Editor {
 		if (items.length === 0) appendSuggestion(theme.fg("emptyState", "No suggestions to display"), -1);
 		// The count row exists only when the list overflows, which is when the page keys move it.
 		if (hasCount && listRoom > 1 && last !== undefined)
-			appendSuggestion(`${last.trimEnd()}${theme.fg("keyboardHint", " · PgUp/PgDn page")}`, lines.length - 1);
+			appendSuggestion(`${last.trimEnd()}${theme.fg("keyboardHint", ` ${GLYPH.sep} PgUp/PgDn page`)}`, lines.length - 1);
 		for (const line of panel.slice(0, panelRows)) {
 			rows.push(padAnsi(`  ${line}`, width));
 			rowMap.push(-1);
@@ -1318,7 +1432,8 @@ export class ClioEditor extends Editor {
 				0,
 				input.findIndex((line) => line.includes(FAKE_CURSOR_START)),
 			);
-			const [start, end] = centeredWindow(input.length, cursor, Math.max(1, dockBodyRows(this.dockHost) - 3));
+			// The draft under a decision card shows at most 2 rows (7.4); the rest is counted on its divider and rail.
+			const [start, end] = centeredWindow(input.length, cursor, APPROVAL_DRAFT_ROWS);
 			// An empty composer has nothing to show under the card; its draft returns with the normal rails.
 			const { card, composer } = this.renderApproval(docked, safeWidth, theme, {
 				rows: text.length > 0 ? input.slice(start, end) : [],

@@ -573,17 +573,22 @@ test("/view renders a transcript block at the preview's width, rail and hanging 
 	view.render(40);
 	await new Promise((resolve) => setImmediate(resolve));
 	const rows = view.render(40).map(stripTerminalSequences);
-	match(rows.join("\n"), /Preview · 1\/1[\s\S]*\$ CLIO Coder ran `node scripts\/check\.js/u);
-	const body = rows
-		.slice(rows.findIndex((row) => row.startsWith("transcript ·")) + 1)
-		.filter((row) => row.trim().length > 0);
+	match(rows.join("\n"), /Preview · 1 of 1[\s\S]*\$ CLIO Coder ran `node scripts\/check\.js/u);
+	const previewBody = (shown: string[]) =>
+		shown.slice(shown.findIndex((row) => row.startsWith("transcript ·")) + 1).filter((row) => row.trim().length > 0);
+	const body = previewBody(rows);
 	ok(body.length > 4, rows.join("\n"));
 	match(body[0] ?? "", /^\$ CLIO Coder ran/u);
+	// The list stacks over the preview at 40 columns, so the rest of the body is read scrolled to its end.
+	view.handleInput("G");
+	const end = view.render(40).map(stripTerminalSequences);
+	const rest = previewBody(end);
 	// Every wrapped row stays in the content column under its rail, as the transcript renders it.
-	for (const row of body.slice(1)) ok(row.startsWith("  "), `a wrapped row restarted at column 0:\n${rows.join("\n")}`);
+	for (const row of [...body.slice(1), ...rest])
+		ok(row.startsWith("  "), `a wrapped row restarted at column 0:\n${rows.join("\n")}\n${end.join("\n")}`);
 	ok(
-		body.some((row) => row.startsWith("  │ ") && row.includes("narrow")),
-		rows.join("\n"),
+		[...body, ...rest].some((row) => row.startsWith("  │ ") && row.includes("narrow")),
+		`${rows.join("\n")}\n${end.join("\n")}`,
 	);
 });
 

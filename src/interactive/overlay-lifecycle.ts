@@ -786,7 +786,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openProjectTrustState: overlayResourceOpeners.openProjectTrustState,
 		toggleDispatchBoardOverlay,
 		openQueueNavigatorState,
-		isPermissionSettling,
+		// The router holds Enter and the session grant while the card settles and while its choices are scrolled out of
+		// view (7.4); the card's own dimmed-allow row reads only the settle window.
+		isPermissionSettling: () => isPermissionSettling() || permissionBody?.choicesOutOfView() === true,
 		confirmPermission: () => {
 			overlayPermission?.confirm();
 			footer.refresh();

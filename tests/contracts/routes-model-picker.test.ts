@@ -80,7 +80,8 @@ test("model picker uses state marks and target health without origin or health g
 			match(view.render(width).map(stripTerminalSequences).join("\n"), new RegExp(words));
 		}
 		doesNotMatch(plain.join("\n"), /[◆◇●◐○]/u);
-		if (width === 60) match(plain[0] ?? "", /…\s*$/u);
+		// The summary drops whole units to fit rather than closing on a cut chip.
+		if (width === 60) doesNotMatch(plain[0] ?? "", /…\s*$/u);
 		ok(
 			rows.some((line) => line.includes(clioTheme().fgSequence("success"))),
 			"target carries health color",
@@ -105,13 +106,17 @@ test("model cell fits wide graphemes without cutting the distinguishing suffix",
 	);
 	try {
 		for (const width of [60, 80, 120, 200]) {
-			const line = view
-				.render(width)
-				.map(stripTerminalSequences)
-				.find((text) => text.startsWith(GLYPH.cursor));
-			ok(line);
-			ok(visibleWidth(line) <= width);
-			match(line, /-FINAL/);
+			// The selected row prints its id whole, carrying what does not fit onto indented continuation rows.
+			const plain = view.render(width).map(stripTerminalSequences);
+			const at = plain.findIndex((text) => text.startsWith(GLYPH.cursor));
+			ok(at >= 0);
+			const block = [plain[at] ?? ""];
+			for (const next of plain.slice(at + 1)) {
+				if (!next.startsWith("    ") || next.trim().length === 0) break;
+				block.push(next);
+			}
+			for (const line of block) ok(visibleWidth(line) <= width);
+			match(block.map((line) => line.trim()).join(""), /-FINAL/);
 		}
 	} finally {
 		view.dispose();

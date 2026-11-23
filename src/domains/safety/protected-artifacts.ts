@@ -5184,19 +5184,27 @@ export function decodedLocaleQuoting(command: string): string | null {
 	return same ? decoded : null;
 }
 
-export function scanShellLikeDeep(command: string, depth = 0): ShellToken[] {
-	const tokens = scanShellLike(command);
+/**
+ * FX-9: with `skipInertHeredocBodies`, a quoted here-document body no shell may read (`python3 - <<'EOF'`) is input
+ * text, not commands, as for the redirect reading ({@link heredocInertRedirectTokens}).
+ */
+export function scanShellLikeDeep(command: string, depth = 0, skipInertHeredocBodies = false): ShellToken[] {
+	const inert = skipInertHeredocBodies ? heredocInertRedirectTokens(command) : null;
+	const tokens = inert === null ? scanShellLike(command) : [...inert];
 	if (depth >= INNER_SHELL_MAX_DEPTH) return tokens;
 	const inner = tokens.flatMap((token) =>
 		(token.substitutions ?? []).flatMap((script) => [
 			{ value: ";", operator: true, quoted: false, start: token.start, end: token.start },
-			...scanShellLikeDeep(script, depth + 1),
+			...scanShellLikeDeep(script, depth + 1, skipInertHeredocBodies),
 		]),
 	);
 	for (const segment of splitSegments(tokens)) {
 		const script = segmentShellScript(shellCommandArguments(segment));
 		if (typeof script === "string") {
-			inner.push({ value: ";", operator: true, quoted: false, start: 0, end: 0 }, ...scanShellLikeDeep(script, depth + 1));
+			inner.push(
+				{ value: ";", operator: true, quoted: false, start: 0, end: 0 },
+				...scanShellLikeDeep(script, depth + 1, skipInertHeredocBodies),
+			);
 		}
 	}
 	return [...tokens, ...inner];

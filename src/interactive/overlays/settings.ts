@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { SettingControl } from "../../core/settings-controls.js";
 import {
 	applyControlValue,
@@ -27,6 +28,7 @@ import {
 	removeTargetFromSettings,
 	SettingsValidationError,
 	setFleetProfileInSettings,
+	settingsPath,
 	useTargetInSettings,
 	validateSettings,
 } from "../../core/config.js";
@@ -37,6 +39,8 @@ import {
 	DEFAULT_SETTINGS,
 	THINKING_LEVELS,
 } from "../../core/defaults.js";
+import { tierPolicy } from "../../core/presentation-tier.js";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { getAtPath, isRoutingPath, resolveMemoryRoute } from "../../core/session-routing.js";
 import type { SettingsAreaId as SettingsSectionId } from "../../core/settings-areas.js";
 import {
@@ -93,7 +97,17 @@ import {
 	type RowBudgetedBody,
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
-import { barSep, clioTheme, emptyState, GLYPH, padAnsi, sectionRule, selectionRow, titleRow } from "../theme/index.js";
+import {
+	barSep,
+	clioTheme,
+	collapseHomePath,
+	emptyState,
+	GLYPH,
+	padAnsi,
+	sectionRule,
+	selectionRow,
+	titleRow,
+} from "../theme/index.js";
 import type { FleetNodeSettingsUi } from "./fleet-node-settings.js";
 import { fleetNodeSettingsSubmenu } from "./fleet-node-settings.js";
 import { modelsForTarget } from "./model-selector.js";
@@ -590,17 +604,17 @@ function scopedModelCapabilityDetail(caps: CapabilityFlags, thinking?: string): 
 		caps.rerank ? "rerank" : null,
 		caps.fim ? "fim" : null,
 	].filter((value): value is string => value !== null);
-	return `Capabilities: ${enabled.length > 0 ? enabled.join(", ") : "none reported"} · context ${compactCapabilityCount(caps.contextWindow)} · max output ${compactCapabilityCount(caps.maxTokens)}${thinking ? ` · thinking ${thinking}` : ""}`;
+	return `Capabilities: ${enabled.length > 0 ? enabled.join(", ") : "none reported"} ${GLYPH.sep} context ${compactCapabilityCount(caps.contextWindow)} ${GLYPH.sep} max output ${compactCapabilityCount(caps.maxTokens)}${thinking ? ` ${GLYPH.sep} thinking ${thinking}` : ""}`;
 }
 
 function scopedModelEntryDetail(providers: ProvidersContract, status: TargetStatus, model: string | null): string {
 	if (!model) {
-		return `${scopedModelCapabilityDetail(status.capabilities)} · target-level scope uses this target's default model when switching targets`;
+		return `${scopedModelCapabilityDetail(status.capabilities)} ${GLYPH.sep} target-level scope uses this target's default model when switching targets`;
 	}
 	const resolved = resolveModelRuntimeCapabilitiesForProviders(providers, status.target.id, model);
 	return resolved
 		? scopedModelCapabilityDetail(resolved.capabilities, resolved.thinking.display)
-		: `${scopedModelCapabilityDetail(status.capabilities)} · model details unresolved`;
+		: `${scopedModelCapabilityDetail(status.capabilities)} ${GLYPH.sep} model details unresolved`;
 }
 
 function buildScopedModelChecklistRows(
@@ -612,7 +626,7 @@ function buildScopedModelChecklistRows(
 	if (providers) {
 		for (const status of providers.list()) {
 			const targetRef = status.target.id;
-			rows.push({ kind: "group", label: `Target · ${targetRef}` });
+			rows.push({ kind: "group", label: `Target ${GLYPH.sep} ${targetRef}` });
 			availableRefs.add(targetRef);
 			rows.push({
 				kind: "entry",
@@ -694,7 +708,7 @@ class ScopedModelChecklist implements Component, RowBudgetedBody {
 		// so the line that survives the cut says it is not.
 		const detail: string[] = [];
 		if (selected?.kind === "entry") {
-			const text = selected.available ? selected.detail : `Unavailable · ${selected.detail}`;
+			const text = selected.available ? selected.detail : `Unavailable ${GLYPH.sep} ${selected.detail}`;
 			const wrapped = wrapTextWithAnsi(theme.fg("annotation", text), safe);
 			const kept = wrapped.slice(0, 3);
 			const last = kept.at(-1);
@@ -906,9 +920,9 @@ function targetActionsSubmenu(targetId: string, options: BuildSettingItemsOption
 		];
 		const details = `URL: ${target?.url ?? "(none)"} · Default model: ${target?.defaultModel ?? "(none)"} · Last probe: ${status?.health.lastCheckAt ? clockLocal(status.health.lastCheckAt) : "never"} ${(() => {
 			const reason = status?.health.lastError ?? (!status?.available && status?.reason ? status.reason : null);
-			return reason === null ? "" : ` · Failure reason: ${reason}`;
+			return reason === null ? "" : ` ${GLYPH.sep} Failure reason: ${reason}`;
 		})()}`;
-		const note = chatEligible ? details : `Not chat-eligible: its runtime is not HTTP/native. · ${details}`;
+		const note = chatEligible ? details : `Not chat-eligible: its runtime is not HTTP/native. ${GLYPH.sep} ${details}`;
 		return selectListSubmenu(
 			`Target ${targetId}`,
 			items,
@@ -1116,7 +1130,7 @@ const turnPreparationSubmenu: SettingSubmenuBuilder = (currentValue, done) => {
 		const choices = [
 			...TURN_CONTROL_WORKFLOWS.map((workflow) => ({
 				value: workflow as string,
-				label: `${selected.has(workflow) ? "✓" : "○"} ${TURN_PREPARATION_LABELS[workflow]}`,
+				label: `${selected.has(workflow) ? GLYPH.ok : "○"} ${TURN_PREPARATION_LABELS[workflow]}`,
 			})),
 			{ value: "apply", label: "Apply these choices" },
 		];
@@ -1953,7 +1967,7 @@ function agentBindingRows(settings: Readonly<ClioSettings>, live: () => Readonly
 		.map(([agentId, profileName]) => {
 			const missing = !settings.fleet.profiles[profileName];
 			return settingItem(`fleet.agentProfiles.${agentId}`, profileName, {
-				label: `${agentId} · profile`,
+				label: `${agentId} ${GLYPH.sep} profile`,
 				description: missing
 					? `Agent ${agentId} is bound to profile ${profileName}, which does not exist; it dispatches on the fleet default until the profile is created.`
 					: `Profile agent ${agentId} dispatches with.`,
@@ -2037,7 +2051,7 @@ export function targetRows(
 			: null;
 		const routes = breakers.filter((route) => route.targetId === target.id);
 		const liveHealth = activitySegment ?? routeBreakerSegment(routes) ?? healthSegment;
-		const breakerText = routes.length > 0 ? ` · Breaker: ${routes.map(routeBreakerPhrase).join("; ")}` : "";
+		const breakerText = routes.length > 0 ? ` ${GLYPH.sep} Breaker: ${routes.map(routeBreakerPhrase).join("; ")}` : "";
 		const runtime = status?.runtime?.id ?? target.runtime;
 		// A down target's latency is how fast the connection was refused, which read as a healthy `2 ms` beside `down`.
 		const latency =
@@ -2053,10 +2067,10 @@ export function targetRows(
 			{ text: `  ${runtime}`, tone: "neutral" as const },
 			{ text: `  ${latency}`, tone: "neutral" as const },
 		];
-		const value = `${health} · ${target.id} · ${roleText} · ${runtime} · ${latency}${breakerText}`;
+		const value = `${health} ${GLYPH.sep} ${target.id} ${GLYPH.sep} ${roleText} ${GLYPH.sep} ${runtime} ${GLYPH.sep} ${latency}${breakerText}`;
 		const item = settingItem(`targets.${target.id}`, value, {
 			label: target.id,
-			description: `URL: ${target.url ?? "(none)"} · Default model: ${target.defaultModel ?? "(none)"}`,
+			description: `URL: ${target.url ?? "(none)"} ${GLYPH.sep} Default model: ${target.defaultModel ?? "(none)"}`,
 			// A target with no failure says nothing about one; `Failure reason: none` read as a failure at a glance.
 			help: `Last probe: ${lastProbe}${failureReason === null ? "" : ` · Failure reason: ${failureReason}`}${breakerText}`,
 			submenu: targetActionsSubmenu(target.id, options),
@@ -2108,9 +2122,9 @@ export function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>, ui?: Flee
 						: node.verification?.reason?.includes("has not passed")
 							? "not checked"
 							: "needs attention";
-		return settingItem(`fleet.nodes.${node.id}`, `${readiness} · ${busy}`, {
+		return settingItem(`fleet.nodes.${node.id}`, `${readiness} ${GLYPH.sep} ${busy}`, {
 			label: `node ${node.id}`,
-			description: `${node.kind} · ${node.host}${node.stateReason ? ` · ${node.stateReason}` : ""}${node.lastSeenAt ? ` · seen ${clockLocal(node.lastSeenAt)}` : ""}`,
+			description: `${node.kind} ${GLYPH.sep} ${node.host}${node.stateReason ? ` ${GLYPH.sep} ${node.stateReason}` : ""}${node.lastSeenAt ? ` ${GLYPH.sep} seen ${clockLocal(node.lastSeenAt)}` : ""}`,
 			affordance:
 				node.kind === "ssh" && ui
 					? "open evidence, test, install or remove"
@@ -2123,7 +2137,7 @@ export function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>, ui?: Flee
 					text: `${node.state === "online" && (node.kind === "local" || node.verification?.ok) ? GLYPH.running : "○"} ${readiness}`,
 					tone: node.state === "online" && (node.kind === "local" || node.verification?.ok) ? "healthy" : "unhealthy",
 				},
-				{ text: ` · ${busy}`, tone: "neutral" },
+				{ text: ` ${GLYPH.sep} ${busy}`, tone: "neutral" },
 			],
 		});
 	});
@@ -2149,7 +2163,7 @@ function fleetEndpointRows(providers: ProvidersContract | undefined): SettingsCe
 		const slots = `slots ${usage[key] ?? 0}/${endpoint.limit}`;
 		return settingItem(`fleet.endpoints.${key}`, slots, {
 			label: `endpoint ${endpoint.label}`,
-			description: `Targets: ${(targetsByEndpoint.get(key) ?? []).join(", ")} · Limit source: ${endpoint.source}`,
+			description: `Targets: ${(targetsByEndpoint.get(key) ?? []).join(", ")} ${GLYPH.sep} Limit source: ${endpoint.source}`,
 			affordance: "read-only inference endpoint capacity",
 			readOnly: true,
 			presentationKind: "status",
@@ -2764,11 +2778,11 @@ function formatScopeConfirmTitle(plan: SettingsChangePlan, width: number): strin
 	const selectedValue = humanizeChangePlanValue(plan);
 	const originalValue = formatSettingsValue(settingsPathForRow(plan.rowId), plan.originalValue);
 	const full = plan.originalValue.trim()
-		? `${plan.label}: ${originalValue} → ${selectedValue}`
+		? `${plan.label}: ${originalValue} ${GLYPH.next} ${selectedValue}`
 		: `${plan.label}: ${selectedValue}`;
 	if (visibleWidth(full) <= width) return full;
 	const destinationFirst = plan.originalValue.trim()
-		? `${plan.label}: → ${selectedValue}`
+		? `${plan.label}: ${GLYPH.next} ${selectedValue}`
 		: `${plan.label}: ${selectedValue}`;
 	if (visibleWidth(destinationFirst) <= width) return destinationFirst;
 	return ellipsizeFromLeft(destinationFirst, width);
@@ -2785,11 +2799,11 @@ function humanizeChangePlanValue(plan: SettingsChangePlan): string {
 	if (separatorIndex < 0) return formatSettingsValue(settingsPathForRow(plan.rowId), plan.selectedValue);
 	const head = plan.selectedValue.slice(0, separatorIndex).trim();
 	const tail = plan.selectedValue.slice(separatorIndex + PROFILE_FIELD_SEPARATOR.length).trim();
-	if (plan.rowId === "fleet.profiles" || plan.rowId === "fleet.agentProfiles") return `${head} → ${tail}`;
+	if (plan.rowId === "fleet.profiles" || plan.rowId === "fleet.agentProfiles") return `${head} ${GLYPH.next} ${tail}`;
 	if (!plan.rowId.startsWith("fleet.profiles.")) return plan.selectedValue;
 	const label =
 		head === "thinkingLevel" ? "thinking" : head === "node" ? "placement" : head === "target" ? "target" : "model";
-	return `${label} → ${tail}`;
+	return `${label} ${GLYPH.next} ${tail}`;
 }
 
 function truncateProfileFact(text: string, width: number): string {
@@ -2843,6 +2857,8 @@ export interface SettingsCenterOptions {
 	pinSetting?: (id: string, pinned: boolean) => SettingsShortcuts;
 	/** Which layer set a row's effective value; absent leaves the origin column empty. */
 	originFor?: (item: SettingsCenterItem) => SettingValueOrigin | null;
+	/** The file that holds a value set by `origin`, for the detailed pane; absent or null names no file. */
+	settingsFileFor?: (origin: SettingValueOrigin) => string | null;
 }
 
 /** The rows lane stops growing here; a label, a value and an origin need no more. */
@@ -3189,7 +3205,7 @@ export class SettingsCenter implements Component {
 				[
 					{ key: "Enter", verb: "open section", short: "open" },
 					...(twoLanes ? [{ key: "Tab", verb: "to rows", short: "rows", critical: true }] : []),
-					{ key: "↑↓", verb: "section", critical: false },
+					{ key: `${GLYPH.up}${GLYPH.down}`, verb: "section", critical: false },
 					filter,
 				],
 				esc,
@@ -3201,7 +3217,7 @@ export class SettingsCenter implements Component {
 			[
 				...(editable ? [{ key: "Enter", verb: "open" }] : []),
 				...(twoLanes ? [{ key: "Tab", verb: "to sections", short: "sections", critical: true }] : []),
-				{ key: "↑↓", verb: "select", critical: false },
+				{ key: `${GLYPH.up}${GLYPH.down}`, verb: "select", critical: false },
 				...(twoLanes && editable && item.values?.length ? [{ key: "Space", verb: "preview", critical: false }] : []),
 				...(twoLanes && isShortcutRow(item) ? [{ key: "*", verb: "pin", critical: false }] : []),
 				filter,
@@ -3602,7 +3618,7 @@ export class SettingsCenter implements Component {
 			.map((leaf) => leaf.path.slice("fleet.agentProfiles.".length));
 		const bindingPreflight =
 			plan.selectedValue === REMOVE_PROFILE_CHOICE
-				? `Affected agent routes: ${affectedBindings.length > 0 ? affectedBindings.join(", ") : "none"} · `
+				? `Affected agent routes: ${affectedBindings.length > 0 ? affectedBindings.join(", ") : "none"} ${GLYPH.sep} `
 				: "";
 		const targetRemovalPreflight = (() => {
 			if (!plan.rowId.startsWith("targets.") || plan.selectedValue !== "remove") return "";
@@ -3613,10 +3629,10 @@ export class SettingsCenter implements Component {
 				.map((leaf) => leaf.path.slice("fleet.profiles.".length).split(".")[0] ?? "profile");
 			const describe = (label: string, affected: readonly string[]): string =>
 				`Affected ${label}: ${affected.length > 0 ? affected.join(", ") : "none"}`;
-			return `${describe("chat route", paths("chat."))} · ${describe("fleet route", paths("fleet.default."))} · ${describe("memory route", paths("context.memory."))} · ${describe("profiles", profiles)} · `;
+			return `${describe("chat route", paths("chat."))} ${GLYPH.sep} ${describe("fleet route", paths("fleet.default."))} ${GLYPH.sep} ${describe("memory route", paths("context.memory."))} ${GLYPH.sep} ${describe("profiles", profiles)} ${GLYPH.sep} `;
 		})();
 		const affected = [...new Set(plan.leaves.map((leaf) => settingsPathLabel(leaf.path)))];
-		const note = `${bindingPreflight}${targetRemovalPreflight}Affects ${affected.join(", ")} · ${plan.impact}`;
+		const note = `${bindingPreflight}${targetRemovalPreflight}Affects ${affected.join(", ")} ${GLYPH.sep} ${plan.impact}`;
 		const card = new SubmenuWrapper(title, list, [{ key: "Enter", verb: "choose" }], note);
 		// Esc backs out one layer, to the value being reviewed; only the Cancel row ends the change.
 		if (back !== undefined) card.escape = back;
@@ -3660,6 +3676,8 @@ export class SettingsCenter implements Component {
 				origin,
 			});
 		})();
+		const detail = tierPolicy().pickerDetail;
+		const file = detail === "pane" && origin !== null ? (this.options.settingsFileFor?.(origin) ?? null) : null;
 		return {
 			sectionLabel: section.label,
 			sectionDescription: SETTINGS_SECTION_DESCRIPTIONS[section.id],
@@ -3672,6 +3690,8 @@ export class SettingsCenter implements Component {
 			pinnable: isShortcutRow(item),
 			rowKeysLive: this.keyOwner() === "rows",
 			...(home ? { homeLabel: home.label } : {}),
+			detail,
+			...(file === null ? {} : { file }),
 		};
 	}
 
@@ -3679,7 +3699,7 @@ export class SettingsCenter implements Component {
 		return {
 			left: Math.min(SECTION_LANE_WIDTH, Math.max(16, Math.floor(width * 0.3))),
 			separator: barSep(clioTheme()),
-			separatorWidth: visibleWidth(" │ "),
+			separatorWidth: visibleWidth(` ${GLYPH.rail} `),
 		};
 	}
 
@@ -3756,7 +3776,7 @@ export class SettingsCenter implements Component {
 			);
 			// `Esc clears` only while the filter is the next thing Esc backs out of; under an open edit or scope card Esc means that layer.
 			const escClears = innermostEscapeLayer(this.escapeLayers())?.verb === "clear filter";
-			const text = `filter “${this.filterQuery}” · ${matches} ${matches === 1 ? "match" : "matches"}${escClears ? " · Esc clears" : ""} · / starts over`;
+			const text = `filter “${this.filterQuery}” ${GLYPH.sep} ${matches} ${matches === 1 ? "match" : "matches"}${escClears ? ` ${GLYPH.sep} Esc clears` : ""} ${GLYPH.sep} / starts over`;
 			return [truncateToWidth(clioTheme().fg("searchQuery", text), width, GLYPH.ellipsis, false)];
 		}
 		// The editor draws its own caret, so the row stops faking one with `_`.
@@ -3772,8 +3792,7 @@ export class SettingsCenter implements Component {
 	private emptyFilterLines(width: number, height: number): string[] {
 		return fitRows(
 			emptyState(clioTheme(), `No settings match “${this.effectiveFilterQuery()}”`, width, {
-				remedy:
-					"/ edits the filter · an empty Enter clears it. Not every setting has a row. Edit settings file lists them all.",
+				remedy: `/ edits the filter ${GLYPH.sep} an empty Enter clears it. Not every setting has a row. Edit settings file lists them all.`,
 			}),
 			width,
 			height,
@@ -3806,7 +3825,9 @@ export class SettingsCenter implements Component {
 			];
 		}
 		const context = this.inspectorContext(rightWidth);
-		const budget = Math.min(INSPECTOR_ROWS, Math.max(0, available - MIN_LIST_ROWS));
+		// The detailed strip adds one row for the file and the scope a change may be saved to.
+		const rows = INSPECTOR_ROWS + (context?.detail === "pane" ? 1 : 0);
+		const budget = Math.min(rows, Math.max(0, available - MIN_LIST_ROWS));
 		const inspector = context ? renderInspector(clioTheme(), context, width, budget) : [];
 		const contentHeight = Math.max(1, available - inspector.length);
 		return [
@@ -3937,6 +3958,8 @@ export class SettingsCenter implements Component {
 		const selected = this.rowIndex(section.id);
 		const labelWidth = settingsLabelWidth(section.items);
 		const selectedId = cursorVisible ? (section.items[selected]?.id ?? null) : null;
+		// The source column (`user`, `default`) is evidence for the value; compact shows the label and value alone.
+		const sourceColumn = tierPolicy().pickerDetail !== "status";
 		const lines: string[] = [];
 		const starts: number[] = [];
 		{
@@ -3961,7 +3984,7 @@ export class SettingsCenter implements Component {
 						displayValue: display.value,
 						pending: display.pending,
 						pinned: this.isPinned(item),
-						origin: this.originFor(item),
+						origin: sourceColumn ? this.originFor(item) : null,
 					}),
 				);
 			});
@@ -4129,6 +4152,28 @@ function settingsBodyHeight(tui: TUI): number {
 	return dockBodyRows(tui);
 }
 
+/**
+ * The file each settings layer reads, home collapsed, resolved once per
+ * origin while the overlay is open: the project lookup walks the directory
+ * tree, and a render must not.
+ */
+function settingsFileResolver(cwd: string): (origin: SettingValueOrigin) => string | null {
+	const files = new Map<SettingValueOrigin, string | null>();
+	const resolveFile = (origin: SettingValueOrigin): string | null => {
+		if (origin === "user") return settingsPath();
+		if (origin !== "project" && origin !== "project.local") return null;
+		const name = origin === "project" ? "settings.yaml" : "settings.local.yaml";
+		return join(clioProjectRoot(cwd, "settings.yaml", "settings.local.yaml"), ".clio-coder", name);
+	};
+	return (origin) => {
+		if (!files.has(origin)) {
+			const file = resolveFile(origin);
+			files.set(origin, file === null ? null : collapseHomePath(file));
+		}
+		return files.get(origin) ?? null;
+	};
+}
+
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): SettingsOverlayHandle {
 	let wizard: OverlayHandle | null = null;
 	const launchWizard = (targetId?: string, byUrl = false): void => {
@@ -4202,6 +4247,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		shortcuts: listSettingsShortcuts(),
 		pinSetting: setSettingPinned,
 		...(deps.settingOrigin ? { originFor: (item) => deps.settingOrigin?.(item.configPath) ?? null } : {}),
+		settingsFileFor: settingsFileResolver(process.cwd()),
 		onApply: (plan, scope) => {
 			if (deps.commitSetting) {
 				let held = false;

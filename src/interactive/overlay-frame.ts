@@ -726,7 +726,9 @@ function fitBody(lines: ReadonlyArray<string>, rowBudget: number, contentWidth: 
 	if (lines.length <= bodyBudget) return lines;
 	const kept = lines.slice(0, bodyBudget - 1);
 	const hidden = lines.length - kept.length;
-	return [...kept, clioTheme().fg("annotation", truncateToWidth(`… ${hidden} more rows`, contentWidth, "", true))];
+	// The marker takes the last kept row's place, so it always stands for two rows or more.
+	const marker = `${GLYPH.ellipsis} ${hidden} more rows`;
+	return [...kept, clioTheme().fg("annotation", truncateToWidth(marker, contentWidth, "", true))];
 }
 
 /**

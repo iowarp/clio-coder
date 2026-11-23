@@ -1,6 +1,7 @@
 import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { stripVTControlCharacters } from "node:util";
+import { setPresentationTier } from "../../src/core/presentation-tier.js";
 import type { LibraryImportPlan } from "../../src/domains/interop/index.js";
 import type { PluginScope } from "../../src/domains/plugins/types.js";
 import type {
@@ -120,7 +121,10 @@ function plain(value: string): string {
 }
 
 describe("library browser projection", () => {
-	it("keeps origin, format, trust and availability as separate facts", () => {
+	it("keeps origin, format, trust and availability as separate facts", (t) => {
+		// Format and the source address are detailed facts.
+		setPresentationTier("detailed");
+		t.after(() => setPresentationTier("standard"));
 		equal(libraryOriginLabel({ kind: "bundled", catalog: "/x" }), "Bundled with CLIO Coder");
 		equal(libraryOriginLabel({ kind: "remote", url: "https://example/x" }), "Remote");
 		equal(libraryOriginLabel({ kind: "local", path: "/x" }), "Local");
@@ -138,9 +142,9 @@ describe("library browser projection", () => {
 			),
 			view: BROWSE,
 		});
-		const meta = plain(rows.items[0]?.meta ?? "");
-		match(meta, /Remote/);
+		// The origin left the row for the pane, where it is its own fact.
 		const detail = plain((rows.items[0]?.detail?.(80) ?? []).join("\n"));
+		match(detail, /Origin\s+Remote/);
 		match(detail, /Claude Code format/);
 		match(detail, /https:\/\/example\/x/);
 	});
@@ -251,12 +255,15 @@ describe("library browser projection", () => {
 		);
 	});
 
-	it("finds a plugin in a component category through its catalog hints, without calling it loaded", () => {
+	it("finds a plugin in a component category through its catalog hints, without calling it loaded", (t) => {
+		// Detailed lists every hinted component by name; standard counts them.
+		setPresentationTier("detailed");
+		t.after(() => setPresentationTier("standard"));
 		const view: LibraryView = { category: "skill", mode: "browse", scope: "user" };
 		const rows = buildLibraryRows({ inventory: selectForCategory(inventory(), view), view });
 		equal(rows.items.length, 1);
 		const detail = plain((rows.items[0]?.detail?.(80) ?? []).join("\n"));
-		match(detail, /Catalog hints \(skill\)\s+skill:materio-lab/);
+		match(detail, /Components\s+\S+\s+1 catalog hint\b[\s\S]*skill\s+materio-lab/);
 		equal(rows.items[0]?.id, "pkg:plugin:materio");
 	});
 

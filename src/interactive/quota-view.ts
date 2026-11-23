@@ -1,3 +1,4 @@
+import { tierPolicy } from "../core/presentation-tier.js";
 import type { QuotaStateV1, RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import type { QuotaSeverity } from "../domains/quota/presentation.js";
@@ -422,20 +423,23 @@ function recordedRoute({ run, enqueued }: RecordedWorkerRun): string {
 	return `${route.targetId} / ${route.wireModelId}${node && node !== "local" ? ` · ${node}` : ""}`;
 }
 
-/** Board rows first, in the board's order; recorded runs the board does not hold follow in the order given. */
+/**
+ * Board rows first, in the board's order; recorded runs the board does not hold follow in the order given. The board's
+ * runs are the Fleet Runs table (6.5) exactly as `runTableRows` returns it, header and dropped-column note included,
+ * so this tab's columns and tier behaviour are the board's at the same measured width.
+ */
 export function renderWorkerUsage(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	recorded: ReadonlyArray<RecordedWorkerRun>,
 	snapshots: QuotaProviders,
 	width: number,
-	style: OutputStyle = "standard",
 ): string[] {
 	const theme = clioTheme();
 	const safe = Math.max(1, Math.floor(width));
 	const onBoard = new Set(rows.map((row) => row.runId));
 	const history = recorded.filter(({ run }) => !onBoard.has(run.row.runId));
 	const out =
-		style === "compact"
+		tierPolicy().usageSections === "totals"
 			? []
 			: [theme.fg("annotation", "Active and recent workers · recorded tokens and cost · account limits are shared.")];
 	if (!rows.length && !history.length) {
@@ -443,20 +447,15 @@ export function renderWorkerUsage(
 		return out;
 	}
 	if (rows.length) {
-		const table = runTableRows(dispatchBoardItems(rows), safe, { quota: snapshots, style });
+		// The board reserves its cursor column; reserving it here too gives the same widths and the same dropped columns.
+		const table = runTableRows(dispatchBoardItems(rows), safe, { quota: snapshots, selectedRunId: null });
 		out.push(
 			sectionRule(theme, safe, "On the board", { meta: `${rows.length} run${rows.length === 1 ? "" : "s"}` }),
 			...table,
 		);
-		// A narrow table drops its cost column first, and that column is what tells these two apart.
-		const said = table.join("\n");
-		const legend = [
-			rows.some((row) => row.usage.kind === "unavailable") && !said.includes(USAGE_NOT_MEASURED)
-				? `n/a ${USAGE_NOT_MEASURED}`
-				: null,
-			rows.some((row) => row.usage.kind === "pending") && !said.includes(USAGE_NO_CALLS) ? `— ${USAGE_NO_CALLS}` : null,
-		].filter((part): part is string => part !== null);
-		if (legend.length > 0) out.push(theme.fg("annotation", legend.join(" · ")));
+		// The board explains a dash in the selected run's facts; this tab has no selection, so it says so once here.
+		if (rows.some((row) => row.usage.kind !== "ready") && table.some((line) => line.includes("—")))
+			out.push(theme.fg("annotation", `— ${USAGE_NOT_MEASURED}, or ${USAGE_NO_CALLS}`));
 		const accounts = new Map<string, string>();
 		for (const row of rows) accounts.set(row.runtimeId, clean(workerQuotaLabel(row, snapshots)));
 		out.push(
@@ -513,5 +512,3 @@ export function renderWorkerUsage(
 	out.push(theme.fg("annotation", "/view dispatch:<run> opens a run's record"));
 	return out.flatMap((line) => wrapTextWithAnsi(theme.base("fieldValue", line), safe));
 }
-
-import type { OutputStyle } from "../core/defaults.js";

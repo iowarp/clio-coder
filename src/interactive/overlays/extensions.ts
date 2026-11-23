@@ -7,6 +7,7 @@
 
 import { readLifecycleReceipts } from "../../core/library-receipts.js";
 import { packageActivityText, recentPackageActivity } from "../../core/package-activity.js";
+import { tierPolicy } from "../../core/presentation-tier.js";
 import { extensionIdentity } from "../../domains/extensions/activity.js";
 import type { InstalledExtension } from "../../domains/extensions/index.js";
 import { promptRefs } from "../../domains/extensions/operator-commands.js";
@@ -21,6 +22,8 @@ import {
 	commandBlock,
 	type Fact,
 	factRows,
+	fitUnits,
+	GLYPH,
 	type StatusKind,
 	statusChip,
 	statusSeverity,
@@ -194,7 +197,13 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					.map(([kind, text]) => statusChip(theme, kind, text));
 			const meta = (): string => {
 				const theme = clioTheme();
-				return stateChips(theme).join(theme.fg("divider", " · "));
+				// From standard the row adds its scope and version as columns after the state, which leads so a narrow
+				// row keeps it.
+				const columns =
+					tierPolicy().pickerDetail === "status"
+						? []
+						: [theme.fg("annotation", ext.scope), theme.fg("annotation", `v${ext.version}`)];
+				return [...stateChips(theme), ...columns].join(theme.fg("divider", ` ${GLYPH.sep} `));
 			};
 			/** What the operator can do about this copy now, said once under its state. */
 			const drifted = ext.diagnostics.some((diagnostic) => /drift/u.test(diagnostic.message));
@@ -219,6 +228,21 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					return meta();
 				},
 				group: SCOPE_GROUP[ext.scope],
+				// The compact status row: the version and scope the row leaves out, then what to do about this copy.
+				summary: (width: number) => {
+					const theme = clioTheme();
+					const hint = next();
+					return fitUnits(
+						theme,
+						"",
+						[
+							theme.fg("annotation", `v${ext.version}`),
+							theme.fg("annotation", ext.scope),
+							...(hint ? [theme.fg("guidance", hint)] : []),
+						],
+						width,
+					);
+				},
 				...detailWithHead((width) => {
 					const theme = clioTheme();
 					const chips = [
@@ -262,22 +286,26 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 						},
 					];
 					if (ext.plugin) facts.push({ label: "Plugin", value: pluginPairing(ext, state) });
+					// Requirements and provenance (confinement, authority, tools, envelope, receipts, activity) are the
+					// detailed tier's; the standard pane keeps what the copy does and why it is not running.
+					const provenance = tierPolicy().pickerDetail === "pane";
 					if (hasRuntime) {
 						facts.push({
 							label: "Runtime",
 							value: runtime?.generation ? `${runtimeWord}, generation ${runtime.generation}` : runtimeWord,
 						});
-						if (ext.runtimeV2)
+						if (ext.runtimeV2 && provenance)
 							facts.push({ label: "Confinement", value: confinement(ext.runtimeV2.permissions.net, runtime?.sandbox) });
-						facts.push({
-							label: "Authority",
-							value: ext.runtimeV2
-								? "Runtime code executes on interactive startup/reload after installation, under Node permissions built from its manifest. Those are a seat belt, not a boundary: a package allowed to run programs has your account's authority except where the OS sandbox confines it."
-								: "Runtime code executes on interactive startup/reload after installation. It has your user account's authority; it is not an OS sandbox.",
-							tone: "muted",
-						});
+						if (provenance)
+							facts.push({
+								label: "Authority",
+								value: ext.runtimeV2
+									? "Runtime code executes on interactive startup/reload after installation, under Node permissions built from its manifest. Those are a seat belt, not a boundary: a package allowed to run programs has your account's authority except where the OS sandbox confines it."
+									: "Runtime code executes on interactive startup/reload after installation. It has your user account's authority; it is not an OS sandbox.",
+								tone: "muted",
+							});
 					}
-					if (ext.capabilities?.tools.length) {
+					if (ext.capabilities?.tools.length && provenance) {
 						facts.push({
 							label: "Tool evidence",
 							value: runtime?.toolEvidence ?? "registry binding unknown in this view",
@@ -288,16 +316,16 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 							value: `${ext.capabilities.tools.map((tool) => tool.name).join(", ")}. Restart the session after changes to refresh tool schemas.`,
 						});
 					}
-					const envelopeDigest = extensionIdentity(raw[index] ?? ext).envelopeDigest;
+					const envelopeDigest = provenance ? extensionIdentity(raw[index] ?? ext).envelopeDigest : undefined;
 					if (envelopeDigest) facts.push({ label: "Envelope", value: `sha256 ${envelopeDigest}`, tone: "muted" });
-					const receipt = displaySafe(readLifecycleReceipts(ext.id, ext.scope, "extension").at(-1));
+					const receipt = provenance ? displaySafe(readLifecycleReceipts(ext.id, ext.scope, "extension").at(-1)) : undefined;
 					if (receipt)
 						facts.push({
 							label: "Last change",
 							value: `${receipt.operation} ${receiptTime(receipt.at)} by ${receipt.actor}; ${receipt.id}@${receipt.version}; digest ${receipt.contentDigest}; operation ${receipt.operationId}`,
 							tone: "muted",
 						});
-					for (const row of displaySafe(recentPackageActivity(ext.id)))
+					for (const row of provenance ? displaySafe(recentPackageActivity(ext.id)) : [])
 						facts.push({ label: "Activity", value: `${row.at} ${packageActivityText(row)}`, tone: "muted" });
 					const hint = next();
 					// The title and the state chips stay pinned while the rest scrolls;

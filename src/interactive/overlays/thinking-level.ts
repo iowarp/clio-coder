@@ -7,6 +7,7 @@
 
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import { buildResponsiveHint, createChoiceList, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { GLYPH } from "../theme/index.js";
 
 export const THINKING_LEVEL_OVERLAY_WIDTH = 56;
 
@@ -30,7 +31,7 @@ export function openThinkingLevelOverlay(tui: TUI, deps: OpenThinkingLevelOverla
 		items: deps.choices.map((choice) => ({
 			value: choice.value,
 			// On the label: a one-line list's frame keeps one row per choice, which cut a description under it.
-			label: choice.value === deps.current ? `${choice.label} · in use` : choice.label,
+			label: choice.value === deps.current ? `${choice.label} ${GLYPH.sep} in use` : choice.label,
 		})),
 		...(currentIndex >= 0 ? { initialIndex: currentIndex } : {}),
 		onSelect: (item) => deps.onPick(item.value),

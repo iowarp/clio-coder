@@ -10,11 +10,7 @@ import { buildFooterDashboard, capabilityLabels } from "../../src/interactive/fo
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import type { Notification } from "../../src/interactive/footer/notifications.js";
 import { formatNotificationPanel } from "../../src/interactive/footer/notifications.js";
-import {
-	dashboardPageViewport,
-	renderCompactDashboard,
-	renderDashboardPage,
-} from "../../src/interactive/footer/pages.js";
+import { dashboardPageViewport, renderCompactDashboard } from "../../src/interactive/footer/pages.js";
 import { dispatchSegment } from "../../src/interactive/footer-panel.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import { GLYPH } from "../../src/interactive/theme/index.js";
@@ -139,8 +135,8 @@ test("footer pages use snapshot time and preserve their row contracts at release
 		const compact = renderCompactDashboard(state, width);
 		strictEqual(compact.length, 2);
 		{
-			const rows = renderDashboardPage(state, width, 240, "Alt+U");
-			strictEqual(rows.length, 8);
+			const rows = dashboardPageViewport(state, width, 240, "Alt+U");
+			strictEqual(rows.length, 6);
 			match(stripTerminalSequences(rows[0] ?? ""), /Dashboard/);
 			for (const row of [...rows, ...compact]) {
 				ok(visibleWidth(row) <= width);
@@ -186,7 +182,8 @@ test("footer totals come from the read model: unknown usage stays partial, never
 				if (scenario === "never-sent") match(text, /(?:0 tok|session 0 tokens) · 1 never sent/u);
 				if (scenario === "golden") {
 					// Two calls have unknown usage; the footer states the bound with the one mark /usage and the exit card use.
-					match(text, /(?:≥5\.3k tok|session ≥5\.3k tokens) · 1 never sent/u);
+					// The glance panel keeps the cost beside the tokens; the never-sent count yields first on a short row.
+					match(text, /session ≥5\.3k tokens · \$0\.01 \+\?/u);
 					ok(!/at least|some calls unknown|~5\.3k/u.test(text));
 					match(text, /\$0\.01 \+\?/u);
 				}
@@ -211,12 +208,9 @@ test("retrying and cancelling workers count as active on every footer surface", 
 	match(dispatchSegment(state.dispatchRows) ?? "", /2 active/u);
 	for (const width of [60, 80, 120, 200]) {
 		const compact = renderCompactDashboard(state, width);
-		const first = dashboardPageViewport(state, width, 240, "Alt+U");
-		const expanded = [...first.rows];
-		for (let offset = 1; offset <= first.maxOffset; offset++)
-			expanded.push(...dashboardPageViewport(state, width, 240, "Alt+U", offset).rows);
+		const expanded = dashboardPageViewport(state, width, 240, "Alt+U");
 		match(compact.map(stripTerminalSequences).join("\n"), /2 workers/u);
-		match(expanded.map(stripTerminalSequences).join("\n"), /2 active/u);
+		match(expanded.map(stripTerminalSequences).join("\n"), /fleet +● 2/u);
 		for (const line of [...compact, ...expanded]) {
 			ok(visibleWidth(line) <= width);
 			for (const tail of line.split(String.fromCharCode(27)).slice(1)) ok(/^\[[0-9;]*m/u.test(tail));

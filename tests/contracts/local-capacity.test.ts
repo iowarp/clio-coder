@@ -249,21 +249,20 @@ describe("fleet.concurrency auto placement surfaces", () => {
 		strictEqual(scheduling.fleet?.get("local")?.capacityBound, "configured");
 	});
 
-	it("names the local worker limit and its binding input on the dashboard's Workers rule", () => {
+	it("names the local worker limit and its binding input on the dashboard's slots fact", () => {
 		const snapshot = footerState();
+		snapshot.outputStyle = "detailed";
 		snapshot.agent.localCapacity = { limit: 2, bound: "memory" };
-		const first = dashboardPageViewport(snapshot, 120, 240, "Alt+U");
-		const rows = [...first.rows];
-		for (let offset = 1; offset <= first.maxOffset; offset++)
-			rows.push(...dashboardPageViewport(snapshot, 120, 240, "Alt+U", offset).rows);
-		match(rows.map(stripTerminalSequences).join("\n"), /Workers ─.*cap 2 · memory/u);
+		const rows = dashboardPageViewport(snapshot, 120, 240, "Alt+U");
+		match(rows.map(stripTerminalSequences).join("\n"), /slots +1\/2 · memory/u);
 	});
 
 	it("names the built-in maximum in words, never as a second bare `cap`", () => {
 		const snapshot = footerState();
+		snapshot.outputStyle = "detailed";
 		snapshot.agent.localCapacity = { limit: 8, bound: "cap" };
-		const text = dashboardPageViewport(snapshot, 120, 240, "Alt+U").rows.map(stripTerminalSequences).join("\n");
-		match(text, /Workers ─.*cap 8 · built-in max/u);
+		const text = dashboardPageViewport(snapshot, 120, 240, "Alt+U").map(stripTerminalSequences).join("\n");
+		match(text, /slots +1\/8 · built-in max/u);
 		strictEqual(/cap 8 · cap\b/u.test(text), false);
 	});
 });
