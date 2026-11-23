@@ -39,8 +39,8 @@ import {
 	statusRailLabelRoom,
 	toolFunction,
 } from "../theme/index.js";
-import { modelNickname } from "../theme/labels.js";
-import { type ContextOccupancyFacts, contextUsagePercent } from "./context-rail.js";
+import { formatWaitClock, modelNickname } from "../theme/labels.js";
+import { type ContextOccupancyFacts, contextReadingQualifier, contextUsagePercent } from "./context-rail.js";
 import type { FooterTelemetry } from "./spend.js";
 
 export interface ToolTallySnapshot {
@@ -183,16 +183,18 @@ export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined, 
 		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 		.slice(0, 4)
 		.map(([name, count]) => `${name} ${formatFooterTokens(count)}`);
-	const called = entries.length > 0 ? entries.join(" · ") : available !== null ? null : "none";
-	const prefix = [available, called].filter((part): part is string => part !== null).join(" · ");
+	const called = entries.length > 0 ? entries.join(` ${GLYPH.dot} `) : available !== null ? null : "none";
+	const prefix = [available, called].filter((part): part is string => part !== null).join(` ${GLYPH.dot} `);
 	const active =
-		typeof snapshot.active === "number" && snapshot.active > 0 ? ` · active ${formatFooterTokens(snapshot.active)}` : "";
+		typeof snapshot.active === "number" && snapshot.active > 0
+			? ` ${GLYPH.dot} active ${formatFooterTokens(snapshot.active)}`
+			: "";
 	const truncated =
 		typeof snapshot.truncatedResults === "number" && snapshot.truncatedResults > 0
-			? ` · trunc ${formatFooterTokens(snapshot.truncatedResults)}`
+			? ` ${GLYPH.dot} trunc ${formatFooterTokens(snapshot.truncatedResults)}`
 			: "";
 	// `1✗` read as a glyph puzzle; a count of failures says what it counts, and none is not worth a chip.
-	const failed = snapshot.errors > 0 ? ` · ${formatFooterTokens(snapshot.errors)} failed` : "";
+	const failed = snapshot.errors > 0 ? ` ${GLYPH.dot} ${formatFooterTokens(snapshot.errors)} failed` : "";
 	return `${prefix}${active}${truncated}${failed}`;
 }
 
@@ -200,7 +202,8 @@ export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined, 
 export function contextUsageText(context: ContextEngineFacts): string {
 	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
 	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
-	const source = context.budget?.inputSource === "historical" ? "saved " : context.budget && used !== null ? "~" : "";
+	const qualifier = contextReadingQualifier({ ...(context.budget ? { budget: context.budget } : {}), used });
+	const source = qualifier === "" ? "" : qualifier === GLYPH.estimate ? qualifier : `${qualifier} `;
 	return `${source}${used === null ? "?" : formatFooterTokens(used)} / ${window ? formatFooterTokens(window) : "unknown"}`;
 }
 
@@ -251,7 +254,7 @@ export function formattedThroughput(
 	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
 	const parts = [
 		tps > 0
-			? `${theme.fg("metricValue", `${GLYPH.speed}${estimated ? "≈" : ""}${rounded}`)} ${theme.fg("metricUnit", "tok/s")}`
+			? `${theme.fg("metricValue", `${GLYPH.speed}${estimated ? GLYPH.estimate : ""}${rounded}`)} ${theme.fg("metricUnit", "tok/s")}`
 			: null,
 		settled?.ttft ? `${theme.fg("fieldName", "ttft")} ${theme.fg("counter", settled.ttft)}` : null,
 	];
@@ -275,7 +278,9 @@ export function liveTokenValue(
 	// The whole prompt, cached reads included, so it is labelled `prompt`: `in` is the uncached input everywhere (bt-11).
 	const prompt = context > 0 ? formatFooterTokens(context) : turnPrompt;
 	const parts = [
-		output > 0 ? theme.fg("counter", `out ${throughput?.estimated ? "≈" : ""}${formatFooterTokens(output)}`) : null,
+		output > 0
+			? theme.fg("counter", `out ${throughput?.estimated ? GLYPH.estimate : ""}${formatFooterTokens(output)}`)
+			: null,
 		prompt !== null ? theme.fg("counter", `prompt ${prompt}`) : null,
 	];
 	const joined = joinChips(theme, parts);
@@ -313,7 +318,7 @@ export function lastTurnDetails(
 				turn.output === null ? null : `out ${turn.output}`,
 			]
 				.filter(Boolean)
-				.join(" · ")
+				.join(` ${GLYPH.dot} `)
 		: "";
 	const cache = turn
 		? [
@@ -326,7 +331,7 @@ export function lastTurnDetails(
 				turn.cacheWrite === null || turn.cacheWrite === "0" ? null : `write ${turn.cacheWrite}`,
 			]
 				.filter(Boolean)
-				.join(" · ")
+				.join(` ${GLYPH.dot} `)
 		: "";
 	const parts: Array<string | null> = [
 		turn ? (measured ? theme.fg("counter", measured) : theme.fg("annotation", "usage not measured (/usage)")) : null,
@@ -345,7 +350,7 @@ export function lastTurnDetails(
 
 export function meaningfulToolTally(value: string): string | null {
 	const text = value.trim();
-	return text === "none" || text === `none · 0${GLYPH.error}` || text === `0${GLYPH.error}` ? null : value;
+	return text === "none" || text === `none ${GLYPH.dot} 0${GLYPH.error}` || text === `0${GLYPH.error}` ? null : value;
 }
 
 /** Task-board progress chips: `2/5 done`, with a warning chip when tasks are blocked. */
@@ -493,7 +498,7 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 			const seconds = Math.max(0, Math.floor((now - status.lastMeaningfulAt) / 1000));
 			return {
 				glyph: GLYPH.warn,
-				label: ultraNarrow ? "No output" : `No output · ${seconds}s`,
+				label: ultraNarrow ? "No output" : `No output ${GLYPH.dot} ${seconds}s`,
 				token: "warning",
 				live: false,
 			};
@@ -532,9 +537,8 @@ const HARNESS_TOOL_ACTIVITY: Readonly<Record<string, { verb: string; bare: strin
 /** Below this terminal width a running call names its actor in the short form, the same on the rail and the strip. */
 const TOOL_ACTOR_TIGHT_WIDTH = 70;
 
-/** These calls leave the next step with a person or a worker, so the model's turn is what is waiting. */
+/** These calls leave the next step with a person, so the model's turn is what is waiting; a worker wait has its own label. */
 const MODEL_OWNED_TOOL_ACTIVITY: Readonly<Record<string, string>> = {
-	[ToolNames.Dispatch]: "is waiting for a worker",
 	[ToolNames.AskUser]: "needs input",
 };
 
@@ -658,13 +662,50 @@ export function compactionRailLabel(
 	// The tight form keeps its verb, so a named subject still reads as a sentence (`Judge-model summarizing`).
 	const [head, tight] = words ?? ["is compacting context", "is compacting"];
 	const elapsedMs = facts ? Math.max(0, now - facts.startedAtMs) : 0;
-	const elapsed = Math.floor(elapsedMs / 1000);
 	return fitRailFacts(
 		[
 			{ text: room >= 40 ? head : tight, keep: 9 },
-			// Past ten seconds the clock reads as the transcript instrument's does, so the two never disagree by a second.
-			{ text: elapsed < 1 ? null : elapsed < 10 ? `${elapsed}s` : formatElapsed(elapsedMs), keep: 8 },
+			// The live clock reads as the transcript instrument's does, so the two never disagree by a second.
+			{ text: elapsedMs < 1000 ? null : formatWaitClock(elapsedMs), keep: RAIL_CLOCK_KEEP },
 			{ ...ESC_CANCELS, text: facts?.phase === "state" ? null : ESC_CANCELS.text, keep: RAIL_ACTION_KEEP },
+		],
+		room,
+		subject,
+	);
+}
+
+/** A wait's clock gives way before its Esc verb, which is the last unit to drop (4.1), and after the actor's name. */
+const RAIL_CLOCK_KEEP = 6.9;
+
+/** Under this a wait shows no clock: every wait of 2 s or longer carries its elapsed time (4.1). */
+const WAIT_CLOCK_FROM_MS = 2000;
+
+/**
+ * The top rail while the turn waits on dispatched workers: `is waiting for 2 workers · 18s · Esc stops`. It names a
+ * count and never a worker's phase, because the fleet dock lists those. A count the caller does not know reads `a
+ * worker`. The Esc verb outlasts the clock, the clock outlasts the actor's name.
+ */
+export function workerWaitRailLabel(
+	workers: number | null,
+	elapsedMs: number | null,
+	room: number,
+	subject?: RailSubject,
+): string {
+	const count = workers !== null && Number.isFinite(workers) && workers > 1 ? Math.floor(workers) : null;
+	const object = count === null ? "a worker" : `${count} workers`;
+	// A survival-width rail keeps the clock and the way out beside a bare state, as `running · 13s · Esc stops` does.
+	const head =
+		room >= 30
+			? { text: `is waiting for ${object}`, short: `waiting for ${object}` }
+			: { text: `awaits ${object}`, short: "waiting" };
+	return fitRailFacts(
+		[
+			{ ...head, keep: 9 },
+			{
+				text: elapsedMs !== null && elapsedMs >= WAIT_CLOCK_FROM_MS ? formatWaitClock(elapsedMs) : null,
+				keep: RAIL_CLOCK_KEEP,
+			},
+			{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
 		],
 		room,
 		subject,
@@ -1022,11 +1063,17 @@ function toolActivity(
 	modelName: string | undefined,
 	slot: RailSubject | undefined,
 	width: number,
+	/** Live workers the turn waits on, when the caller knows them. */
+	workers: number | null = null,
 ): { label: string; subject?: string } {
 	const tool = status.tool;
 	const mine = tool?.operatorShell === true;
 	const name = tool?.toolName ?? "tool";
 	const owned = MODEL_OWNED_TOOL_ACTIVITY[name];
+	if (name === ToolNames.Dispatch && !mine) {
+		const from = tool?.startedAt ?? status.toolStartedAt;
+		return { label: workerWaitRailLabel(workers, from === undefined ? null : now - from, room, slot) };
+	}
 	if (owned !== undefined && !mine) return { label: fitRailFacts([{ text: owned, keep: 9 }], room, slot) };
 	const activity = Object.hasOwn(HARNESS_TOOL_ACTIVITY, name) ? HARNESS_TOOL_ACTIVITY[name] : undefined;
 	const object = tool?.toolSubject ?? null;
@@ -1117,6 +1164,8 @@ export function composerPhasePresentation(
 	compaction?: CompactionRailFacts | null,
 	/** The target the request goes to, by its configured name. */
 	target?: string,
+	/** Live workers the turn waits on during a dispatch; the rail names the count, never their phases. */
+	workers?: number | null,
 ): RailPhasePresentation {
 	const phase = footerPhasePresentation(status, width, now);
 	const room = labelRoom ?? railActivityRoom(width, reserved);
@@ -1225,7 +1274,7 @@ export function composerPhasePresentation(
 			]);
 			break;
 		case "tool_running": {
-			const activity = toolActivity(status, room, now, null, elapsedFrom, modelName, slot, width);
+			const activity = toolActivity(status, room, now, null, elapsedFrom, modelName, slot, width, workers ?? null);
 			return done({ ...phase, ...activity });
 		}
 		case "tool_blocked":
@@ -1238,16 +1287,15 @@ export function composerPhasePresentation(
 			label = compactionRailLabel(compaction ?? null, room, now, slot);
 			break;
 		case "dispatching":
-			label = fit([
-				// A narrow rail keeps the way out beside a shorter wait rather than the long wait alone.
-				{ text: "is waiting for a worker", short: "awaits a worker", keep: 9 },
-				{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
-			]);
+			label = workerWaitRailLabel(workers ?? null, now - (status.phaseSince ?? status.since), room, slot);
 			break;
 		case "stuck":
 			if (status.resumePhase === "tool_running" && status.tool) {
 				// Its own process has gone quiet, which is not the model having no output.
-				return done({ ...phase, ...toolActivity(status, room, now, null, elapsedFrom, modelName, slot, width) });
+				return done({
+					...phase,
+					...toolActivity(status, room, now, null, elapsedFrom, modelName, slot, width, workers ?? null),
+				});
 			}
 			if (status.resumePhase === "retrying" && status.retry) {
 				label = retryRailLabel(status, room, now, elapsedFrom, slot, server);
@@ -1529,7 +1577,7 @@ export function shellSettledPresentation(
 			...(outcome.tail ? [outcome.tail] : []),
 			// The way to another model goes with the blocker it answers, whole or not at all.
 			{
-				text: routeNote === null ? null : `${routeNote} · ${MODEL_SWITCHES.text}`,
+				text: routeNote === null ? null : `${routeNote} ${GLYPH.dot} ${MODEL_SWITCHES.text}`,
 				...(routeNote === null ? {} : { short: routeNote }),
 				keep: 4,
 			},
@@ -1598,7 +1646,7 @@ export function buildHarnessStatePill(
 	// prefixing it with an idle glyph.
 	if (status.phase === "idle") {
 		const idle = theme.fg("counter", `${GLYPH.queued} Idle`);
-		return badge ? `${idle} ${theme.fg("annotation", "·")} ${badge}` : idle;
+		return badge ? `${idle} ${theme.fg("annotation", GLYPH.dot)} ${badge}` : idle;
 	}
 	const phase = footerPhasePresentation(status, safeWidth, now);
 	// A live phase leads with the animated spinner; the spinner stands in for the
@@ -1606,5 +1654,5 @@ export function buildHarnessStatePill(
 	// for the attention states and ended forms; idle returned quietly above.
 	const lead = phase.live ? spinnerFrame(tick) : phase.glyph;
 	const mainPill = theme.style(phase.token, `${lead} ${phase.label}`);
-	return badge ? `${mainPill} ${theme.fg("annotation", "·")} ${badge}` : mainPill;
+	return badge ? `${mainPill} ${theme.fg("annotation", GLYPH.dot)} ${badge}` : mainPill;
 }

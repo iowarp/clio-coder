@@ -3,7 +3,9 @@ import { test } from "node:test";
 import { stripTerminalSequences, type Terminal, TuiMainScreen, visibleWidth } from "../../src/engine/tui.js";
 import { ClioEditor } from "../../src/interactive/clio-editor.js";
 import { renderEditorRail } from "../../src/interactive/editor-rails.js";
-import { createClioTheme } from "../../src/interactive/theme/index.js";
+import { contextRailGroup, contextRailUnit, thinkingRailUnit } from "../../src/interactive/footer/context-rail.js";
+import { compactionRailLabel, workerWaitRailLabel } from "../../src/interactive/footer/widgets.js";
+import { createClioTheme, statusRailLabelRoom } from "../../src/interactive/theme/index.js";
 
 const theme = createClioTheme({ color: true, truecolor: true });
 test("rails preserve width and decision labels across animated and static phases", () => {
@@ -106,4 +108,61 @@ test("a working rail steps with the shared animation clock, and the approval cue
 	now = 1_700;
 	notStrictEqual(working.render(80)[0], firstWorking);
 	strictEqual(approval.render(80)[0], firstApproval);
+});
+test("rail content: the context and thinking group keeps ctx last and drops units in the 4.1 order (W1-2)", () => {
+	const thinking = { label: "low", hasLevels: true, supportedLevels: ["off", "low", "medium", "high"] };
+	const live = (used: number, inputSource: "anchored-plus-estimated-tail" | "historical" | "estimated") => ({
+		budget: { revision: "r1", historical: inputSource === "historical", inputSource },
+		used,
+		contextWindow: 272_000,
+		toolSchemaTokens: 4_000,
+		breakdown: { systemPromptTokens: 3_000, toolSchemaTokens: 4_000, messageTokens: used - 7_000, pendingUserTokens: 0 },
+	});
+	const room = (width: number) => Math.max(1, width - Math.min(16, Math.floor(width / 3)) - 3);
+	const group = (context: Parameters<typeof contextRailGroup>[1]["context"], width: number) => {
+		const row = contextRailGroup(theme, { context, thinking }, room(width), width);
+		ok(visibleWidth(row) <= room(width), `${width}: ${row}`);
+		return stripTerminalSequences(row);
+	};
+	strictEqual(group(live(16_800, "anchored-plus-estimated-tail"), 80), "ctx ▰▱▱▱▱▱ 6% · low ● ○ ○ ○");
+	strictEqual(group(live(16_800, "anchored-plus-estimated-tail"), 120), "ctx ▰▱▱▱▱▱▱▱▱▱ 16.8k/272k 6% · low ● ○ ○ ○");
+	strictEqual(group(live(10_900, "anchored-plus-estimated-tail"), 33), "ctx 4% · think low");
+	strictEqual(group(live(223_000, "anchored-plus-estimated-tail"), 80), "ctx ▰▰▰▰▰▱ 82% high · low ● ○ ○ ○");
+	strictEqual(group(live(261_200, "anchored-plus-estimated-tail"), 80), "ctx ▰▰▰▰▰▰ 96% full · low ● ○ ○ ○");
+	strictEqual(group(live(223_000, "historical"), 80), "ctx ▰▰▰▰▰▱ saved 82% high · low ● ○ ○ ○");
+	strictEqual(group(live(16_800, "historical"), 120), "ctx ▰▱▱▱▱▱▱▱▱▱ saved 16.8k/272k 6% · low ● ○ ○ ○");
+	strictEqual(group(live(16_800, "estimated"), 120), "ctx ▰▱▱▱▱▱▱▱▱▱ ≈16.8k/272k 6% · low ● ○ ○ ○");
+	const fresh = {
+		budget: { revision: "r1", historical: false, inputSource: "unknown" as const },
+		used: null,
+		contextWindow: 272_000,
+		toolSchemaTokens: null,
+	};
+	strictEqual(group(fresh, 80), "ctx 272k · low ● ○ ○ ○");
+	// Narrowing drops the marks (the word stays), then the bar, then the word; `ctx N%` stands last.
+	const context = live(16_800, "anchored-plus-estimated-tail");
+	const fitted = (cells: number) => stripTerminalSequences(contextRailGroup(theme, { context, thinking }, cells, 80));
+	strictEqual(fitted(20), "ctx ▰▱▱▱▱▱ 6% · low");
+	strictEqual(fitted(18), "ctx 6% · think low");
+	strictEqual(fitted(8), "ctx 6%");
+	strictEqual(stripTerminalSequences(contextRailUnit(context, theme, { bar: 0, pair: true })), "ctx 16.8k/272k 6%");
+	strictEqual(stripTerminalSequences(thinkingRailUnit(theme, thinking, "labelled") ?? ""), "think low");
+});
+test("rail content: worker waits name a count and a clock, and Esc stops outlasts both (W1-2)", () => {
+	for (const [width, expected] of [
+		[120, "is waiting for 2 workers · 18s · Esc stops"],
+		[80, "is waiting for 2 workers · 18s · Esc stops"],
+		[48, "waiting for 2 workers · 18s · Esc stops"],
+		[33, "waiting · 18s · Esc stops"],
+	] as const) {
+		const room = statusRailLabelRoom(width) - 2;
+		const label = workerWaitRailLabel(2, 18_400, room, { name: "GPT-6-luna", shown: false });
+		strictEqual(label, expected);
+		ok(visibleWidth(label) <= room);
+	}
+	strictEqual(workerWaitRailLabel(2, 1_500, 60), "is waiting for 2 workers · Esc stops");
+	for (const width of [120, 80, 48]) {
+		const label = compactionRailLabel({ phase: "summarize", startedAtMs: 0 }, statusRailLabelRoom(width) - 2, 5_200);
+		strictEqual(label, "is summarizing history · 5s · Esc stops");
+	}
 });
