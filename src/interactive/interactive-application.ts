@@ -2228,7 +2228,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	applicationController = createInteractiveInputRuntime({
 		tui,
 		...(workspaceSurfaces ? { extraLeaderTargets: () => workspaceSurfaces.leaderTargets() } : {}),
-		scrollFooter: (delta) => footer.scroll(delta),
 		hasQueuedMessages: () => {
 			const queue = deps.chat.queuedMessages();
 			return queue.steer.length + queue.followUp.length > 0;

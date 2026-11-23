@@ -601,28 +601,6 @@ function progressActionLine(
 	return cardUnitsLine(theme, "doing", units, contentWidth);
 }
 
-/** Live dashboard detail shares the board's redacted actions and contract-aware answer rendering. */
-export function renderDispatchActivity(row: DispatchBoardRow, width: number): string[] {
-	const theme = clioTheme();
-	const progress = row.progress;
-	if (!progress) return [];
-	const lines: string[] = [];
-	// The inline card's and the dock's words for the same phase, so the three surfaces never disagree.
-	// A running call is what the worker is doing now; without one, the phase says it.
-	const phase = workerPhaseActivity(progress)[1];
-	const words = progress.currentAction
-		? actionPhrase(progress.currentAction, "running")
-		: `${phase.charAt(0).toUpperCase()}${phase.slice(1)}`;
-	lines.push(...wrapTextWithAnsi(`${theme.fg("harnessHeading", "Now")}  ${words}`, width));
-	for (const action of progress.recentActions.slice(0, 3))
-		lines.push(...wrapTextWithAnsi(`${theme.fg("annotation", "Recent")}  ${actionPhrase(action, "finished")}`, width));
-	if (progress.tailText.trim()) {
-		lines.push(theme.fg("annotation", progress.settled ? "Worker output" : "Live response · provisional"));
-		lines.push(...progressAnswerLines(theme, progress, row.runId, width, row, 3));
-	}
-	return lines;
-}
-
 /**
  * The `answer` block: the newest rows of the worker's bounded prose on a rail,
  * then what is not shown and where to read it. Wrapping happens before the row

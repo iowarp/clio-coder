@@ -114,22 +114,14 @@ test("the machine block splits its meters only when wide and names its sampling"
 	}
 });
 
-test("small dashboard viewports scroll the one page without exceeding their row budget", () => {
+test("small terminals shrink the dashboard to a third of their rows and it never scrolls", () => {
 	const state = footerState();
 	for (const width of [24, 40, 60, 120]) {
 		for (const height of [12, 18, 24, 30, 40]) {
-			const first = dashboardPageViewport(state, width, height, "Alt+U");
-			const rows = [...first.rows];
-			for (let offset = 1; offset <= first.maxOffset; offset++) {
-				const next = dashboardPageViewport(state, width, height, "Alt+U", offset);
-				strictEqual(next.rows.length, first.rows.length);
-				rows.push(...next.rows);
-			}
-			ok(first.rows.length <= 8);
+			const rows = dashboardPageViewport(state, width, height, "Alt+U");
+			strictEqual(rows.length, Math.max(3, Math.min(6, Math.floor(height / 3))));
 			for (const row of rows) ok(visibleWidth(row) <= width);
-			const last = dashboardPageViewport(state, width, height, "Alt+U", Number.MAX_SAFE_INTEGER);
-			strictEqual(last.offset, last.maxOffset);
-			strictEqual(dashboardPageViewport(state, width, height, "Alt+U", -100).offset, 0);
+			doesNotMatch(rows.map(stripTerminalSequences).join("\n"), /of \d+ rows|Alt\+PgUp/u);
 		}
 	}
 });

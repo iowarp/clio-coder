@@ -7,11 +7,7 @@ import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } 
 import type { FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
-import {
-	dashboardPageViewport,
-	renderCompactDashboard,
-	renderDashboardPage,
-} from "../../src/interactive/footer/pages.js";
+import { dashboardPageViewport, renderCompactDashboard } from "../../src/interactive/footer/pages.js";
 import { footerTelemetry } from "../../src/interactive/footer/spend.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import {
@@ -92,35 +88,31 @@ function state(): FooterDashboardRenderState {
 	};
 }
 const plain = (rows: string[]) => rows.map(stripTerminalSequences).join("\n");
-/** Expanded pages are a bounded viewport that scrolls, so content checks read every scroll position. */
-function scrolled(snapshot: FooterDashboardRenderState, width: number, rows: number): string[] {
-	const first = dashboardPageViewport(snapshot, width, rows, "alt+u", 0);
-	const all = [...first.rows];
-	for (let offset = 1; offset <= first.maxOffset; offset += 1)
-		all.push(...dashboardPageViewport(snapshot, width, rows, "alt+u", offset).rows);
-	return all;
+/** The dashboard is one fixed glance panel; it never scrolls, so one render holds every row it shows. */
+function page(snapshot: FooterDashboardRenderState, width: number, rows: number): string[] {
+	return dashboardPageViewport(snapshot, width, rows, "Alt+U");
 }
 
-test("the dashboard is one glance page: agents, one context line, one spend line and where the detail lives", () => {
+test("the dashboard is one glance panel: turn, session and fleet blocks and where the detail lives", () => {
 	for (const width of [40, 80, 120, 172]) {
-		const rows = renderDashboardPage(state(), width, 40, "Alt+U");
+		const rows = page(state(), width, 40);
 		ok(
 			rows.every((line) => visibleWidth(line) <= width),
 			`${width}`,
 		);
-		ok(rows.length <= 8, `${width} exceeded footer budget`);
+		strictEqual(rows.length, 6, `${width}: standard is four content rows between two rules`);
 		match(plain(rows), /Alt\+U/);
+		doesNotMatch(plain(rows), /Alt\+PgUp|of \d+ rows/);
 	}
-	const activity = plain(scrolled(state(), 172, 120));
-	match(activity, /scout/);
-	match(activity, /internal agent/);
-	match(activity, /Explore the dispatch/);
-	doesNotMatch(activity, /context 17k/);
-	match(activity, /blade\/mini\/qwopus/);
-	match(activity, /\/ 262\.1k · 26\.1%/);
-	match(activity, /ceiling/);
-	doesNotMatch(activity, /Connections ─|Machine ─|Composition/);
-	match(plain(renderDashboardPage(state(), 172, 120, "Alt+U")), /\/context · \/usage · \/fleet for detail/);
+	const glance = plain(page(state(), 172, 120));
+	match(glance, /^Dashboard ─/);
+	match(glance, /fleet +● 1 running/);
+	match(glance, /● ◆ ↳ scout +12s +Explore the dispatch/);
+	doesNotMatch(glance, /context 17k/);
+	match(glance, /context +▰.*68\.5k\/262k 26%/);
+	match(glance, /limit +unknown/);
+	doesNotMatch(glance, /Connections ─|Machine ─|Composition/);
+	match(glance, /\[Alt\+U\] close · \/usage · \/context · \/fleet ─$/);
 });
 
 test("the resolved dashboard shortcut opens the page and closes it again without capturing text", () => {
@@ -139,9 +131,9 @@ test("the resolved dashboard shortcut opens the page and closes it again without
 		const modes = [footer.toggleExpanded()];
 		const text = plain(footer.view.render(120));
 		match(text, /Dashboard/);
-		match(text, /Ctrl\+U → close/);
+		match(text, /\[Ctrl\+U\] close/);
 		modes.push(footer.toggleExpanded());
-		deepStrictEqual(modes, ["expanded", "compact"]);
+		deepStrictEqual(modes, ["open", "closed"]);
 		strictEqual(footer.isExpanded(), false);
 	} finally {
 		footer.dispose();
@@ -205,19 +197,20 @@ test("Activity gives two live agents full-width tasks and distinct work measurem
 		{ ...row, taskSummary: task },
 		{ ...row, runId: "second-scout", taskSummary: "Inspect the dashboard telemetry." },
 	]);
-	const text = plain(scrolled(snapshot, 160, 120));
-	match(text, /Read the interview implementation/);
-	match(text, /Inspect the dashboard telemetry\./);
-	match(text, /\b68\.0k\s+2\.0k\b/);
+	const text = plain(page(snapshot, 160, 120));
+	match(text, /scout +12s +Read the interview/);
+	match(text, /scout +12s +Inspect the dashboard telemetry\./);
 	doesNotMatch(text, /Work.*context 17k \/ 262\.1k/);
 });
 
-test("Activity retains fast tool actions between calls and shows live worker output", () => {
+test("the dashboard keeps its height while a worker streams and leaves live worker output to /fleet", () => {
 	const snapshot = state();
 	const progress = createWorkerProgressFold();
 	const render = () => {
 		snapshot.dispatchRows = snapshot.dispatchRows.map((row) => ({ ...row, progress: progress.snapshot() }));
-		return plain(scrolled(snapshot, 160, 120));
+		const rows = page(snapshot, 160, 120);
+		strictEqual(rows.length, 6);
+		return plain(rows);
 	};
 	progress.observe({
 		type: "clio_coder_tool_start",
@@ -227,23 +220,18 @@ test("Activity retains fast tool actions between calls and shows live worker out
 			action: { verb: "reading", object: "src/interactive/overlays/ask-user.ts" },
 		},
 	});
-	match(render(), /Now.*reading src\/interactive\/overlays\/ask-user\.ts/);
+	match(render(), /● ◆ ↳ scout +12s +Explore the dispatch/);
 	progress.observe({ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId: "read1" } });
-	match(render(), /Recent.*ask-user\.ts/);
-	match(render(), /Now +Waiting on the model/);
 	progress.observe({
 		type: "message_update",
 		assistantMessageEvent: { type: "thinking_delta", delta: "private reasoning must never render" },
 	});
-	match(render(), /Now.*Thinking/);
 	doesNotMatch(render(), /private reasoning/);
 	progress.observe({
 		type: "message_update",
 		assistantMessageEvent: { type: "text_delta", delta: "Found the question navigation handlers." },
 	});
-	match(render(), /Now +Writing/);
-	match(render(), /Found the question navigation handlers/);
-	match(render(), /Live response · provisional/);
+	doesNotMatch(render(), /Found the question navigation handlers|Live response/);
 });
 
 test("the footer exposes workspace, model identity and worker count in bounded rows of the tier's height", () => {
@@ -279,32 +267,34 @@ test("finished agents collapse into bounded history while retries retain live ca
 			taskSummary: "Historical verbose task must not render",
 		})),
 	];
-	const text = plain(scrolled(snapshot, 160, 120));
-	match(text, /Active retry task/);
-	match(text, /Workers ─.*1 active · 8 done/);
-	match(text, /✓ done.*scout.*68\.0k\s+2\.0k.*\/view dispatch:done-0/);
-	match(text, /4 more finished runs/);
-	doesNotMatch(text, /Historical verbose task/);
+	const rows = page(snapshot, 160, 120);
+	strictEqual(rows.length, 6, "nine runs never grow the panel");
+	const text = plain(rows);
+	// Counts worst first: a settled run with no verified record is never ok (6.1).
+	match(text, /fleet +! 8 unverified · ● 1/);
+	strictEqual(
+		text.split("\n").filter((line) => /[!●✓] ◆ ↳ scout/u.test(line)).length,
+		3,
+		"the fleet block holds three run rows",
+	);
 	snapshot.dispatchRows = [{ ...row, status: "failed", outcomeDetail: "result_contract_exhausted" }];
-	const settled = plain(scrolled(snapshot, 86, 75));
-	match(settled, /Workers ─.*1 failed/);
-	match(settled, /failed.*scout/);
-	match(settled, /result_contract_exhausted.*\/view dispatch:scout-run/);
+	const settled = plain(page(snapshot, 86, 75));
+	match(settled, /fleet +✗ 1 failed/);
 	doesNotMatch(settled, /AGENT ACTIVITY|Task |Recent |Worker output|Budget /);
+	const wide = plain(page(snapshot, 160, 75));
+	match(wide, /✗ ◆ ↳ scout +12s +result_contract_exhausted/);
 });
 
-test("expanded pages have identical viewport-relative height across widths and lifecycle changes", () => {
+test("the dashboard has the tier's height, reduced to a third of the terminal, across widths and lifecycle changes", () => {
 	for (const width of [40, 86, 160])
-		for (const height of [24, 40, 75, 93]) {
+		for (const height of [12, 15, 24, 40, 75, 93]) {
 			const snapshot = state();
-			const rows = renderDashboardPage(snapshot, width, height, "alt+u");
-			strictEqual(rows.length, Math.max(6, Math.min(8, Math.floor(height / 3))));
+			const expected = Math.max(3, Math.min(6, Math.floor(height / 3)));
+			const rows = page(snapshot, width, height);
+			strictEqual(rows.length, expected);
 			ok(rows.every((row) => visibleWidth(row) <= width));
 			snapshot.dispatchRows = [];
-			strictEqual(
-				renderDashboardPage(snapshot, width, height, "alt+u").length,
-				Math.max(6, Math.min(8, Math.floor(height / 3))),
-			);
+			strictEqual(page(snapshot, width, height).length, expected);
 		}
 });
 
@@ -442,9 +432,10 @@ test("worker cards and Status distinguish shared account limits from recorded se
 		runtimeId: "claude-code",
 		runtimeKind: "subprocess",
 	}));
-	const activity = plain(scrolled(snapshot, 160, 120));
-	match(activity, /Account.*Shared claude-code.*91% used/);
-	match(activity, /tools 19 available · ceiling unknown/);
+	// A worker's shared account is a run fact for Fleet Runs; the glance panel keeps the session's own limit.
+	const glance = plain(page(snapshot, 160, 120));
+	match(glance, /limit +unknown/);
+	doesNotMatch(glance, /Shared claude-code/);
 });
 
 test("compact quota stays beside the selected model while workspace and rotating hints remain visible", () => {

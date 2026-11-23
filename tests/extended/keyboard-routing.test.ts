@@ -68,7 +68,7 @@ afterEach(async () => {
 	for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 const noop = () => {};
-function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter?: (delta: number) => boolean) {
+function fixture(overrides: Record<string, string | string[]> = {}) {
 	const previousKeys = getKeybindings();
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.interface.keybindings = overrides;
@@ -140,7 +140,6 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 	};
 	const controller = createInteractiveInputRuntime({
 		tui,
-		...(scrollFooter ? { scrollFooter } : {}),
 		keybindings: keys,
 		dispatchAction: dispatchInteractiveAction,
 		actions: {
@@ -943,7 +942,7 @@ it("Interop x asks once before it declines a proposal; another key keeps the row
 	assert.deepEqual(declined, ["claude-code"]);
 });
 
-it("scrolls the expanded footer with a draft while overlays and search retain keyboard ownership", () => {
+it("leaves the open dashboard and the draft as they were on Alt+PgUp and Alt+PgDn", () => {
 	const footer = buildFooterDashboard({
 		providers: { list: () => [] } as never,
 		getTerminalColumns: () => 40,
@@ -951,45 +950,15 @@ it("scrolls the expanded footer with a draft while overlays and search retain ke
 		resolveCurrentBranch: async () => null,
 	});
 	cleanups.push(() => footer.dispose());
-	const deltas: number[] = [];
-	const f = fixture({}, (delta) => {
-		deltas.push(delta);
-		return footer.scroll(delta);
-	});
+	const f = fixture();
 	f.editor.setText("keep this draft");
 	footer.setExpanded(true);
 	const before = footer.view.render(40);
 	f.terminal.input("\x1b[6;3~");
-	assert.notDeepEqual(footer.view.render(40), before);
-	assert.equal(f.editor.getText(), "keep this draft");
 	f.terminal.input("\x1b[5;3~");
-	assert.deepEqual(footer.view.render(40), before);
-	assert.deepEqual(deltas, [4, -4]);
-	f.open("skills-hub");
-	f.terminal.input("\x1b[6;3~");
-	assert.deepEqual(deltas, [4, -4]);
-	f.close();
-	f.terminal.input("\x12");
-	f.terminal.input("\x1b[6;3~");
-	assert.deepEqual(deltas, [4, -4]);
-	f.terminal.input("\x1b");
-	const reached = [...footer.view.render(40)];
-	let settled = false;
-	for (let press = 0; press < 100; press++) {
-		const previous = footer.view.render(40);
-		f.terminal.input("\x1b[6;3~");
-		const current = footer.view.render(40);
-		reached.push(...current);
-		if (JSON.stringify(current) === JSON.stringify(previous)) {
-			settled = true;
-			break;
-		}
-	}
-	assert.ok(settled, "scrolling reaches a bounded end");
-	const content = reached.map(stripTerminalSequences).join("\n");
-	for (const label of ["context", "spend", "Workers", "No workers yet"])
-		assert.match(content, new RegExp(label), "the shortest viewport leaves no dashboard row unreachable");
+	assert.deepEqual(footer.view.render(40), before, "the dashboard never scrolls");
 	assert.equal(f.editor.getText(), "keep this draft");
+	assert.doesNotMatch(before.map(stripTerminalSequences).join("\n"), /Alt\+PgUp|of \d+ rows/);
 });
 it("keeps pointer and focus reports out of key routing, at boot and after it", async () => {
 	const motion = "\x1b[<35;10;5M";

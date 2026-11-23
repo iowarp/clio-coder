@@ -10,73 +10,57 @@
  */
 
 import { clioBuildLabel } from "../../core/build-info.js";
-import { presentationTier, tierPolicy } from "../../core/presentation-tier.js";
+import { type FillSource, formatFill } from "../../core/format-time.js";
+import { presentationTier, type TierPolicy, tierPolicy } from "../../core/presentation-tier.js";
+import {
+	compareRuns,
+	type RunCell,
+	type RunFacts,
+	type RunOrigin,
+	runCountBuckets,
+	runCountRow,
+	runIdentityWidth,
+	runRow,
+} from "../../core/run-row.js";
 import { COST_NOT_MEASURED, renderUsdLimit } from "../../core/telemetry/render.js";
 import { autonomyModeReadout, autonomyWindowReadout } from "../../domains/safety/autonomy-readout.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
-import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { getKeybindings, truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import { tokensPerSecondText } from "../../session-control/assistant-generation-timing.js";
 import { contextPercentRole, renderContextMeterBar } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
-import { dispatchBoardItems, renderDispatchActivity, runTableRows } from "../dispatch-board.js";
-import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
+import { ACTIVE_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
 import { actionKeyLabel, formatKeyLabel } from "../keybinding-manager.js";
-import type { QuotaProviders } from "../quota-view.js";
-import {
-	bindingQuotaWindow,
-	bindingWindowPart,
-	linkedQuotaAccounts,
-	quotaWaitWords,
-	routeWeeklyQuota,
-} from "../quota-view.js";
+import { bindingQuotaWindow, bindingWindowPart, linkedQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
+import { formatReasoningChip } from "../status/reasoning.js";
 import {
 	brandMark,
 	type ClioTheme,
 	type ClioToken,
-	chipRow,
-	chipRows,
 	clioTheme,
-	emptyState,
 	factRows,
 	fitSides,
-	formatContextPercent,
 	formatElapsed,
 	GLYPH,
+	keyCap,
 	meter,
 	metricText,
 	padAnsi,
-	positionRow,
 	rule,
 	type SideUnit,
 	sectionRule,
 	type Tone,
+	widthClass,
 } from "../theme/index.js";
-import { fitIdentityLabel, fitPathLabel, modelNickname } from "../theme/labels.js";
+import { fitIdentityLabel, fitPathLabel } from "../theme/labels.js";
 import { economyReceipt } from "../usage-words.js";
+import { contextReadingQualifier } from "./context-rail.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
-import {
-	formatNotificationPanel,
-	type Notification,
-	notificationGlyph,
-	notificationToken,
-	topNotification,
-} from "./notifications.js";
+import { type Notification, notificationGlyph, notificationToken, topNotification } from "./notifications.js";
 import type { LocalMachineMetrics } from "./system-metrics.js";
-import {
-	activeTaskLine,
-	blockedTaskLines,
-	buildHarnessStatePill,
-	contextUsageText,
-	formattedThroughput,
-	lastTurnDetails,
-	lastTurnOutcome,
-	liveTokenValue,
-	meaningfulToolTally,
-	taskBoardValue,
-	zipColumns,
-} from "./widgets.js";
+import { buildHarnessStatePill, lastTurnOutcome, taskBoardValue, zipColumns } from "./widgets.js";
 
 /** A plan row stands for a whole fleet plan, and a finished one can predate this process. Neither is a worker. */
 function workerRowsOf(rows: ReadonlyArray<DispatchBoardRow>): ReadonlyArray<DispatchBoardRow> {
@@ -87,63 +71,12 @@ function workerRowsOf(rows: ReadonlyArray<DispatchBoardRow>): ReadonlyArray<Disp
 const FOOTER_SPLIT_COLUMNS = 84;
 const clean = (value: string) => sanitizeCallTargetText(redactSecretString(value));
 
-/** `label value`, the dim label first, for a chip that names what its figure is. */
-function labelled(label: string, value: string): string {
-	const theme = clioTheme();
-	return `${theme.fg("annotation", label)} ${value}`;
-}
-
 /** Two column blocks beside each other, or stacked when the page is narrow. */
 function columns(left: string[], right: string[], width: number): string[] {
 	if (width < FOOTER_SPLIT_COLUMNS) return [...left, ...right];
 	const leftWidth = Math.floor((width - 3) / 2);
 	return zipColumns(left, right, leftWidth, width - leftWidth - 3, "   ");
 }
-
-/**
- * Activity: what is running. The harness phase and the live figures on the
- * first row, the session's totals and the task board on the second, then one
- * table row per worker, live runs first, so the question is answered before
- * the page scrolls. Finished runs stop at {@link ACTIVITY_HISTORY_ROWS} and
- * each live run keeps its detail below the table.
- */
-/** Finished runs the page lists; the Fleet Runs board has the rest. */
-const ACTIVITY_HISTORY_ROWS = 4;
-
-/**
- * What the table row has no column for: the route the run is on, whose account
- * it draws from, the task once progress has taken the row's activity cell, and
- * what the worker just did, which a fast tool call would otherwise take off
- * the page before anyone reads it.
- */
-function liveWorkerDetail(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
-	const theme = clioTheme();
-	const field = (label: string, value: string): string[] =>
-		wrapTextWithAnsi(`${theme.fg("annotation", `${label}  `)}${clean(value)}`, width);
-	const internal = row.agentAudience === "shadow" || row.agentAudience === "internal";
-	const weekly = routeWeeklyQuota(row, quota);
-	// A retry the provider's limit caused waits on a quota window; it names the one that binds, or says none is known.
-	const waiting =
-		row.status === "retrying" && row.retry && QUOTA_RETRY.test(row.retry.reason)
-			? quotaWaitWords(
-					bindingQuotaWindow(
-						linkedQuotaAccounts(quota, { runtimeIds: [row.runtimeId], targetIds: [row.targetId], node: row.node }),
-					),
-					Date.now(),
-				)
-			: null;
-	return [
-		sectionRule(theme, width, clean(row.agentId), { meta: internal ? "internal agent" : "fleet agent" }),
-		...field("Route", `${row.targetId}/${row.wireModelId}`),
-		...(weekly ? field("Account", `Shared ${weekly.account} · ${weekly.label}`) : []),
-		...(waiting ? field("Waiting", waiting) : []),
-		...(row.progress && row.taskSummary ? field("Task", row.taskSummary) : []),
-		...renderDispatchActivity(row, width),
-		...field("Inspect", `/view dispatch:${row.runId}`),
-	];
-}
-
-const QUOTA_RETRY = /rate[- ]?limit|quota|usage limit|\b429\b/iu;
 
 /**
  * The session's receipt as chips: the binding window of the account the main route draws on first, then the extra
@@ -167,186 +100,6 @@ function receiptChips(theme: ClioTheme, state: FooterDashboardRenderState): stri
 	);
 }
 
-/**
- * The session's measured tokens. A bound such as `≥~13.1k +?` is true but unreadable on this row, so the footer states
- * what was measured, as the receipt and the turn row do, and points at /usage when nothing was.
- */
-function sessionTokens(theme: ClioTheme, measured: string | null, width: number): string {
-	if (measured === null)
-		return theme.fg("annotation", width < 60 ? "usage not measured" : "session usage not measured (/usage)");
-	// Cost and never-sent share this row, so a narrow page keeps the figure and `tok`.
-	return theme.fg("counter", width < 60 ? `${measured} tok` : `session ${measured} tokens`);
-}
-
-/**
- * The tool tally as one chip that fits its row: the registered count gives way first, so a narrow page keeps what ran
- * and what failed. At 40 columns `tools 8 available · bash 1 · 1 failed` wrapped and lost `failed` below the fold.
- */
-function toolChip(tally: string, width: number): string {
-	const room = Math.max(1, width - 2 - visibleWidth("tools "));
-	if (visibleWidth(tally) <= room) return tally;
-	const called = tally.replace(/^\d+ available · /u, "");
-	return called.length > 0 ? called : tally;
-}
-
-/** A settled rate says which call it belongs to; beside `last turn` it read as a live figure. */
-function lastCallThroughput(state: FooterDashboardRenderState): string | null {
-	const figures = formattedThroughput(clioTheme(), state.throughput, state.telemetry);
-	return figures === null ? null : labelled("last call", figures);
-}
-
-function activityPage(state: FooterDashboardRenderState, width: number): string[] {
-	const theme = clioTheme();
-	const streaming = state.status.phase !== "idle" && state.status.phase !== "ended";
-	const lastTurn = state.agent.lastTurn;
-	const contextWork = state.agent.contextActivity;
-	// The headline and the session row wrap between whole chips rather than give
-	// the tail up to an ellipsis: the last chip is the one that did not fit the
-	// row's end, and dropping it left free width beside a `…` that hid a fact.
-	const headline = chipRows(
-		theme,
-		[
-			// Idle has one name, the rail's `is ready` two rows down; `◌ Idle` here was a third (HS01). With nothing running
-			// the row leads with the last turn, or says there has been none.
-			state.status.phase === "idle" && (state.toolCounts.active ?? 0) <= 0
-				? lastTurn
-					? null
-					: theme.fg("counter", "no turn yet")
-				: buildHarnessStatePill(theme, state.status, state.toolCounts, state.tick, state.now, Math.max(width, 40)),
-			contextWork
-				? theme.fg(
-						contextWork.status === "failed" ? "error" : contextWork.status === "completed" ? "success" : "activity",
-						`${GLYPH.phaseCompact} ${clean(contextWork.message)}`,
-					)
-				: null,
-			...(state.background ?? []).map((call) =>
-				theme.fg(
-					"activity",
-					`${call.purpose} on ${modelNickname(call.model)} · ${formatElapsed(state.now - call.startedAt)}`,
-				),
-			),
-			streaming ? formattedThroughput(theme, state.throughput, undefined) : null,
-			streaming ? liveTokenValue(theme, state.throughput, state.telemetry, state.context.used) : null,
-			!streaming && lastTurn ? labelled("last turn", lastTurnOutcome(theme, lastTurn)) : null,
-			!streaming && lastTurn ? lastTurnDetails(theme, lastTurn, state.telemetry) : null,
-			!streaming ? lastCallThroughput(state) : null,
-		],
-		width,
-	);
-	const tools = meaningfulToolTally(state.agent.toolTally);
-	const board = state.agent.taskBoard;
-	const spend = state.telemetry;
-	const session = chipRows(
-		theme,
-		[
-			...(spend.kind === "unavailable"
-				? [theme.fg("unknownValue", "spend not available")]
-				: spend.kind === "reading"
-					? [theme.fg("unknownValue", "reading the call journal")]
-					: [
-							spend.tokens === null && spend.neverSent === null
-								? null
-								: sessionTokens(theme, spend.tokens === null ? "0" : spend.measuredTokens, width),
-							spend.neverSent ? theme.fg("counter", spend.neverSent) : null,
-							// A bare `not measured` beside the token count read as the tokens' own qualifier.
-							spend.cost === null
-								? null
-								: theme.fg("counter", /^[≥~]*\$/u.test(spend.cost) ? spend.cost : `cost ${spend.cost}`),
-						]),
-			...receiptChips(theme, state),
-			tools === null ? null : labelled("tools", theme.fg("counter", toolChip(clean(tools), width))),
-			ceilingChip(state),
-		],
-		width,
-	);
-	// The board keeps a row of its own, because at the tail of the session row its blocked count was the first thing cut.
-	const tasks =
-		board && board.tasks.length > 0
-			? [
-					chipRow(theme, [labelled("tasks", taskBoardValue(theme, board)), activeTaskLine(theme, board)], width),
-					...blockedTaskLines(theme, board, width),
-				]
-			: [];
-	const rows = workerRowsOf(state.dispatchRows);
-	const active = rows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
-	const done = rows.filter((row) => row.status === "completed");
-	// A run someone stopped did not fail: `12 failed` sat over rows that each read `⊘ cancelled`.
-	const cancelled = rows.filter((row) => row.status === "aborted");
-	const failed = rows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status) && row.status !== "aborted");
-	const counts = [
-		active.length > 0 ? `${active.length} active` : null,
-		done.length > 0 ? `${done.length} done` : null,
-		failed.length > 0 ? `${failed.length} failed` : null,
-		cancelled.length > 0 ? `${cancelled.length} cancelled` : null,
-	]
-		.filter((part): part is string => part !== null)
-		.join(" · ");
-	// Runs from before this Clio started are history: `12 cancelled` beside an exit card's `0 workers` read as this visit's.
-	const pastOnly = rows.length > 0 && rows.every((row) => row.earlier === true);
-	const capacity = state.agent.localCapacity;
-	// The auto maximum's bound is named "cap"; `cap 8 · cap` read as a row cut mid-word.
-	const cap = capacity ? `cap ${capacity.limit} · ${capacity.bound === "cap" ? "built-in max" : capacity.bound}` : "";
-	const meta = [pastOnly ? `earlier sessions · ${counts}` : counts, cap].filter(Boolean).join(" · ");
-	const liveNotices = state.notices.filter((notice) => notice.presentation !== "setting");
-	const notices = formatNotificationPanel(liveNotices, width, {
-		maxRows: liveNotices.length,
-		ended: state.endedNotices ?? [],
-		now: state.now,
-		...(state.dismissKeyLabel ? { dismissKeyLabel: state.dismissKeyLabel } : {}),
-		theme,
-	});
-	const lines = [
-		...headline,
-		...session,
-		...tasks,
-		...notices,
-		contextLine(state, width),
-		sectionRule(theme, width, "Workers", { ...(meta ? { meta } : {}) }),
-	];
-	if (rows.length === 0) {
-		lines.push(
-			...emptyState(theme, "No workers yet.", width, {
-				remedy: "Rows appear here as agents start; /run starts one.",
-			}),
-		);
-		return lines;
-	}
-	const history = rows.filter((row) => !ACTIVE_DISPATCH_STATUSES.has(row.status));
-	const listed = history.slice(0, ACTIVITY_HISTORY_ROWS);
-	lines.push(
-		...runTableRows(dispatchBoardItems([...active, ...listed]), width, {
-			compact: true,
-			inspectFinished: true,
-			tick: state.tick,
-			now: state.now,
-			quota: state.quota ?? [],
-		}),
-	);
-	// How a run ended can be longer than the activity column, and it is the row's whole point.
-	// One row each: the cause in the run's own words, without the worker's stderr dump, and where the rest is.
-	for (const row of listed) {
-		// A run the operator cancelled already says so in its row; only a cause beyond that earns a line.
-		if (row.status !== "completed" && row.outcomeDetail && !/^operator abort\b/u.test(row.outcomeDetail)) {
-			const where = ` · /view dispatch:${row.runId}`;
-			const cause =
-				clean(row.outcomeDetail)
-					.split(/;\s*stderr:/u)[0]
-					?.trim() ?? "";
-			const lead = `${clean(row.agentId)}: ${cause}`;
-			const room = Math.max(8, width - visibleWidth(where));
-			lines.push(theme.fg("annotation", `${truncateToWidth(lead, room, GLYPH.ellipsis, false)}${where}`));
-		}
-	}
-	if (listed.length < history.length) {
-		const boardKey = actionKeyLabel("clio-coder.dispatchBoard.toggle") ?? "/fleet";
-		lines.push(
-			theme.fg("annotation", `${history.length - listed.length} more finished runs · ${boardKey} for full history`),
-		);
-	}
-	for (const row of active) lines.push(...liveWorkerDetail(row, width, state.quota ?? []));
-	return lines;
-}
-
 /** The longest bar a page meter draws; past this a wide terminal gets room, not resolution. */
 const PAGE_METER_CELLS = 48;
 
@@ -361,59 +114,6 @@ function pageMeter(label: string, value: number | null, max: number, width: numb
 	const shown = amount ?? `${Math.round(ratio * 100)}%`;
 	const capped = Math.min(width, visibleWidth(label) + 1 + PAGE_METER_CELLS + 1 + visibleWidth(shown));
 	return meter(theme, { label, value, max, width: capped, tone, amount: shown });
-}
-
-/**
- * The dashboard's one context line: the category meter with its figure when the
- * ledger is known, the budget's own figure otherwise. `/context` has the rest.
- */
-function contextLine(state: FooterDashboardRenderState, width: number): string {
-	const theme = clioTheme();
-	const ledger = state.context.ledger;
-	const facts = state.context;
-	// The budget's own figure, which a live session has beside its ledger.
-	const budgetFigure = (): string => {
-		const used = facts.used;
-		const window = facts.contextWindow;
-		const percent = used !== null && window ? (used / window) * 100 : null;
-		return `${contextUsageText(facts)} ${theme.fg("metricUnit", "tokens")}${
-			percent === null ? "" : ` · ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`
-		}`;
-	};
-	if (!ledger) {
-		const window = facts.contextWindow;
-		if (!window) return `${theme.fg("fieldName", "context")} ${theme.fg("unknownValue", "window unknown")}`;
-		// A known window with no input figure yet is not an unknown window.
-		return facts.used === null
-			? `${theme.fg("fieldName", "context")} ${budgetFigure()}`
-			: pageMeter("context", facts.used, window, width, budgetFigure());
-	}
-	const figure = facts.budget
-		? budgetFigure()
-		: `${theme.fg("metricValue", `${formatFooterTokens(ledger.usedTokens)} / ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.contextWindow) : "unknown"}`)}${
-				ledger.percent === null
-					? ""
-					: ` · ${theme.fg(contextPercentRole(ledger.percent), formatContextPercent(ledger.percent))}`
-			}`;
-	const barCells = Math.max(4, width - visibleWidth(figure) - 2);
-	// Every live session has a budget beside its ledger: the figure is the budget's, the categories the ledger's.
-	return `${renderContextMeterBar(ledger, barCells, theme)}  ${figure}`;
-}
-
-/** The session cost ceiling beside the spend on the dashboard's session row; `/usage` has the rest. */
-function ceilingChip(state: FooterDashboardRenderState): string {
-	const theme = clioTheme();
-	return labelled(
-		"ceiling",
-		theme.fg(
-			"counter",
-			state.costCeilingUsd === undefined
-				? "unknown"
-				: state.costCeilingUsd === 0
-					? "none"
-					: `${renderUsdLimit(state.costCeilingUsd)} tracked pricing only`,
-		),
-	);
 }
 
 /**
@@ -607,15 +307,21 @@ function countValue(text: string): number | null {
 	return scale === undefined ? null : Number(match[1]) * scale;
 }
 
-/** `cache 87%`: the newest main call's prompt read from cache, stated only when every part was measured. */
-function cacheShare(cache: { read: string; write: string; uncached: string } | null): string | null {
+/** The newest main call's prompt read from cache, in whole percent, only when every part was measured. */
+function cachePercent(cache: { read: string; write: string; uncached: string } | null): number | null {
 	if (cache === null) return null;
 	const read = countValue(cache.read);
 	const write = countValue(cache.write);
 	const uncached = countValue(cache.uncached);
 	if (read === null || write === null || uncached === null) return null;
 	const prompt = read + write + uncached;
-	return prompt > 0 ? `cache ${Math.round((read / prompt) * 100)}%` : null;
+	return prompt > 0 ? Math.round((read / prompt) * 100) : null;
+}
+
+/** `cache 87%`: the newest main call's prompt read from cache. */
+function cacheShare(cache: { read: string; write: string; uncached: string } | null): string | null {
+	const percent = cachePercent(cache);
+	return percent === null ? null : `cache ${percent}%`;
 }
 
 /**
@@ -845,6 +551,95 @@ function newestFirst(notices: ReadonlyArray<Notification>): Notification[] {
 	return [...notices].sort((a, b) => b.addedAt - a.addedAt);
 }
 
+/** The yolo window and the weekly quota as the status line and the notice row both read them. */
+interface FooterWindows {
+	weekly: ReturnType<typeof routeWeeklyQuota> | null;
+	readout: ReturnType<typeof autonomyWindowReadout> | null;
+	/** The window ends soon or its meters warn: an alert on the notice row rather than a fact on the status line. */
+	ending: boolean;
+	nearest: ReturnType<typeof autonomyWindowReadout> | null;
+}
+
+function footerWindows(state: FooterDashboardRenderState, narrow: boolean): FooterWindows {
+	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
+	const window = state.session.autonomy === "yolo" ? (state.session.autonomyWindow ?? null) : null;
+	const readout =
+		window === null ? null : autonomyWindowReadout(window, { narrow, dot: GLYPH.dot, resumeHint: "Enter continues" });
+	const leftMs =
+		window !== null && window.caps.minutes > 0 ? window.caps.minutes * 60_000 - window.usage.activeMs : null;
+	return {
+		weekly,
+		readout,
+		ending: readout !== null && (readout.tone === "warning" || (leftMs !== null && leftMs < WINDOW_ENDING_MS)),
+		nearest: window === null ? null : autonomyWindowReadout(window, { narrow: true, dot: GLYPH.dot, resumeHint: "" }),
+	};
+}
+
+/**
+ * The live alerts, highest first (4.2): what the operator just asked for, an error, the alerts that state a standing
+ * limit, then warnings, then information above the tier's floor. The notice row shows the first; the dashboard leads
+ * with it at W1 and W2.
+ */
+function footerAlerts(
+	state: FooterDashboardRenderState,
+	w: number,
+	policy: TierPolicy,
+	keys: { surfaceOwnsKeys: boolean; immediateKeys: boolean; hintRow: boolean },
+	windows: FooterWindows,
+): { alerts: FooterAlert[]; feedback: ReturnType<typeof topNotification> } {
+	const now = state.now;
+	const feedback = topNotification(
+		state.notices.filter((notice) => notice.presentation === "setting"),
+		now,
+	);
+	const live = state.notices.filter(
+		(entry) =>
+			entry.presentation !== "setting" &&
+			(entry.expiresAt === null || entry.expiresAt > now) &&
+			// A tip teaches the idle composer; under a card, or while a run holds the keys, the row keeps what applies.
+			!((keys.surfaceOwnsKeys || keys.immediateKeys) && entry.text.startsWith("tip: ")),
+	);
+	const leaderKey = formatKeyLabel(getKeybindings().getKeys("clio-coder.leader")[0], "");
+	const urgent = state.session.shutdownArmed
+		? typeof state.session.shutdownArmed === "string"
+			? state.session.shutdownArmed
+			: "Ctrl+C again to quit"
+		: // The leader also opens the action menu, whose own rail lists the keys: a second legend under it said
+			// `choose key` for a choice already on screen.
+			state.session.leaderArmed && !keys.surfaceOwnsKeys
+			? leaderKey
+				? `${leaderKey} ${GLYPH.next} choose key`
+				: "Choose key"
+			: null;
+	const silence = state.silenceNotes ?? null;
+	const silenceNote = silence?.find((form) => visibleWidth(form) + 2 <= w) ?? silence?.at(-1) ?? null;
+	const plain = (kind: FooterAlertKind, text: string, tone: ClioToken, glyph: string | null): FooterAlert => ({
+		kind,
+		text,
+		tone,
+		glyph,
+		notice: false,
+		more: false,
+	});
+	const { weekly, readout, ending } = windows;
+	const alerts: FooterAlert[] = [
+		...(urgent === null ? [] : [plain("urgent", urgent, "warning", null)]),
+		// Setting feedback acknowledges a key the operator just pressed; with no hint row to carry it, it leads here.
+		...(feedback && !keys.hintRow ? [plain("feedback", clean(feedback.text), "changedValue", null)] : []),
+		...newestFirst(live.filter((entry) => entry.level === "error")).map((entry) => noticeAlert(entry, "error")),
+		...(ending && readout ? [plain("window", readout.text, "warning", GLYPH.warn)] : []),
+		...(weekly && weekly.severity === "critical" ? [plain("weekly", weekly.label, "error", GLYPH.warn)] : []),
+		...(silenceNote === null ? [] : [plain("silence", silenceNote, "warning", GLYPH.warn)]),
+		...newestFirst(live.filter((entry) => entry.level === "warning")).map((entry) => noticeAlert(entry, "warning")),
+		...(policy.noticeFloor === "info"
+			? newestFirst(live.filter((entry) => entry.level === "info" || entry.level === "success")).map((entry) =>
+					noticeAlert(entry, "info"),
+				)
+			: []),
+	];
+	return { alerts, feedback };
+}
+
 /**
  * The notice row: the highest live alert at normal intensity with its glyph, then `+N <dashboard key>` for the rest
  * and the dismiss key at the right while a notice is among them.
@@ -906,21 +701,12 @@ export function renderCompactDashboard(
 		queued,
 		plans: state.dispatchRows.filter((row) => row.plan !== undefined && row.status === "running").length,
 	};
-	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
+	const windows = footerWindows(state, narrow);
+	const { weekly, readout: windowReadout, ending: windowEnding, nearest } = windows;
 	// Idle and off say nothing: memory is named only while it works or cannot. The rail names a memory call from its
 	// first moment, and memory yields the model to the turn on purpose, so its wait is no fault (N9).
 	const guardian = state.session.memoryIntervention?.guardian;
 	const memoryOnRail = (state.background ?? []).some((call) => call.purpose === "memory review");
-	const window = state.session.autonomy === "yolo" ? (state.session.autonomyWindow ?? null) : null;
-	const windowReadout =
-		window === null ? null : autonomyWindowReadout(window, { narrow, dot: GLYPH.dot, resumeHint: "Enter continues" });
-	const windowLeftMs =
-		window !== null && window.caps.minutes > 0 ? window.caps.minutes * 60_000 - window.usage.activeMs : null;
-	const windowEnding =
-		windowReadout !== null &&
-		(windowReadout.tone === "warning" || (windowLeftMs !== null && windowLeftMs < WINDOW_ENDING_MS));
-	const nearest =
-		window === null ? null : autonomyWindowReadout(window, { narrow: true, dot: GLYPH.dot, resumeHint: "" });
 	const skills = state.session.activeSkills ?? [];
 	const styled = (text: string): SideUnit => ({ text, drop: STATUS_RANK.aux });
 	// Facts the row carries beside its own while they fit: an alert of the same kind has the notice row instead.
@@ -965,57 +751,8 @@ export function renderCompactDashboard(
 	const rate = footerRate(state);
 	if (policy.statusRows >= 2 && !reduced) rows.push(footerSessionRow(state, theme, w, rate));
 
-	const feedback = topNotification(
-		state.notices.filter((notice) => notice.presentation === "setting"),
-		now,
-	);
 	const hintRow = policy.hintRow && !reduced;
-	const live = state.notices.filter(
-		(entry) =>
-			entry.presentation !== "setting" &&
-			(entry.expiresAt === null || entry.expiresAt > now) &&
-			// A tip teaches the idle composer; under a card, or while a run holds the keys, the row keeps what applies.
-			!((surfaceOwnsKeys || immediateKeys) && entry.text.startsWith("tip: ")),
-	);
-	const leaderKey = formatKeyLabel(getKeybindings().getKeys("clio-coder.leader")[0], "");
-	const urgent = state.session.shutdownArmed
-		? typeof state.session.shutdownArmed === "string"
-			? state.session.shutdownArmed
-			: "Ctrl+C again to quit"
-		: // The leader also opens the action menu, whose own rail lists the keys: a second legend under it said
-			// `choose key` for a choice already on screen.
-			state.session.leaderArmed && !surfaceOwnsKeys
-			? leaderKey
-				? `${leaderKey} ${GLYPH.next} choose key`
-				: "Choose key"
-			: null;
-	const silence = state.silenceNotes ?? null;
-	const silenceNote = silence?.find((form) => visibleWidth(form) + 2 <= w) ?? silence?.at(-1) ?? null;
-	const plain = (kind: FooterAlertKind, text: string, tone: ClioToken, glyph: string | null): FooterAlert => ({
-		kind,
-		text,
-		tone,
-		glyph,
-		notice: false,
-		more: false,
-	});
-	// Precedence, highest first (4.2): what the operator just asked for, an error, the alerts that state a standing
-	// limit, then warnings, then information above the tier's floor.
-	const alerts: FooterAlert[] = [
-		...(urgent === null ? [] : [plain("urgent", urgent, "warning", null)]),
-		// Setting feedback acknowledges a key the operator just pressed; with no hint row to carry it, it leads here.
-		...(feedback && !hintRow ? [plain("feedback", clean(feedback.text), "changedValue", null)] : []),
-		...newestFirst(live.filter((entry) => entry.level === "error")).map((entry) => noticeAlert(entry, "error")),
-		...(windowEnding && windowReadout ? [plain("window", windowReadout.text, "warning", GLYPH.warn)] : []),
-		...(weekly && weekly.severity === "critical" ? [plain("weekly", weekly.label, "error", GLYPH.warn)] : []),
-		...(silenceNote === null ? [] : [plain("silence", silenceNote, "warning", GLYPH.warn)]),
-		...newestFirst(live.filter((entry) => entry.level === "warning")).map((entry) => noticeAlert(entry, "warning")),
-		...(policy.noticeFloor === "info"
-			? newestFirst(live.filter((entry) => entry.level === "info" || entry.level === "success")).map((entry) =>
-					noticeAlert(entry, "info"),
-				)
-			: []),
-	];
+	const { alerts, feedback } = footerAlerts(state, w, policy, { surfaceOwnsKeys, immediateKeys, hintRow }, windows);
 	const top = alerts[0];
 	const shownAlert = top === undefined ? null : !reduced || top.kind === "urgent" || top.kind === "error" ? top : null;
 	if (shownAlert !== null)
@@ -1057,79 +794,572 @@ function fitNoticeWords(text: string, width: number): string {
 	return whole === null ? truncateToWidth(text, room, GLYPH.ellipsis, false) : `${whole}${GLYPH.ellipsis}`;
 }
 
+/** The dashboard's label column: its widest labels (`session`, `context`, `notices`) take seven cells. */
+const DASH_LABEL_CELLS = 7;
+/** Cells between two dashboard columns. */
+const DASH_GAP = 2;
+/** A block column other than the last is at most this wide (4.3: 42 cells at 80 and at 120 columns). */
+const DASH_COLUMN_CELLS = 42;
+/** The last block keeps at least this much, which holds a run row with its elapsed time. */
+const DASH_LAST_COLUMN_CELLS = 30;
+/** Task text narrower than this beside a fact is left out rather than shown as a stub and `…`. */
+const DASH_TASK_MIN_CELLS = 8;
+/** The context meter inside its fact: twelve cells at every width, the figure beside it says the rest. */
+const DASH_METER_CELLS = 12;
+/** The route in the title rule keeps at least this much, or the title rule names no route. */
+const DASH_ROUTE_MIN_CELLS = 12;
+
+type DashKey =
+	| "turn"
+	| "tokens"
+	| "cache"
+	| "think"
+	| "speed"
+	| "tools"
+	| "fleet"
+	| "runs"
+	| "session"
+	| "cost"
+	| "context"
+	| "limit"
+	| "tasks"
+	| "notices"
+	| "cacheShare"
+	| "slots";
+
 /**
- * The expanded footer: one glance page. Title row, rule, a bounded content viewport, rule, hint.
- * Height is a function of the terminal alone, so a page never changes height
- * as its live values change; content that does not fit scrolls.
+ * The blocks as columns (4.3), one layout per row budget of the tier: two columns from W3 (turn, then session, the
+ * fleet as one fact closing the turn column), three from W4 (turn, session, fleet with its run rows).
+ */
+const DASH_LAYOUTS: ReadonlyArray<{ rows: number; two: DashKey[][]; three: DashKey[][] }> = [
+	{
+		rows: 2,
+		two: [
+			["turn", "fleet"],
+			["session", "context"],
+		],
+		three: [
+			["turn", "speed"],
+			["session", "context"],
+			["fleet", "tasks"],
+		],
+	},
+	{
+		rows: 4,
+		two: [
+			["turn", "tokens", "speed", "fleet"],
+			["session", "context", "limit", "tasks"],
+		],
+		three: [
+			["turn", "tokens", "speed", "tools"],
+			["session", "context", "limit", "tasks"],
+			["fleet", "runs"],
+		],
+	},
+	{
+		rows: 6,
+		two: [
+			["turn", "tokens", "cache", "think", "speed", "fleet"],
+			["session", "cost", "context", "limit", "tasks", "notices"],
+		],
+		three: [
+			["turn", "tokens", "cache", "think", "speed", "tools"],
+			["session", "cost", "context", "limit", "cacheShare", "notices"],
+			["fleet", "runs", "tasks", "slots"],
+		],
+	},
+];
+
+interface DashFact {
+	label: string;
+	/** Whole chips, dropped from the right when the row is short; a fact whose first chip does not fit is absent. */
+	chips?: ReadonlyArray<string | null>;
+	/** The value fitted to `room` cells by the fact itself; empty when nothing fits. */
+	fit?: (room: number) => string;
+	/** Task text after the chips: the one part of a fact row that may close on `…`. */
+	task?: string;
+}
+
+interface DashContext {
+	state: FooterDashboardRenderState;
+	theme: ClioTheme;
+	/** The tier's row budget, which also says how much evidence a fact carries (2 is outcomes only). */
+	budget: number;
+	/** This visit's worker runs, worst first. */
+	runs: RunFacts[];
+	boardKey: string;
+	/** The layout has a cost fact of its own, so the session fact leaves the cost to it. */
+	costRow: boolean;
+}
+
+/** A dispatch board row as run facts: outcome, validation and integrity, so the run row model picks the state. */
+function dashRunFacts(row: DispatchBoardRow): RunFacts {
+	const origin: RunOrigin =
+		row.requestOrigin === "user" ? "operator" : row.requestOrigin === "harness" ? "harness" : "model";
+	const base = {
+		agent: clean(row.agentId),
+		origin,
+		...(row.agentAudience === "shadow" || row.agentAudience === "internal" ? { helper: true } : {}),
+		runId: row.runId,
+		elapsed: formatElapsed(row.elapsedMs),
+		...(row.taskSummary ? { task: clean(row.taskSummary) } : {}),
+	};
+	// The cause in the run's own words, without the worker's stderr dump.
+	const cause = row.outcomeDetail
+		? (clean(row.outcomeDetail)
+				.split(/;\s*stderr:/u)[0]
+				?.trim() ?? "")
+		: "";
+	switch (row.status) {
+		case "enqueued":
+			return { ...base, outcome: "queued", phase: "no free slot" };
+		case "running":
+			return { ...base, outcome: "running", ...(row.currentTool ? { phase: clean(row.currentTool) } : {}) };
+		case "retrying":
+			return { ...base, outcome: "running", phase: "retrying" };
+		case "cancelling":
+			return { ...base, outcome: "running", phase: "stopping" };
+		case "stale":
+			return { ...base, outcome: "running", phase: "quiet" };
+		case "aborted":
+			return {
+				...base,
+				outcome: "cancelled",
+				...(cause && !/^operator abort\b/u.test(cause) ? { reason: cause } : {}),
+			};
+		case "completed": {
+			const integrity = row.trust?.axes.artifactIntegrity;
+			const rejected = row.hostVerification === "rejected";
+			return {
+				...base,
+				outcome: "succeeded",
+				validation: rejected ? "failed" : row.hostVerification === "verified" ? "passed" : "none",
+				integrity: integrity === "verified" ? "verified" : integrity === "failed" ? "compromised" : "unverified",
+				...(rejected && row.validationFailure ? { reason: clean(row.validationFailure) } : {}),
+			};
+		}
+		default:
+			return { ...base, outcome: "failed", reason: cause || clean(row.validationFailure ?? row.status) };
+	}
+}
+
+/** Paint run-row cells: each cell's lead, then its glyph and text in its role. */
+function paintRunCells(theme: ClioTheme, cells: readonly RunCell[]): string {
+	let out = "";
+	for (const cell of cells) {
+		const text = `${cell.glyph === undefined ? "" : GLYPH[cell.glyph]}${cell.text}`;
+		out += `${cell.lead}${text.length === 0 ? "" : theme.fg(cell.role, text)}`;
+	}
+	return out;
+}
+
+/** `17 tools, 2 failed`, the failure count in the error role; nothing when the turn called no tool. */
+function turnToolWords(theme: ClioTheme, lastTurn: NonNullable<FooterDashboardRenderState["agent"]["lastTurn"]>) {
+	if (lastTurn.toolCount <= 0) return null;
+	const tools = theme.fg("counter", `${lastTurn.toolCount} tool${lastTurn.toolCount === 1 ? "" : "s"}`);
+	return lastTurn.toolErrorCount > 0 ? `${tools}${theme.fg("error", `, ${lastTurn.toolErrorCount} failed`)}` : tools;
+}
+
+function plural(count: number, word: string): string {
+	return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+/** One fact of the dashboard, or null when the session has nothing to say for it. */
+function dashFact(key: DashKey, ctx: DashContext, form: { list: boolean; runRows: boolean }): DashFact | null {
+	const { state, theme } = ctx;
+	const value = (text: string): string => theme.fg("counter", text);
+	const unknown = (text: string): string => theme.fg("unknownValue", text);
+	const note = (text: string): string => theme.fg("annotation", text);
+	const spend = state.telemetry;
+	const turn = spend.kind === "ready" ? spend.turn : null;
+	const evidence = ctx.budget > 2;
+	switch (key) {
+		case "turn": {
+			const rate = footerRate(state);
+			const speed = rate.speed === null ? null : value(rate.speed);
+			const live = (state.status.phase !== "idle" && state.status.phase !== "ended") || (state.toolCounts.active ?? 0) > 0;
+			if (live)
+				return {
+					label: "turn",
+					chips: [buildHarnessStatePill(theme, state.status, state.toolCounts, state.tick, state.now, 40), speed],
+				};
+			const last = state.agent.lastTurn;
+			if (last === null) return { label: "turn", chips: [value("no turn yet")] };
+			return {
+				label: "turn",
+				chips: [lastTurnOutcome(theme, last), turnToolWords(theme, last), form.list ? speed : null],
+			};
+		}
+		case "speed": {
+			const rate = footerRate(state);
+			if (rate.speed === null && rate.ttft === null) return null;
+			return {
+				label: "speed",
+				chips: [
+					rate.speed === null ? null : value(rate.speed),
+					evidence && rate.ttft !== null ? `${note("first token")} ${value(rate.ttft)}` : null,
+				],
+			};
+		}
+		case "tokens": {
+			if (turn === null) return null;
+			const cached = turn.cacheRead === null || turn.cacheRead === "0" || turn.cacheRead === "?" ? null : turn.cacheRead;
+			const chips = [
+				turn.input === null ? null : value(`in ${turn.input}`),
+				turn.output === null ? null : value(`out ${turn.output}`),
+				cached === null ? null : value(`cached ${cached}`),
+			];
+			return chips.some((chip) => chip !== null) ? { label: "tokens", chips } : null;
+		}
+		case "cache": {
+			if (turn === null) return null;
+			const chips = [
+				turn.cacheRead === null || turn.cacheRead === "0"
+					? null
+					: turn.cacheRead === "?"
+						? unknown("read not reported")
+						: value(`read ${turn.cacheRead}`),
+				turn.cacheWrite === null || turn.cacheWrite === "0" ? null : value(`write ${turn.cacheWrite}`),
+			];
+			return chips.some((chip) => chip !== null) ? { label: "cache", chips } : null;
+		}
+		case "think": {
+			const reasoning = turn?.reasoning;
+			if (!reasoning || formatReasoningChip(reasoning) === null) return null;
+			const mark = reasoning.provenance === "provider" ? "" : GLYPH.estimate;
+			return { label: "think", chips: [value(`${mark}${formatFooterTokens(reasoning.tokens)} reasoning tokens`)] };
+		}
+		case "tools": {
+			const entries = Object.entries(state.toolCounts.tools)
+				.filter(([name, count]) => count > 0 && name.toLowerCase() !== "dispatch")
+				.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+				.map(([name, count]) => value(`${clean(name)} ${formatFooterTokens(count)}`));
+			if (entries.length === 0) return null;
+			const separator = theme.fg("separator", ` ${GLYPH.sep} `);
+			return {
+				label: "tools",
+				fit: (room) => {
+					for (let kept = entries.length; kept > 0; kept -= 1) {
+						const parts = entries.slice(0, kept);
+						if (kept < entries.length) parts.push(value(`+${entries.length - kept}`));
+						const row = parts.join(separator);
+						if (visibleWidth(row) <= room) return row;
+					}
+					return "";
+				},
+			};
+		}
+		case "fleet": {
+			if (ctx.runs.length === 0)
+				return { label: "fleet", chips: [value("no workers"), evidence ? note("/run starts one") : null] };
+			const buckets = runCountBuckets(ctx.runs);
+			const key = form.runRows ? "" : theme.fg("keyboardHint", ctx.boardKey);
+			const separator = theme.fg("separator", ` ${GLYPH.sep} `);
+			return {
+				label: "fleet",
+				fit: (room) => {
+					if (key !== "") {
+						const counts = runCountRow(buckets, room - visibleWidth(key) - visibleWidth(separator));
+						if (counts.length > 0) return `${paintRunCells(theme, counts)}${separator}${key}`;
+					}
+					return paintRunCells(theme, runCountRow(buckets, room));
+				},
+			};
+		}
+		case "session": {
+			if (spend.kind === "unavailable") return { label: "session", chips: [unknown("not available")] };
+			if (spend.kind === "reading") return { label: "session", chips: [unknown("reading the call journal")] };
+			const tokens =
+				spend.tokens === null && spend.neverSent === null
+					? value("no calls yet")
+					: spend.tokens !== null && spend.measuredTokens === null
+						? unknown("usage not measured")
+						: value(`${spend.tokens === null ? "0" : spend.measuredTokens} tokens`);
+			const cost =
+				ctx.costRow && !form.list
+					? null
+					: spend.cost === null
+						? null
+						: spend.cost === COST_NOT_MEASURED
+							? unknown("cost not measured")
+							: value(clean(spend.cost));
+			return {
+				label: "session",
+				// The cost is the session's second fact; calls that never reached a provider yield first on a short row.
+				chips: [tokens, cost, spend.neverSent ? theme.fg("warning", spend.neverSent) : null],
+			};
+		}
+		case "cost": {
+			if (spend.kind !== "ready") return null;
+			const receipt = receiptChips(theme, state);
+			if (receipt.length > 0) return { label: "cost", chips: receipt };
+			if (spend.cost === null) return null;
+			return {
+				label: "cost",
+				chips: [spend.cost === COST_NOT_MEASURED ? unknown("not measured") : value(clean(spend.cost))],
+			};
+		}
+		case "cacheShare": {
+			const percent = spend.kind === "ready" ? cachePercent(spend.promptCache) : null;
+			return percent === null ? null : { label: "cache", chips: [value(`${percent}% of prompt read from cache`)] };
+		}
+		case "context": {
+			const facts = state.context;
+			const ledger = facts.ledger ?? null;
+			const used = facts.budget ? facts.used : (ledger?.usedTokens ?? facts.used);
+			const window = facts.budget ? facts.contextWindow : (ledger?.contextWindow ?? facts.contextWindow);
+			if (!window) return { label: "context", chips: [unknown("window unknown")] };
+			const qualifier = contextReadingQualifier({ ...(facts.budget ? { budget: facts.budget } : {}), used });
+			const source: FillSource = qualifier === "" ? "measured" : qualifier === GLYPH.estimate ? "estimated" : "saved";
+			const percent = used === null ? null : (used / window) * 100;
+			const fill = theme.fg(percent === null ? "counter" : contextPercentRole(percent), formatFill(used, window, source));
+			const bar = ledger ? renderContextMeterBar(ledger, DASH_METER_CELLS, theme) : "";
+			return {
+				label: "context",
+				fit: (room) => {
+					const full = bar === "" ? fill : `${bar} ${fill}`;
+					if (visibleWidth(full) <= room) return full;
+					return visibleWidth(fill) <= room ? fill : "";
+				},
+			};
+		}
+		case "limit": {
+			const ceiling = state.costCeilingUsd;
+			return {
+				label: "limit",
+				chips:
+					ceiling === undefined
+						? [unknown("unknown")]
+						: ceiling === 0
+							? [value("none")]
+							: [value(renderUsdLimit(ceiling)), note("tracked pricing only")],
+			};
+		}
+		case "tasks": {
+			const board = state.agent.taskBoard;
+			if (!board || board.tasks.length === 0) return { label: "tasks", chips: [value("none")] };
+			const active = evidence ? board.tasks.find((task) => task.status === "active") : undefined;
+			return {
+				label: "tasks",
+				chips: [taskBoardValue(theme, board)],
+				...(active ? { task: `${clean(active.id)} ${clean(active.title)}` } : {}),
+			};
+		}
+		case "notices": {
+			const live = state.notices.filter(
+				(notice) => notice.presentation !== "setting" && (notice.expiresAt === null || notice.expiresAt > state.now),
+			);
+			const count = (levels: ReadonlyArray<Notification["level"]>): number =>
+				live.filter((notice) => levels.includes(notice.level)).length;
+			const errors = count(["error"]);
+			const warnings = count(["warning"]);
+			const infos = count(["info", "success"]);
+			const chips = [
+				errors > 0 ? theme.fg("error", plural(errors, "error")) : null,
+				warnings > 0 ? theme.fg("warning", plural(warnings, "warning")) : null,
+				infos > 0 ? value(`${infos} info`) : null,
+			];
+			return { label: "notices", chips: chips.some((chip) => chip !== null) ? chips : [value("none")] };
+		}
+		case "slots": {
+			const live = workerRowsOf(state.dispatchRows).filter(
+				(row) => ACTIVE_DISPATCH_STATUSES.has(row.status) && row.status !== "enqueued",
+			);
+			const capacity = state.agent.localCapacity;
+			if (capacity)
+				return {
+					label: "slots",
+					chips: [
+						value(`${live.length}/${capacity.limit}`),
+						// The auto maximum's bound is named "cap"; `cap 8 · cap` read as a row cut mid-word.
+						note(capacity.bound === "cap" ? "built-in max" : clean(capacity.bound)),
+					],
+				};
+			const endpoint = live.find((row) => row.endpoint !== undefined)?.endpoint;
+			if (!endpoint) return null;
+			const busy = live.filter((row) => row.endpoint?.key === endpoint.key).length;
+			return { label: "slots", chips: [value(`${busy}/${endpoint.limit} ${clean(endpoint.label)}`)] };
+		}
+		case "runs":
+			return null;
+	}
+}
+
+/**
+ * One fact row: the label column, then the value. Chips drop whole from the right and a fact whose first chip does
+ * not fit is absent (null); only task text may close on `…`.
+ */
+function dashRow(theme: ClioTheme, fact: DashFact | null, width: number): string | null {
+	if (fact === null) return null;
+	const room = width - DASH_LABEL_CELLS - 2;
+	if (room < 1) return null;
+	let body = fact.fit ? fact.fit(room) : wholeChips(theme, fact.chips ?? [], room);
+	if (fact.task !== undefined && fact.task.length > 0) {
+		const separator = body === "" ? "" : theme.fg("separator", ` ${GLYPH.sep} `);
+		const left = room - visibleWidth(body) - visibleWidth(separator);
+		if (left >= Math.min(DASH_TASK_MIN_CELLS, visibleWidth(fact.task)))
+			body = `${body}${separator}${theme.fg("body", truncateToWidth(fact.task, left, GLYPH.ellipsis, false))}`;
+	}
+	return body === "" ? null : `${padAnsi(theme.fg("annotation", fact.label), DASH_LABEL_CELLS)}  ${body}`;
+}
+
+/** Up to `count` run rows in the section 6.1 grammar, worst first, sharing one identity column. */
+function dashRunRows(ctx: DashContext, count: number, width: number): string[] {
+	const runs = ctx.runs.slice(0, Math.max(0, count));
+	const identityWidth = runIdentityWidth(runs, visibleWidth);
+	return runs.map((facts) =>
+		paintRunCells(ctx.theme, runRow(facts, { width, identityWidth, measure: visibleWidth, rail: false }).cells),
+	);
+}
+
+/** One column of facts, exactly `rows` rows; an absent fact leaves its row blank so the column keeps its shape. */
+function dashColumn(ctx: DashContext, keys: readonly DashKey[], rows: number, width: number): string[] {
+	const runRows = keys.includes("runs");
+	const others = keys.filter((key) => key !== "runs").length;
+	const lines: string[] = [];
+	for (const key of keys) {
+		if (key === "runs") lines.push(...dashRunRows(ctx, rows - others, width));
+		else lines.push(dashRow(ctx.theme, dashFact(key, ctx, { list: false, runRows }), width) ?? "");
+	}
+	while (lines.length < rows) lines.push("");
+	return lines.slice(0, rows);
+}
+
+/**
+ * The blocks side by side. Each column but the last takes its widest row, at most {@link DASH_COLUMN_CELLS} and never
+ * so much that a later block gets under {@link DASH_LAST_COLUMN_CELLS}, so the last block gets the room left.
+ */
+function dashColumns(ctx: DashContext, layout: readonly DashKey[][], rows: number, width: number): string[] {
+	const columns: string[][] = [];
+	const widths: number[] = [];
+	let used = 0;
+	layout.forEach((keys, index) => {
+		const left = layout.length - index;
+		const available = width - used;
+		const share =
+			left === 1
+				? available
+				: Math.min(
+						DASH_COLUMN_CELLS,
+						Math.max(
+							Math.floor((available - DASH_GAP * (left - 1)) / left),
+							available - (DASH_GAP + DASH_LAST_COLUMN_CELLS) * (left - 1),
+						),
+					);
+		const lines = dashColumn(ctx, keys, rows, Math.max(1, share));
+		const cells = left === 1 ? share : Math.max(1, ...lines.map((line) => visibleWidth(line)));
+		columns.push(lines);
+		widths.push(cells);
+		used += cells + DASH_GAP;
+	});
+	return Array.from({ length: rows }, (_, row) =>
+		columns
+			.map((lines, index) =>
+				index === columns.length - 1 ? (lines[row] ?? "") : padAnsi(lines[row] ?? "", (widths[index] ?? 1) + DASH_GAP),
+			)
+			.join(""),
+	);
+}
+
+/**
+ * W1 and W2: no columns, a priority list of one-row summaries. The live alert leads, then the turn, the fleet while
+ * a run is live or failed, the session and the context; what does not fit is one command away on the closing rule.
+ */
+function dashList(ctx: DashContext, rows: number, width: number, alert: string | null): string[] {
+	const buckets = runCountBuckets(ctx.runs);
+	const fleetLive = buckets.failed + buckets.waiting + buckets.running + buckets.queued > 0;
+	const keys: DashKey[] = ["turn", ...(fleetLive ? (["fleet"] as const) : []), "session", "context"];
+	const lines = alert === null ? [] : [alert];
+	for (const key of keys) {
+		const row = dashRow(ctx.theme, dashFact(key, ctx, { list: true, runRows: false }), width);
+		if (row !== null) lines.push(row);
+	}
+	while (lines.length < rows) lines.push("");
+	return lines.slice(0, rows);
+}
+
+/** `Dashboard ──── <build> · <route> ─`: the build gives way first, then the route shortens keeping its suffix. */
+function dashTitle(theme: ClioTheme, state: FooterDashboardRenderState, withBuild: boolean, width: number): string {
+	const route = `${state.session.duckBadge ? "🦆 " : ""}${clean(state.session.target ?? "No model selected")}`;
+	const separator = ` ${GLYPH.sep} `;
+	// The label and its space, ` <meta> ─` and two cells of fill.
+	const room = width - visibleWidth("Dashboard ") - 3 - 2;
+	const build = withBuild ? clioBuildLabel() : "";
+	const buildCells = visibleWidth(build) + visibleWidth(separator);
+	const meta =
+		build !== "" && buildCells + Math.min(visibleWidth(route), DASH_ROUTE_MIN_CELLS) <= room
+			? `${theme.fg("annotation", build)}${theme.fg("separator", separator)}${theme.fg("footerIdentity", fitIdentityLabel(route, room - buildCells))}`
+			: room >= DASH_ROUTE_MIN_CELLS
+				? theme.fg("footerIdentity", fitIdentityLabel(route, room))
+				: "";
+	return rule(theme, width, {
+		left: "Dashboard",
+		...(meta === "" ? {} : { right: meta, rightRaw: true, rightTail: theme.fg("divider", GLYPH.rule) }),
+	});
+}
+
+/** `──── [Alt+U] close · /usage · /context · /fleet ─`; a narrow row keeps the commands, which name every cut block. */
+function dashClose(theme: ClioTheme, toggleKey: string, width: number): string {
+	const separator = theme.fg("separator", ` ${GLYPH.sep} `);
+	const where = ["/usage", "/context", "/fleet"].map((command) => theme.fg("keyboardHint", command)).join(separator);
+	const cap = toggleKey ? keyCap(theme, toggleKey, "keyboardHint") : "";
+	const forms = cap
+		? [`${cap} ${theme.fg("keyboardHint", "close")}${separator}${where}`, `${cap}${separator}${where}`, where]
+		: [where];
+	// The key goes last: a form that keeps it bare beats a ruled form without it.
+	for (const form of forms) {
+		if (visibleWidth(form) + 5 <= width)
+			return rule(theme, width, { right: form, rightRaw: true, rightTail: theme.fg("divider", GLYPH.rule) });
+		if (visibleWidth(form) <= width) return form;
+	}
+	return truncateToWidth(where, width, GLYPH.ellipsis, true);
+}
+
+/**
+ * The Alt+U dashboard (4.3): a glance panel of fixed height that never scrolls. A titled light rule, the tier's
+ * `dashboardRows` content rows (reduced so the panel fits a third of the terminal), and a closing rule naming where
+ * the rest lives. The footer's status line stays under it.
  */
 export function dashboardPageViewport(
 	state: FooterDashboardRenderState,
 	width: number,
 	terminalRows: number,
 	toggleKey: string,
-	scrollOffset = 0,
-): { rows: string[]; offset: number; maxOffset: number } {
-	const theme = clioTheme();
-	const safeWidth = Math.max(1, width);
-	const gutter = safeWidth >= 20 ? 2 : 0;
-	const innerWidth = Math.max(1, safeWidth - gutter * 2);
-	const pad = " ".repeat(gutter);
-	const inset = (line: string): string =>
-		theme.base(
-			"fieldValue",
-			padAnsi(`${pad}${truncateToWidth(line, innerWidth, GLYPH.ellipsis, true)}${pad}`, safeWidth),
-		);
-	// A glance, not a standing view: the transcript keeps two thirds of the terminal, and the workers list scrolls.
-	const budget = Math.max(6, Math.min(8, Math.floor(terminalRows / 3)));
-	// The rule keeps the brand from reading as part of the title.
-	const title = `${brandMark(theme)} ${theme.fg("border", GLYPH.rail)} ${theme.style("selectedOption", "Dashboard", { bold: true })}`;
-	// The build this process runs, as its process title names it, yields to the route when the row is narrow.
-	const withBuild = `${title}  ${theme.fg("annotation", clioBuildLabel())}`;
-	const tabText = innerWidth - visibleWidth(withBuild) - 4 >= 20 ? withBuild : title;
-	// The route sits flush right, the way a title row carries its meta, so the
-	// tabs and the identity read as one row with two ends rather than a sentence.
-	const identityRoom = innerWidth - visibleWidth(tabText) - 4;
-	const identity = `${state.session.duckBadge ? "🦆 " : ""}${clean(state.session.target ?? "No model selected")}`;
-	const identityText = identityRoom >= 20 ? theme.fg("footerIdentity", fitIdentityLabel(identity, identityRoom)) : "";
-	const heading =
-		identityText.length > 0
-			? `${tabText}${" ".repeat(Math.max(1, innerWidth - visibleWidth(tabText) - visibleWidth(identityText)))}${identityText}`
-			: truncateToWidth(tabText, innerWidth, GLYPH.ellipsis, true);
-	const cycle = `${toggleKey || "Dashboard"} ${GLYPH.next} close`;
-	const where = "/context · /usage · /fleet for detail";
-	const available = budget - 4;
-	let content = activityPage(state, innerWidth);
-	content = content.flatMap((line) => (visibleWidth(line) > innerWidth ? wrapTextWithAnsi(line, innerWidth) : [line]));
-	const maxOffset = Math.max(0, content.length - available);
-	const offset = Math.max(0, Math.min(maxOffset, Math.floor(scrollOffset)));
-	const hint =
-		maxOffset > 0
-			? positionRow(
-					theme,
-					{
-						start: offset + 1,
-						end: Math.min(content.length, offset + available),
-						total: content.length,
-						keys: innerWidth >= 64 ? ["Alt+PgUp/PgDn scroll", cycle, where] : [cycle],
-					},
-					innerWidth,
-				)
-			: truncateToWidth(theme.fg("keyboardHint", `${cycle}   ·   ${where}`), innerWidth, GLYPH.ellipsis, true);
-	content = content.slice(offset, offset + available);
-	while (content.length < available) content.push("");
-	return {
-		rows: [inset(heading), rule(theme, safeWidth), ...content.map(inset), rule(theme, safeWidth), inset(hint)],
-		offset,
-		maxOffset,
-	};
-}
-
-export function renderDashboardPage(
-	state: FooterDashboardRenderState,
-	width: number,
-	terminalRows: number,
-	toggleKey: string,
-	scrollOffset = 0,
 ): string[] {
-	return dashboardPageViewport(state, width, terminalRows, toggleKey, scrollOffset).rows;
+	const theme = clioTheme();
+	const w = Math.max(1, Math.floor(width));
+	const policy = tierPolicy(state.outputStyle ?? presentationTier());
+	const height = Math.max(3, Math.min(policy.dashboardRows + 2, Math.floor(terminalRows / 3)));
+	const rows = height - 2;
+	const layouts = DASH_LAYOUTS.filter((layout) => layout.rows <= policy.dashboardRows).at(-1) ?? DASH_LAYOUTS[0];
+	const kind = widthClass(w);
+	const layout = kind === "W3" ? layouts?.two : layouts?.three;
+	const ctx: DashContext = {
+		state,
+		theme,
+		budget: policy.dashboardRows,
+		runs: workerRowsOf(state.dispatchRows)
+			.filter((row) => row.earlier !== true)
+			.map(dashRunFacts)
+			.sort(compareRuns),
+		boardKey: actionKeyLabel("clio-coder.dispatchBoard.toggle") ?? "/fleet",
+		costRow: layout?.some((keys) => keys.includes("cost")) === true,
+	};
+	let body: string[];
+	if (kind === "W1" || kind === "W2" || layout === undefined) {
+		const { alerts } = footerAlerts(
+			state,
+			w,
+			policy,
+			{ surfaceOwnsKeys: false, immediateKeys: false, hintRow: policy.hintRow },
+			footerWindows(state, w <= FOOTER_NARROW_CELLS),
+		);
+		const top = alerts[0];
+		const alert =
+			top === undefined
+				? null
+				: theme.fg(top.tone, fitNoticeWords(top.glyph === null ? top.text : `${top.glyph} ${top.text}`, w));
+		body = dashList(ctx, rows, w, alert);
+	} else body = dashColumns(ctx, layout, rows, w);
+	return [dashTitle(theme, state, policy.hintRow, w), ...body, dashClose(theme, toggleKey, w)];
 }
