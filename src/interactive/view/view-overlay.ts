@@ -16,7 +16,7 @@ import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
 import { buildHint, fitRows, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
 import { inlineImageRows } from "../renderers/tool-images.js";
-import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
+import { clioTheme, emptyState, GLYPH, markdownTheme, padAnsi, positionRow, rule } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 
 export const VIEW_OVERLAY_WIDTH = "100%";
@@ -25,16 +25,21 @@ export const VIEW_OVERLAY_MARGIN = { top: 0, right: 0, bottom: 0, left: 0 } as c
 
 const LEFT_PANE_MIN_WIDTH = 36;
 const LEFT_PANE_MAX_WIDTH = 72;
-const SEPARATOR = " │ ";
+const SEPARATOR = ` ${GLYPH.rail} `;
 /**
- * Below this the two panes cannot both be read.
+ * Below this the two panes cannot sit side by side.
  *
- * The list needs 36 columns and a useful detail pane needs 45. Below that,
- * one pane at a time keeps titles and content readable; Tab switches focus.
+ * The list needs 36 columns and a useful detail pane needs 45. Below that the
+ * list stacks over the preview at full width; Tab still moves focus.
  */
 const TWO_PANE_MIN_WIDTH = LEFT_PANE_MIN_WIDTH + 3 + 45;
+/**
+ * Below this a stacked list or preview would scroll inside fewer than three
+ * rows, so a body this short shows the focused pane alone.
+ */
+const STACKED_MIN_HEIGHT = 12;
 
-/** Whether a body this wide shows one pane instead of two. */
+/** Whether a body this wide puts the panes in one column instead of side by side. */
 function viewUsesSinglePane(bodyWidth: number): boolean {
 	return bodyWidth < TWO_PANE_MIN_WIDTH;
 }
@@ -332,7 +337,7 @@ export function nextContentScrollOffset(
 
 function verificationText(state: ViewVerificationState | undefined): string {
 	if (!state || state.status === "idle") return "";
-	if (state.status === "running") return `${GLYPH.running} Verification: checking…`;
+	if (state.status === "running") return `${GLYPH.running} Verification: checking${GLYPH.ellipsis}`;
 	if (state.status === "warning") return `${GLYPH.warn} Verification: ${state.detail}`;
 	if (state.status === "ok") return `${GLYPH.ok} Verification: ${state.detail}`;
 	if (state.status === "retired") return `${GLYPH.warn} Verification: not checked. ${state.detail}`;
@@ -363,7 +368,7 @@ function buildArtifactHeaderLines(
 					truncateToWidth(`${wrappedTitle[2] ?? ""}${GLYPH.ellipsis}`, width, GLYPH.ellipsis, true),
 				];
 	const size = formatArtifactSize(artifact.sizeBytes);
-	const metadata = [artifact.category, formatLocalTime(artifact.timestamp), size].filter(Boolean).join(" · ");
+	const metadata = [artifact.category, formatLocalTime(artifact.timestamp), size].filter(Boolean).join(` ${GLYPH.sep} `);
 	const verify = verificationText(verification);
 	const heading = [
 		...titleRows.map((row) => padAnsi(row, width, GLYPH.ellipsis)),
@@ -561,7 +566,12 @@ export class ViewOverlayView implements Component {
 		const key = artifactKey(artifact);
 		if (this.content?.key === key) return;
 		const token = ++this.loadToken;
-		this.content = { key, status: "loading", lines: [clioTheme().fg("annotation", "loading artifact…")], format: "text" };
+		this.content = {
+			key,
+			status: "loading",
+			lines: [clioTheme().fg("annotation", `loading artifact${GLYPH.ellipsis}`)],
+			format: "text",
+		};
 		void (async () => {
 			try {
 				const loaded = await Promise.resolve().then(() => artifact.load());
@@ -672,7 +682,7 @@ export class ViewOverlayView implements Component {
 					"",
 					...(content.renderWidth === width && content.renderEpoch === skinEpoch()
 						? (content.renderedLines ?? [])
-						: ["Laying out details…"]),
+						: [`Laying out details${GLYPH.ellipsis}`]),
 				];
 			}
 			return metadata;
@@ -685,7 +695,7 @@ export class ViewOverlayView implements Component {
 			return content.renderedLines;
 		}
 		this.queueContentRender(content, width);
-		return [clioTheme().fg("annotation", "laying out preview…")];
+		return [clioTheme().fg("annotation", `laying out preview${GLYPH.ellipsis}`)];
 	}
 
 	private renderList(width: number, height: number): string[] {
@@ -700,7 +710,7 @@ export class ViewOverlayView implements Component {
 		}
 
 		if (this.loadingArtifacts) {
-			lines.push(padAnsi(theme.fg("annotation", "loading artifacts…"), width, GLYPH.ellipsis));
+			lines.push(padAnsi(theme.fg("annotation", `loading artifacts${GLYPH.ellipsis}`), width, GLYPH.ellipsis));
 			return fitRows(lines, width, height);
 		}
 		if (this.artifactError) {
@@ -713,38 +723,43 @@ export class ViewOverlayView implements Component {
 		const filtered = this.filteredArtifacts();
 		lines.push(
 			padAnsi(
-				theme.fg(
-					this.focus === "list" ? "selectedOption" : "annotation",
-					`List · ${filtered.length}/${this.artifacts.length} · ←→ category`,
-				),
+				theme.fg(this.focus === "list" ? "selectedOption" : "annotation", `List ${GLYPH.sep} ←→ category`),
 				width,
 				GLYPH.ellipsis,
 			),
 		);
-		if (filtered.length === 0)
-			return fitRows(
-				[
-					...lines,
-					theme.fg("annotation", "No matching details."),
-					theme.fg("menuDescription", "Esc clears the filter."),
-					theme.fg("annotation", "Try workspace: or run:"),
-				],
-				width,
-				height,
-			);
+		if (filtered.length === 0) {
+			const empty =
+				this.artifacts.length > 0
+					? emptyState(theme, `No matching artifacts among ${this.artifacts.length}.`, width, {
+							remedy: "Esc clears the filter. Try workspace: or run:",
+						})
+					: emptyState(theme, "No artifacts yet.", width, {
+							remedy: "Tool calls, runs and outputs of this session appear here.",
+						});
+			return fitRows([...lines, ...empty], width, height);
+		}
 		const rows = groupedViewRows(filtered);
 		const selectedRow = rows.findIndex((row) => row.type === "item" && row.itemIndex === this.selectedIndex);
-		const rowHeight = Math.max(1, height - lines.length);
+		// One row under the window is the position row.
+		const rowHeight = Math.max(1, height - lines.length - 1);
 		if (selectedRow >= 0) {
 			if (selectedRow < this.listScrollOffset) this.listScrollOffset = selectedRow;
 			if (selectedRow >= this.listScrollOffset + rowHeight) this.listScrollOffset = selectedRow - rowHeight + 1;
 		}
 		this.listScrollOffset = Math.max(0, Math.min(this.listScrollOffset, Math.max(0, rows.length - rowHeight)));
 
-		for (const row of rows.slice(this.listScrollOffset, this.listScrollOffset + rowHeight)) {
+		const windowRows = rows.slice(this.listScrollOffset, this.listScrollOffset + rowHeight);
+		for (const row of windowRows) {
 			if (row.type === "group") {
 				const count = filtered.filter((artifact) => artifact.category === row.category).length;
-				lines.push(padAnsi(theme.fg("annotation", `── ${categoryLabel(row.category)} (${count})`), width, GLYPH.ellipsis));
+				lines.push(
+					padAnsi(
+						theme.fg("annotation", `${GLYPH.rule.repeat(2)} ${categoryLabel(row.category)} (${count})`),
+						width,
+						GLYPH.ellipsis,
+					),
+				);
 				continue;
 			}
 			if (row.type === "empty") {
@@ -765,6 +780,30 @@ export class ViewOverlayView implements Component {
 			const gap = " ".repeat(Math.max(1, available - visibleWidth(clippedTitle) - metaWidth));
 			lines.push(padAnsi(`${cursor}${clippedTitle}${metaWidth > 0 ? `${gap}${meta}` : ""}`, width, GLYPH.ellipsis));
 		}
+		// `1–14 of 231 artifacts`: the shown artifacts, counted without the group rows.
+		const shown = windowRows.flatMap((row) =>
+			row.type === "item" && row.itemIndex !== undefined ? [row.itemIndex] : [],
+		);
+		if (shown.length > 0) {
+			const filteredFrom = filtered.length < this.artifacts.length ? [`filtered from ${this.artifacts.length}`] : [];
+			lines.push(
+				padAnsi(
+					positionRow(
+						theme,
+						{
+							start: Math.min(...shown) + 1,
+							end: Math.max(...shown) + 1,
+							total: filtered.length,
+							unit: filtered.length === 1 ? "artifact" : "artifacts",
+							keys: filteredFrom,
+						},
+						width,
+					),
+					width,
+					GLYPH.ellipsis,
+				),
+			);
+		}
 
 		return fitRows(lines, width, height);
 	}
@@ -774,18 +813,19 @@ export class ViewOverlayView implements Component {
 		this.ensureContentLoaded(artifact);
 		this.lastContentWidth = width;
 		const filtered = this.filteredArtifacts();
-		const position = artifact ? ` · ${this.selectedIndex + 1}/${filtered.length}` : "";
+		const position = artifact ? ` ${GLYPH.sep} ${this.selectedIndex + 1} of ${filtered.length}` : "";
+		const sep = ` ${GLYPH.sep} `;
 		const verification = artifact ? this.verifications.get(artifactKey(artifact)) : undefined;
 		const narrowHeader = width < 50;
 		const headerLabel = this.showProvenance
 			? narrowHeader
-				? `Details${position} · i preview`
-				: `Details${position} · i preview · Esc list`
+				? `Details${position}${sep}i preview`
+				: `Details${position}${sep}i preview${sep}Esc list`
 			: this.focus === "content"
 				? narrowHeader
-					? `Preview${position} · i detail`
-					: `Preview${position} · n/p item · i detail · Esc list`
-				: `Preview${position} · Enter/Tab focus`;
+					? `Preview${position}${sep}i detail`
+					: `Preview${position}${sep}n/p item${sep}i detail${sep}Esc list`
+				: `Preview${position}${sep}Enter/Tab focus`;
 		const header = [
 			padAnsi(
 				clioTheme().fg(this.focus === "content" ? "selectedOption" : "annotation", headerLabel),
@@ -813,7 +853,16 @@ export class ViewOverlayView implements Component {
 	render(width: number): string[] {
 		const bodyHeight = Math.max(1, this.options.getBodyHeight());
 		if (viewUsesSinglePane(width)) {
-			return this.focus === "content" ? this.renderContent(width, bodyHeight) : this.renderList(width, bodyHeight);
+			if (bodyHeight < STACKED_MIN_HEIGHT) {
+				return this.focus === "content" ? this.renderContent(width, bodyHeight) : this.renderList(width, bodyHeight);
+			}
+			// List over preview, a light rule between them; the preview takes the odd row.
+			const listHeight = Math.floor((bodyHeight - 1) / 2);
+			return [
+				...this.renderList(width, listHeight),
+				rule(clioTheme(), width, { fillToken: "border" }),
+				...this.renderContent(width, bodyHeight - 1 - listHeight),
+			];
 		}
 		const separatorWidth = visibleWidth(SEPARATOR);
 		const leftWidth = Math.min(LEFT_PANE_MAX_WIDTH, Math.max(LEFT_PANE_MIN_WIDTH, Math.floor(width * 0.4)));
