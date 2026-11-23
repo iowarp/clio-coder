@@ -1,4 +1,5 @@
 import type { OutputStyle } from "../core/defaults.js";
+import { tierPolicy, type UsageSections } from "../core/presentation-tier.js";
 import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { EconomyProjection } from "../core/telemetry/economy.js";
@@ -13,9 +14,15 @@ import type { GitChanges } from "../domains/session/workspace/git-probe.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
-import { matchesKey, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { matchesKey, stripTerminalSequences, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { USAGE_TAB_NAMES, type UsageTab } from "../session-control/slash-commands.js";
-import { ACTIVITY_SPAN_DAYS, bucketActivity, renderActivityHeatmap } from "./activity-view.js";
+import {
+	ACTIVITY_SPAN_DAYS,
+	ACTIVITY_SPARK_WEEKS,
+	bucketActivity,
+	renderActivityHeatmap,
+	weeklyActivity,
+} from "./activity-view.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { machineBlock } from "./footer/pages.js";
 import { createLocalMachineSampler } from "./footer/system-metrics.js";
@@ -30,7 +37,16 @@ import {
 	renderQuotaAccounts,
 	renderWorkerUsage,
 } from "./quota-view.js";
-import { clioTheme, formatElapsed, padAnsi, positionRow, rule } from "./theme/index.js";
+import {
+	clioTheme,
+	formatElapsed,
+	GLYPH,
+	heightClass,
+	padAnsi,
+	positionRow,
+	sectionRule,
+	sparkline,
+} from "./theme/index.js";
 import {
 	economyEvidence,
 	economyReceipt,
@@ -56,19 +72,19 @@ const DEFAULT_CONTENT_WIDTH = 104;
 
 export const USAGE_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
-/** What each agent role's count reads as; a role added later still shows, under its own name. */
-const ROLE_CAPTION: Readonly<Record<AgentRole, string>> = {
-	main: "conversation calls",
-	coordinator: "coordinator calls",
-	worker: "worker calls",
-	compaction: "compaction calls",
-	memory: "memory steps",
-	"system-one": "System One calls",
+/** Each agent role's share of the calls row, in the note column; a role added later still shows, under its own name. */
+const ROLE_WORD: Readonly<Record<AgentRole, string>> = {
+	main: "conversation",
+	coordinator: "coordinator",
+	worker: "workers",
+	compaction: "compaction",
+	memory: "memory",
+	"system-one": "System One",
 	prewarm: "pre-warms",
 	btw: "side questions",
 	handoff: "handoffs",
-	helper: "helper calls",
-	"safety-judge": "safety judge calls",
+	helper: "helpers",
+	"safety-judge": "safety judge",
 };
 const NOT_AVAILABLE = "spend not available: this session has no telemetry read model";
 const NOT_STARTED = "nothing recorded yet: the session starts with its first prompt";
@@ -99,34 +115,92 @@ function contributed(quantity: Quantity): boolean {
  */
 const REASONING_NOTE = "provider-reported only";
 
-function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>, contentWidth: number): string[] {
+/** One fact: its label, the figure for the number column, and a note for the third column. */
+type FactRow = readonly [string, string, string?];
+
+/** A figure no wider than this sits in the number column; a longer value is read in the note column instead. */
+const VALUE_MAX = 12;
+const NOTE_GAP = 3;
+/** Under this many cells a note column would hold a word or two, so notes take the row under their figure. */
+const NOTE_MIN = 16;
+/** The cell of a figure nothing measured; the note column says why, once. */
+const NO_VALUE = "—";
+
+/** Where a fact's parts go: a figure stays in the number column, a word or a long value moves to the note column. */
+function placeFact([key, value, note]: FactRow): { key: string; value: string; note: string } {
 	const theme = clioTheme();
+	const annotation = (text: string) => theme.fg("annotation", text);
+	const text = stripTerminalSequences(value);
+	// The number column holds figures and the dash; a word such as `unknown` is said in the note column.
+	if (text.length > 0 && text !== NO_VALUE && !/\d/u.test(text))
+		return { key, value: NO_VALUE, note: annotation(note ? `${text} ${GLYPH.sep} ${note}` : text) };
+	return visibleWidth(value) <= VALUE_MAX
+		? { key, value, note: note ? annotation(note) : "" }
+		: { key, value: "", note: `${theme.fg("counter", value)}${note ? annotation(` ${GLYPH.sep} ${note}`) : ""}` };
+}
+
+/** The label and number columns several fact blocks share, so one tab's figures sit in one column. */
+interface FactColumns {
+	keyWidth: number;
+	valueWidth: number;
+}
+
+function factColumns(entries: ReadonlyArray<FactRow>, contentWidth: number): FactColumns {
+	const rows = entries.map(placeFact);
+	return {
+		keyWidth: Math.min(
+			Math.max(0, ...rows.map((row) => visibleWidth(row.key))),
+			Math.max(4, Math.floor(contentWidth * 0.4)),
+		),
+		valueWidth: Math.max(0, ...rows.map((row) => visibleWidth(row.value))),
+	};
+}
+
+/**
+ * Fact rows in three columns (7.8): labels left, every figure right-aligned in one column, every note starting in one
+ * column and wrapping inside it. A word or a value too wide for the number column moves to the note column, so a
+ * sentence never pushes the figures of its neighbours apart. Blocks of one tab pass the same `columns`. Under 32 cells
+ * each label sits above its value.
+ */
+function kvBlock(
+	entries: ReadonlyArray<FactRow>,
+	contentWidth: number,
+	columns: FactColumns = factColumns(entries, contentWidth),
+): string[] {
+	const theme = clioTheme();
+	const counter = (value: string) => theme.fg("counter", value);
 	if (contentWidth < 32)
-		return entries.flatMap(([key, value, annotation]) => [
+		return entries.flatMap(([key, value, note]) => [
 			...wrapTextWithAnsi(theme.fg("fieldName", key), contentWidth),
 			...wrapTextWithAnsi(
-				`${theme.fg("counter", value)}${annotation ? ` ${theme.fg("annotation", annotation)}` : ""}`,
+				[value.length > 0 ? counter(value) : null, note ? theme.fg("annotation", note) : null]
+					.filter((part) => part !== null)
+					.join(" "),
 				contentWidth,
 			),
 		]);
-	const keyWidth = entries.reduce((max, [key]) => Math.max(max, visibleWidth(key)), 0);
-	const columnLimit = Math.min(12, Math.max(0, contentWidth - keyWidth - 2));
-	const valueWidth = entries.reduce((max, [, value]) => {
-		const width = visibleWidth(value);
-		return width <= columnLimit ? Math.max(max, width) : max;
-	}, 0);
-	return entries.flatMap(([key, value, annotation]) => {
-		const text = `${theme.fg("counter", value)}${annotation ? ` ${theme.fg("annotation", annotation)}` : ""}`;
-		const textWidth = visibleWidth(text);
-		const rowKeyWidth =
-			visibleWidth(key) + 2 + textWidth <= contentWidth ? Math.min(keyWidth, contentWidth - textWidth - 2) : keyWidth;
-		const prefix = `${theme.fg("fieldName", padAnsi(key, rowKeyWidth))}  `;
-		const availableWidth = Math.max(1, contentWidth - rowKeyWidth - 2);
-		const padding = Math.max(0, Math.min(valueWidth - visibleWidth(value), availableWidth - textWidth));
-		return wrapTextWithAnsi(`${" ".repeat(padding)}${text}`, availableWidth).map(
-			(line, index) => `${index === 0 ? prefix : " ".repeat(rowKeyWidth + 2)}${line}`,
-		);
+	const { keyWidth, valueWidth } = columns;
+	const noteColumn = keyWidth + 2 + (valueWidth > 0 ? valueWidth + NOTE_GAP : 0);
+	const stacked = contentWidth - noteColumn < NOTE_MIN;
+	const noteIndent = stacked ? keyWidth + 2 : noteColumn;
+	const noteRoom = Math.max(1, contentWidth - noteIndent);
+	return entries.map(placeFact).flatMap((row) => {
+		const lead = `${theme.fg("fieldName", padAnsi(row.key, keyWidth, GLYPH.ellipsis))}  ${
+			valueWidth > 0 ? `${" ".repeat(valueWidth - visibleWidth(row.value))}${row.value ? counter(row.value) : ""}` : ""
+		}`;
+		const notes = row.note.length > 0 ? wrapTextWithAnsi(row.note, noteRoom) : [];
+		const indent = " ".repeat(noteIndent);
+		if (stacked || notes.length === 0) return [lead.trimEnd(), ...notes.map((line) => `${indent}${line}`)];
+		const [first, ...rest] = notes;
+		return [`${padAnsi(lead, noteColumn)}${first}`, ...rest.map((line) => `${indent}${line}`)];
 	});
+}
+
+/** A figure for the number column; one nothing measured is the dash there and says `not measured` in the note. */
+function figureRow(label: string, figure: string, note?: string): FactRow {
+	if (figure === USAGE_NOT_MEASURED)
+		return [label, NO_VALUE, note === undefined ? USAGE_NOT_MEASURED : `${USAGE_NOT_MEASURED} ${GLYPH.sep} ${note}`];
+	return note === undefined ? [label, figure] : [label, figure, note];
 }
 
 const BARE_COUNT = /^[≥~]*\d[\d,]*$/u;
@@ -140,11 +214,7 @@ function tokensText(display: string): string {
 }
 
 /** Whole-session token rows, optionally for one model group; every value is the read model's own display. */
-function tokenRows(
-	view: TelemetryView,
-	model?: string,
-	style: OutputStyle = "standard",
-): Array<readonly [string, string, string?]> {
+function tokenRows(view: TelemetryView, model: string | undefined, sections: UsageSections): FactRow[] {
 	// Each row is the figure alone; the coverage row above the table says once how many calls reported nothing (F4).
 	// One mark at most: `≥~27,252` stacked two qualifiers; the usage data row says once which calls Clio estimated.
 	const quantity = (metric: FactMetric) =>
@@ -157,16 +227,16 @@ function tokenRows(
 			}),
 		);
 	const display = (metric: FactMetric) => usageLineFigure(quantity(metric));
-	if (style === "compact") return [["processed", tokensText(display("total"))]];
+	if (sections === "totals") return [figureRow("processed", display("total"), "tokens")];
 	// `processed` counts the cache write, so Standard shows it whenever it is not zero, as the exit summary does.
-	const cacheWrite = style === "detailed" || nonZero(quantity("cacheWrite"));
+	const cacheWrite = sections === "provenance" || nonZero(quantity("cacheWrite"));
 	return [
-		["input", display("input")],
-		["output", display("output")],
-		["cache read", display("cacheRead")],
-		...(style === "detailed" ? [["reasoning", display("reasoning"), REASONING_NOTE] as const] : []),
-		...(cacheWrite ? [["cache write", display("cacheWrite")] as const] : []),
-		["processed", tokensText(display("total"))],
+		figureRow("input", display("input")),
+		figureRow("output", display("output")),
+		figureRow("cache read", display("cacheRead")),
+		...(sections === "provenance" ? [figureRow("reasoning", display("reasoning"), REASONING_NOTE)] : []),
+		...(cacheWrite ? [figureRow("cache write", display("cacheWrite"))] : []),
+		figureRow("processed", display("total"), "tokens"),
 	];
 }
 
@@ -208,49 +278,53 @@ function callsStillRunning(view: TelemetryView): number {
 }
 
 /**
- * Calls per agent as the exit card counts them: the ones that went out, with the attempts that never left beside them.
- * A role whose every step was skipped reads `0 · 8 never sent` rather than eight model calls nobody made.
+ * The calls row as the exit card counts them: the ones that went out, then in its note each role's share (from the
+ * breakdown tier) and the attempts that never left. A role whose every step was skipped reads `memory 0 (8 never
+ * sent)` rather than eight model calls nobody made.
  */
-function callRows(
+function callRow(
 	view: TelemetryView,
 	groups: ReadonlyArray<{ key: string; calls: Quantity }>,
-): Array<readonly [string, string, string?]> {
-	const caption = (key: string): string => ROLE_CAPTION[key as AgentRole] ?? `${key} calls`;
+	sections: UsageSections,
+): FactRow {
+	const word = (key: string): string => ROLE_WORD[key as AgentRole] ?? key;
+	const breakdown = sections !== "totals";
 	const total = sentCallCount(view);
+	const row = (value: string, parts: readonly string[]): FactRow =>
+		parts.length === 0 ? ["calls", value] : ["calls", value, parts.join(` ${GLYPH.sep} `)];
 	if (Number.isNaN(total))
-		return [
-			...groups.map((group) => [caption(group.key), group.calls.display] as const),
-			["model calls", view.cost("role").total.calls.display],
-		];
-	const unsent = (all: Quantity, sent: number): string | undefined => {
+		return row(
+			view.cost("role").total.calls.display,
+			breakdown ? groups.map((group) => `${word(group.key)} ${group.calls.display}`) : [],
+		);
+	const unsent = (all: Quantity, sent: number): number => {
 		const known = factKnownValue(all.fact);
-		const left = Number.isFinite(known) ? known - sent : 0;
-		return left > 0 ? `sent · ${left.toLocaleString("en-US")} more never sent` : "sent";
+		return Number.isFinite(known) ? Math.max(0, known - sent) : 0;
 	};
-	type Row = readonly [string, string, string?];
-	const row = (label: string, value: number, note: string | undefined): Row =>
-		note === undefined ? [label, value.toLocaleString("en-US")] : [label, value.toLocaleString("en-US"), note];
-	const rows = groups.map((group) => {
-		const sent = sentCallCount(view, { roles: [group.key as AgentRole] });
-		const note = unsent(group.calls, sent);
-		return row(caption(group.key), sent, note);
-	});
-	const note = unsent(view.cost("role").total.calls, total);
-	return [...rows, row("model calls", total, note)];
+	const count = (value: number) => value.toLocaleString("en-US");
+	const roles = breakdown
+		? groups.map((group) => {
+				const sent = sentCallCount(view, { roles: [group.key as AgentRole] });
+				const left = unsent(group.calls, sent);
+				return `${word(group.key)} ${count(sent)}${left > 0 ? ` (${count(left)} never sent)` : ""}`;
+			})
+		: [];
+	const left = unsent(view.cost("role").total.calls, total);
+	return row(count(total), [...roles, ...(left > 0 ? [`${count(left)} more never sent`] : [])]);
 }
 
 /**
  * The Session tab: every call this session paid for, across every branch, as the telemetry read model folds it
- * (#434 §11.3). Nothing here adds or subtracts; an unknown cache read reads `unknown`, never `0`.
+ * (#434 §11.3). Nothing here adds or subtracts; an unknown cache read reads `not measured`, never `0`. The totals show
+ * at every tier, the breakdown rows from standard, the cache accounting and recall from detailed.
  */
-function summaryBlock(
+function summaryRows(
 	view: TelemetryView,
 	recall: RecallTelemetry | null,
 	verified: VerifiedOutcomeCount | null,
-	contentWidth: number,
-	style: OutputStyle,
+	sections: UsageSections,
 	receipt: readonly ReceiptPart[] = [],
-): string[] {
+): FactRow[] {
 	const session = view.session();
 	const byRole = view.cost("role");
 	const cache = view.cache();
@@ -261,53 +335,56 @@ function summaryBlock(
 	// A measured zero read is a cache that served nothing, which the rows say; only a session no call fed hides them.
 	const cached = contributed(cache.cacheRead) || contributed(cache.cacheWrite) || contributed(cache.rePrefilled);
 	const v = cache.verdicts;
-	const calls = callRows(view, groups);
-	return kvBlock(
-		[
-			...(style === "compact" ? calls.slice(-1) : calls),
-			...(style !== "compact" ? [["harness overhead", session.overhead.share.display] as const] : []),
-			...(sessionUsageNotes(view).length > 0 ? [["usage data", sessionUsageNotes(view).join(" · ")] as const] : []),
-			// The calls rows carry their never-sent count beside them; a separate row is needed only when they could not.
-			...(nonZero(neverSent) && Number.isNaN(sentCallCount(view))
-				? [["never sent", `${neverSent.display} ${neverSent.display === "1" ? "call" : "calls"}`] as const]
+	const usageNotes = sessionUsageNotes(view);
+	const receiptNote = receipt.length > 0 ? receiptText(receipt) : undefined;
+	const usd = byRole.total.usd;
+	return [
+		callRow(view, groups, sections),
+		...(sections !== "totals" ? [["harness overhead", session.overhead.share.display] as const] : []),
+		...(usageNotes.length > 0 ? [["usage data", "", usageNotes.join(` ${GLYPH.sep} `)] as const] : []),
+		// The calls row carries its never-sent count; a separate row is needed only when it could not.
+		...(nonZero(neverSent) && Number.isNaN(sentCallCount(view))
+			? [["never sent", neverSent.display, neverSent.display === "1" ? "call" : "calls"] as const]
+			: []),
+		// The receipt is the cost's evidence in words, so it is the cost row's note.
+		...(contributed(usd)
+			? [figureRow("cost", usageUnmeasured(usd) ? USAGE_NOT_MEASURED : usd.display, receiptNote)]
+			: receiptNote !== undefined
+				? [["receipt", "", receiptNote] as const]
 				: []),
-			...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
-			...(receipt.length > 0 ? [["receipt", receiptText(receipt)] as const] : []),
-			...(verified !== null ? verifiedRows(view, verified) : []),
-			...tokenRows(view, undefined, style),
-			...(cached && style === "detailed"
-				? [
-						["uncached prefill", usageFigure(cache.uncachedPrefill)] as const,
-						[
-							"re-prefilled",
-							renderUpperBound(cache.rePrefilled.fact, usageFigure(cache.rePrefilled)),
-							`${cache.breaks.length} breaks`,
-						] as const,
-						["cache-break bill", renderUpperBound(cache.breakUsd.fact, usageFigure(cache.breakUsd))] as const,
-						[
-							"cache verdicts",
-							`hot ${v.hot} · partial ${v.partial} · cold ${v.cold} · small ${v.small} · unknown ${v.unknown}`,
-						] as const,
-					]
-				: []),
-			// #422: a recalled body is written to the cache once and read on every later
-			// request, the same as if it had never left; the tokens here are what the
-			// model asked back, not the recall requests' own prefix reads.
-			...(recall !== null && hasRecallTelemetry(recall)
-				? [["recalled into context", formatRecallTelemetry(recall), "estimate · excludes operator recalls"] as const]
-				: []),
-		],
-		contentWidth,
-	);
+		...(verified !== null ? verifiedRows(view, verified) : []),
+		...tokenRows(view, undefined, sections),
+		...(cached && sections === "provenance"
+			? [
+					["uncached prefill", usageFigure(cache.uncachedPrefill)] as const,
+					[
+						"re-prefilled",
+						renderUpperBound(cache.rePrefilled.fact, usageFigure(cache.rePrefilled)),
+						`${cache.breaks.length} breaks`,
+					] as const,
+					["cache-break bill", renderUpperBound(cache.breakUsd.fact, usageFigure(cache.breakUsd))] as const,
+					[
+						"cache verdicts",
+						`hot ${v.hot} · partial ${v.partial} · cold ${v.cold} · small ${v.small} · unknown ${v.unknown}`,
+					] as const,
+				]
+			: []),
+		// #422: a recalled body is written to the cache once and read on every later
+		// request, the same as if it had never left; the tokens here are what the
+		// model asked back, not the recall requests' own prefix reads.
+		...(recall !== null && hasRecallTelemetry(recall)
+			? [["recalled into context", formatRecallTelemetry(recall), "estimate · excludes operator recalls"] as const]
+			: []),
+	];
 }
 
 /**
  * The session's verified outcomes and what each cost, beside the totals they divide. Cost per outcome is the cost row's
  * own mark, so an unpriced route reads `not measured` on both; with no outcome there is no per-outcome row at all.
  */
-function verifiedRows(view: TelemetryView, outcomes: VerifiedOutcomeCount): Array<readonly [string, string, string?]> {
+function verifiedRows(view: TelemetryView, outcomes: VerifiedOutcomeCount): FactRow[] {
 	const words = verifiedOutcomeWords(view, outcomes);
-	if (words.kind === "none") return [["verified outcomes", "none", NO_VERIFIED_OUTCOME.replace(/^none /u, "")]];
+	if (words.kind === "none") return [["verified outcomes", NO_VALUE, NO_VERIFIED_OUTCOME.replace(/^none /u, "")]];
 	return [
 		["verified outcomes", words.count, words.parts.join(" · ")],
 		["tokens per outcome", words.tokens],
@@ -338,19 +415,26 @@ function sessionReceipt(economy: SessionEconomy, quota: QuotaProviders, now: num
 }
 
 /** The receipt's evidence, expanded under the Session tab; a value with an unknown keeps the neutral tone. */
-function evidenceLines(economy: EconomyProjection, contentWidth: number): string[] {
+function evidenceRows(economy: EconomyProjection): FactRow[] {
 	const theme = clioTheme();
-	const rows = economyEvidence(economy, "session");
-	if (rows.length === 0) return [];
+	return economyEvidence(economy, "session").map(([label, value, note, unknown]) => {
+		const shown = unknown ? theme.fg("unknownValue", value) : value;
+		return note === undefined ? ([label, shown] as const) : ([label, shown, note] as const);
+	});
+}
+
+/**
+ * The Session tab's facts under its titled rule, and the receipt's evidence under its own when shown. The two blocks
+ * share their label and number columns, so every figure of the tab ends in one column and every note starts in one.
+ */
+function sessionLines(rows: readonly FactRow[], evidence: readonly FactRow[], contentWidth: number): string[] {
+	const theme = clioTheme();
+	const columns = factColumns([...rows, ...evidence], contentWidth);
 	return [
-		theme.style("sectionHeading", "Receipt evidence", { bold: true }),
-		...kvBlock(
-			rows.map(([label, value, note, unknown]) => {
-				const shown = unknown ? theme.fg("unknownValue", value) : value;
-				return note === undefined ? ([label, shown] as const) : ([label, shown, note] as const);
-			}),
-			contentWidth,
-		),
+		...kvBlock(rows, contentWidth, columns),
+		...(evidence.length > 0
+			? ["", sectionRule(theme, contentWidth, "Receipt evidence"), ...kvBlock(evidence, contentWidth, columns)]
+			: []),
 	];
 }
 
@@ -365,7 +449,7 @@ function poolLines(economy: EconomyProjection, contentWidth: number): string[] {
 	if (pools.length === 0) return [];
 	return [
 		"",
-		theme.style("sectionHeading", "Funding pools · this session", { bold: true }),
+		sectionRule(theme, contentWidth, "Funding pools", { meta: "this session" }),
 		...wrapTextWithAnsi(
 			theme.fg("annotation", "Declared fees belong to their period, not a session: clio-coder usage report."),
 			contentWidth,
@@ -392,7 +476,7 @@ function poolLines(economy: EconomyProjection, contentWidth: number): string[] {
 }
 
 /** The Models tab: one block per `target/model`, the reported model where the provider named one. */
-function modelLines(view: TelemetryView, contentWidth: number, style: OutputStyle): string[] {
+function modelLines(view: TelemetryView, contentWidth: number, sections: UsageSections): string[] {
 	const theme = clioTheme();
 	const groups = view.cost("model").groups;
 	if (groups.length === 0) return [theme.fg("menuDescription", "no model calls recorded for this session")];
@@ -404,14 +488,16 @@ function modelLines(view: TelemetryView, contentWidth: number, style: OutputStyl
 			...kvBlock(
 				[
 					["model calls", group.calls.display],
-					...(contributed(group.usd) ? [["cost", group.usd.display] as const] : []),
-					...tokenRows(view, group.key, style),
+					...(contributed(group.usd)
+						? [figureRow("cost", usageUnmeasured(group.usd) ? USAGE_NOT_MEASURED : group.usd.display)]
+						: []),
+					...tokenRows(view, group.key, sections),
 				],
 				contentWidth,
 			),
 		);
 	}
-	return [rule(theme, contentWidth), ...lines];
+	return lines;
 }
 
 /** What the overlay reads: the live view, and the ledger's recall fold, re-read on updates rather than per frame. */
@@ -433,6 +519,7 @@ interface SessionEconomy {
 }
 
 export interface OpenUsageOverlayOptions {
+	/** Ignored: `/usage` reads the tier from `tierPolicy()` like every surface (3.1). The sweep row removes it. */
 	getOutputStyle?: () => OutputStyle;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
 	/** Session ledger, read on every render so newly settled and branched calls appear. */
@@ -488,9 +575,9 @@ function sessionValue(view: TelemetryView, elapsed: string | null): string {
 }
 
 /**
- * The glance tab: the activity graph, then the four facts an operator asks for
- * before any table. Every row is `label  value` on one column so the eye reads
- * down the labels, the way the Copilot usage card does.
+ * The glance tab: the activity graph, then the four facts an operator asks for before any table, each `label  value`
+ * on one column so the eye reads down the labels. The graph is a 26-week sparkline from the breakdown tier, and the
+ * full heatmap only with provenance on a terminal of the H3 class or taller.
  */
 function renderActivity(
 	days: ReadonlyMap<string, number>,
@@ -501,46 +588,53 @@ function renderActivity(
 	startedAt: string | null,
 	now: number,
 	contentWidth: number,
-	style: OutputStyle,
+	sections: UsageSections,
+	terminalRows: number,
 ): string[] {
 	const theme = clioTheme();
-	const label = (text: string): string => padAnsi(theme.fg("fieldName", text), 12);
+	const sparkLabel = `${ACTIVITY_SPARK_WEEKS} weeks`;
+	const labelWidth = Math.max(visibleWidth(sparkLabel), visibleWidth("receipt")) + 2;
 	// A value that wraps continues under its own column, not under the label, so a narrow Session row still reads
 	// as one row.
 	const row = (name: string, value: string): string[] =>
 		contentWidth < 32
 			? kvBlock([[name, value]], contentWidth)
-			: wrapTextWithAnsi(value, Math.max(1, contentWidth - 12)).map(
-					(line, index) => `${index === 0 ? label(name) : " ".repeat(12)}${line}`,
+			: wrapTextWithAnsi(value, Math.max(1, contentWidth - labelWidth)).map(
+					(line, index) =>
+						`${index === 0 ? padAnsi(theme.fg("fieldName", name), labelWidth) : " ".repeat(labelWidth)}${line}`,
 				);
-	const lines = [
-		...(style === "detailed" || (style === "standard" && sessions > 0)
-			? [
-					...renderActivityHeatmap(
-						days,
-						now,
-						contentWidth,
-						`last ${ACTIVITY_SPAN_DAYS} days · ${sessions} session${sessions === 1 ? "" : "s"} in this workspace`,
-					),
-					"",
-				]
-			: []),
-	];
+	const workspace = `${sessions} session${sessions === 1 ? "" : "s"} in this workspace`;
+	const tall = heightClass(terminalRows) === "H3" || heightClass(terminalRows) === "H4";
+	const lines: string[] = [];
+	if (sections === "provenance" && tall)
+		lines.push(
+			...renderActivityHeatmap(days, now, contentWidth, `last ${ACTIVITY_SPAN_DAYS} days ${GLYPH.sep} ${workspace}`),
+			"",
+		);
+	else if (sections !== "totals") {
+		const cells = Math.max(1, Math.min(ACTIVITY_SPARK_WEEKS, contentWidth - labelWidth));
+		lines.push(
+			...row(sparkLabel, `${sparkline(theme, weeklyActivity(days, now), cells)}  ${theme.fg("annotation", workspace)}`),
+		);
+	}
 	const changesValue =
 		changes === null
 			? theme.fg("annotation", "not observed")
-			: `${theme.fg("success", `+${changes.insertions}`)} ${theme.fg("error", `-${changes.deletions}`)} ${theme.fg("annotation", `· ${changes.files} file${changes.files === 1 ? "" : "s"}`)}`;
-	lines.push(...row("Changes", changesValue));
+			: `${theme.fg("success", `+${changes.insertions}`)} ${theme.fg("error", `-${changes.deletions}`)} ${theme.fg("annotation", `${GLYPH.sep} ${changes.files} file${changes.files === 1 ? "" : "s"}`)}`;
+	lines.push(...row("changes", changesValue));
 	const started = startedAt ? Date.parse(startedAt) : Number.NaN;
 	const elapsed = Number.isFinite(started) ? `${formatElapsed(Math.max(0, now - started))} so far` : null;
 	const view = data.view;
 	if (!view)
 		lines.push(
-			...row("Session", theme.fg("annotation", [elapsed, data.missing].filter((part) => part !== null).join(" · "))),
+			...row(
+				"session",
+				theme.fg("annotation", [elapsed, data.missing].filter((part) => part !== null).join(` ${GLYPH.sep} `)),
+			),
 		);
 	else {
-		lines.push(...row("Session", sessionValue(view, elapsed)));
-		// A token total nothing measured already says why on the Session row, so its coverage is not said again here.
+		lines.push(...row("session", sessionValue(view, elapsed)));
+		// A token total nothing measured already says why on the session row, so its coverage is not said again here.
 		const tokens = view.session().totals.tokens;
 		const tokenCoverage = usageSaysNothing(usageFigure(tokens)) ? [] : sessionUsageNotes(view);
 		const neverSent = view.session().own.counts.dispositions.neverSent;
@@ -548,25 +642,25 @@ function renderActivity(
 			...tokenCoverage,
 			nonZero(neverSent) ? `${neverSent.display} ${neverSent.display === "1" ? "call" : "calls"} never sent` : null,
 		].filter((part) => part !== null);
-		if (usage.length > 0) lines.push(...row("Usage", theme.fg("annotation", usage.join(" · "))));
+		if (usage.length > 0) lines.push(...row("usage", theme.fg("annotation", usage.join(` ${GLYPH.sep} `))));
 	}
 	// The window that binds first, the fullest one, not whichever account happened to be listed first.
 	const window = bindingQuotaWindow(quota);
 	if (window) {
 		const meter =
-			window.pct !== null && style !== "compact"
+			window.pct !== null && sections !== "totals"
 				? `${quotaMeter(Math.min(100, window.pct), Math.min(28, Math.max(1, contentWidth - 30)), window.severity)} `
 				: "";
 		lines.push(
 			...row(
-				"Plan",
-				`${meter}${window.used} used ${theme.fg("annotation", `· ${window.stale ? "STALE · " : ""}${window.provider} ${window.window}`)}`,
+				"plan",
+				`${meter}${window.used} used ${theme.fg("annotation", `${GLYPH.sep} ${window.stale ? `STALE ${GLYPH.sep} ` : ""}${window.provider} ${window.window}`)}`,
 			),
 		);
-	} else lines.push(...row("Plan", theme.fg("annotation", "no subscription window reported")));
-	// The Plan row above names the binding window, so the receipt here starts at the extra cost.
+	} else lines.push(...row("plan", theme.fg("annotation", "no subscription window reported")));
+	// The plan row above names the binding window, so the receipt here starts at the extra cost.
 	const receipt = data.economy ? economyReceipt(data.economy.projection.total, null) : [];
-	if (receipt.length > 0) lines.push(...row("Receipt", receiptText(receipt)));
+	if (receipt.length > 0) lines.push(...row("receipt", receiptText(receipt)));
 	return lines;
 }
 
@@ -616,14 +710,15 @@ class UsageOverlayBody implements Component {
 			startedAt: string | null;
 			now: () => number;
 		},
-		private readonly getOutputStyle: () => OutputStyle,
-		private readonly getHealthLines: (width: number, style: OutputStyle) => string[],
+		private readonly getHealthLines: (width: number, sections: UsageSections) => string[],
+		/** Terminal rows: the heatmap needs the H3 class or taller. */
+		private readonly terminalRows: () => number,
 		/** Told which tab each frame shows, so the machine sampler runs only under Health. */
 		private readonly onTabShown: (tab: number) => void = () => {},
 	) {}
 
 	showsEvidence(): boolean {
-		return this.evidence ?? this.getOutputStyle() === "detailed";
+		return this.evidence ?? tierPolicy().usageSections === "provenance";
 	}
 
 	/** Whether the open view has more than it shows, so the scroll keys move something. */
@@ -660,17 +755,17 @@ class UsageOverlayBody implements Component {
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, Math.floor(width));
 		this.onTabShown(this.tab);
-		const style = this.getOutputStyle();
+		const sections = tierPolicy().usageSections;
 		const data = this.getData();
 		const quota = this.getQuotaSnapshots();
 		const theme = clioTheme();
+		// The active tab carries the cursor; a no-break space keeps a tab's number with its name when the row wraps.
 		const tabs = wrapTextWithAnsi(
 			USAGE_TABS.map((name, index) =>
 				index === this.tab
-					? theme.style("selectedOption", `${index + 1}\u00a0${name}`, { bold: true, underline: true })
-					: // A no-break space keeps a tab's number with its name when the row wraps (`5` above `Workers`).
-						theme.fg("menuOption", `${index + 1}\u00a0${name}`),
-			).join("   "),
+					? theme.style("selectedOption", `${GLYPH.cursor}${index + 1}\u00a0${name}`, { bold: true })
+					: theme.fg("menuOption", `${index + 1}\u00a0${name}`),
+			).join("  "),
 			contentWidth,
 		);
 		let body: string[];
@@ -684,16 +779,17 @@ class UsageOverlayBody implements Component {
 				this.activity.startedAt,
 				this.activity.now(),
 				contentWidth,
-				style,
+				sections,
+				this.terminalRows(),
 			);
 		else if (this.tab === 1)
 			body = [
-				...(style === "compact"
+				...(sections === "totals"
 					? []
 					: [theme.fg("annotation", "Account-wide limits · filled = used · shared across sessions and devices"), ""]),
 				// An empty tab said only that nothing was journaled; it now says what would fill it.
 				...(quota.length > 0
-					? renderQuotaAccounts(quota, contentWidth, { compact: style === "compact" })
+					? renderQuotaAccounts(quota, contentWidth, { compact: sections === "totals" })
 					: wrapTextWithAnsi(
 							theme.fg(
 								"annotation",
@@ -705,35 +801,37 @@ class UsageOverlayBody implements Component {
 			];
 		else if (this.tab === 2)
 			body = [
-				theme.style("sectionHeading", "Session tokens & cost", { bold: true }),
-				...(style === "detailed"
-					? [
-							theme.fg("annotation", "Every call this session paid for, across every branch · estimates and gaps are marked"),
-							"",
-						]
-					: []),
+				sectionRule(theme, contentWidth, "Session", { meta: "this session, every branch" }),
 				...(data.view
-					? summaryBlock(
-							data.view,
-							data.recall,
-							data.verified,
+					? sessionLines(
+							summaryRows(
+								data.view,
+								data.recall,
+								data.verified,
+								sections,
+								data.economy ? sessionReceipt(data.economy, quota, this.activity.now()) : [],
+							),
+							data.economy && this.showsEvidence() ? evidenceRows(data.economy.projection) : [],
 							contentWidth,
-							style,
-							data.economy ? sessionReceipt(data.economy, quota, this.activity.now()) : [],
 						)
 					: [theme.fg("annotation", data.missing)]),
-				...(data.economy && this.showsEvidence() ? ["", ...evidenceLines(data.economy.projection, contentWidth)] : []),
-				"",
-				rule(theme, contentWidth),
-				...(style === "detailed"
-					? [theme.fg("annotation", "Session tokens cannot be converted to subscription percentages.")]
+				...(data.view && !nonZero(data.view.cost("role").total.calls)
+					? [theme.fg("annotation", "no calls recorded for this session")]
 					: []),
-				...(data.view && !nonZero(data.view.cost("role").total.calls) ? ["no calls recorded for this session"] : []),
+				...(sections === "provenance"
+					? [
+							"",
+							theme.fg(
+								"annotation",
+								"Estimates and gaps are marked. Session tokens cannot be converted to subscription percentages.",
+							),
+						]
+					: []),
 			];
 		else if (this.tab === 3) {
 			body = [
-				theme.style("sectionHeading", "Model activity · this session", { bold: true }),
-				...(style === "detailed"
+				sectionRule(theme, contentWidth, "Models", { meta: "this session, every branch" }),
+				...(sections === "provenance"
 					? [
 							theme.fg(
 								"annotation",
@@ -742,10 +840,10 @@ class UsageOverlayBody implements Component {
 							"",
 						]
 					: []),
-				...(data.view ? modelLines(data.view, contentWidth, style) : [theme.fg("annotation", data.missing)]),
+				...(data.view ? modelLines(data.view, contentWidth, sections) : [theme.fg("annotation", data.missing)]),
 			];
-		} else if (this.tab === 5) body = this.getHealthLines(contentWidth, style);
-		else body = renderWorkerUsage(this.getDispatchRows(), this.recordedRuns(data.view), quota, contentWidth, style);
+		} else if (this.tab === 5) body = this.getHealthLines(contentWidth, sections);
+		else body = renderWorkerUsage(this.getDispatchRows(), this.recordedRuns(data.view), quota, contentWidth);
 		const lines = body.flatMap((line) => wrapTextWithAnsi(line, contentWidth));
 		this.lineCount = lines.length;
 		// One row stays free for the `n–m / N` indicator a scrolled page carries.
@@ -830,12 +928,12 @@ export function openUsageOverlay(
 			startedAt: options?.sessionStartedAt ?? null,
 			now,
 		},
-		options?.getOutputStyle ?? (() => "standard"),
-		(width, style) => [
-			...healthLines(healthData(readModel, options?.health), width, style),
-			"",
-			...machineBlock(machine.snapshot(), now(), width),
-		],
+		// The machine block is healthy detail, so it joins the Health rows from the breakdown tier.
+		(width, sections) => {
+			const lines = healthLines(healthData(readModel, options?.health), width);
+			return sections === "totals" ? lines : [...lines, "", ...machineBlock(machine.snapshot(), now(), width)];
+		},
+		() => tui.terminal.rows,
 		(tab) => machine.setActive(tab === 5),
 	);
 	if (options?.tab) body.tab = Math.max(0, USAGE_TAB_NAMES.indexOf(options.tab));
@@ -847,7 +945,7 @@ export function openUsageOverlay(
 		// The scroll keys are named only while the open view has more than it shows.
 		footerHint: (innerWidth) =>
 			buildResponsiveHint([
-				{ key: "1–6 / Tab", verb: "view", critical: true },
+				{ key: "1–6/Tab", verb: "view", critical: true },
 				// The evidence is folded away in Standard, so its key outlives the scroll keys on a narrow rail.
 				...(body.tab === 2
 					? [

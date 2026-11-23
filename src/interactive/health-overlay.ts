@@ -1,9 +1,11 @@
 import type { OutputStyle } from "../core/defaults.js";
 import { stampLocal } from "../core/format-time.js";
+import { presentationTier, tierPolicy } from "../core/presentation-tier.js";
 import type { HealthV1, QuotaStateV1, SessionTelemetryV1 } from "../core/telemetry/dto.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import { renderCount } from "../core/telemetry/render.js";
 import type { RouteBreakerView } from "../domains/dispatch/contract.js";
+import { severityForPct } from "../domains/quota/presentation.js";
 import type { SystemOneBreakerView } from "../domains/system-one/index.js";
 import type { TelemetryReadModel } from "../domains/telemetry/contract.js";
 import { HEALTH_WINDOW_MS } from "../domains/telemetry/health-window.js";
@@ -132,7 +134,8 @@ function loss(count: number, phrase: string, passive = true): Loss {
 function journalLosses(journal: Journal, owner: OwnerName): Loss[] {
 	return [
 		loss(measured(journal.dropped), `dropped from ${owner.of} journal`),
-		loss(measured(journal.writeErrors), `could not be written to ${owner.of} journal`, false),
+		// The table's column is `failed writes`, so the sentence names the cause in the same words.
+		loss(measured(journal.writeErrors), `lost to failed writes on ${owner.of} journal`),
 		loss(measured(journal.invalid), `rejected as malformed by ${owner.of} journal`),
 	].filter((entry) => entry.count > 0);
 }
@@ -220,10 +223,31 @@ function textWords(
 	return quantity.fact.kind === "measured" ? words(quantity.fact.value) : stripUsageClause(quantity.display);
 }
 
-/** The overlay's lines, from data read once per frame: the summary, then a rule per region. */
-export function healthLines(data: HealthData, width: number, style: OutputStyle): string[] {
+/** A journal that lost, rejected or still holds records: the rows Health shows at every tier. */
+function journalUnhealthy(journal: Journal): boolean {
+	return lost(journal.dropped) || lost(journal.writeErrors) || lost(journal.invalid) || lost(journal.queueDepth);
+}
+
+/** A provider account worth showing when only unhealthy rows show: a failed read, a stale reading, a window near its limit. */
+function accountUnhealthy(account: QuotaStateV1["providers"][number]): boolean {
+	return (
+		account.status !== "ok" ||
+		account.stale ||
+		account.windows.some((window) => severityForPct(factKnownValue(window.usedPct.fact)) !== "normal")
+	);
+}
+
+/**
+ * The overlay's lines, from data read once per frame: the summary, then a rule per region. The tier's `usageSections`
+ * decides which rows show: from `breakdown` every row, at `totals` only the rows that are not healthy, by state, so a
+ * healthy session at the compact tier reads as the sentence alone.
+ */
+export function healthLines(data: HealthData, width: number, tier: OutputStyle = presentationTier()): string[] {
 	const theme = clioTheme();
 	const safe = Math.max(1, Math.floor(width));
+	const sections = tierPolicy(tier).usageSections;
+	const everyRow = sections !== "totals";
+	const provenance = sections === "provenance";
 	const unit = (label: string, display: string, alarm = false) =>
 		`${theme.fg("fieldName", label)} ${theme.fg(alarm ? "warning" : "counter", display)}`;
 	const lossCell = (quantity: LiveCount): TableCell => ({
@@ -235,74 +259,82 @@ export function healthLines(data: HealthData, width: number, style: OutputStyle)
 	const lines: string[] = [];
 
 	const summary = healthSummary(data);
-	lines.push(
-		...wrapTextWithAnsi(
-			`${statusChip(theme, summary.ok ? "ok" : "warning")} ${theme.fg(summary.ok ? "body" : "warning", summary.text)}`,
-			safe,
-		),
-		"",
+	const lead = wrapTextWithAnsi(
+		`${statusChip(theme, summary.ok ? "ok" : "warning")} ${theme.fg(summary.ok ? "body" : "warning", summary.text)}`,
+		safe,
 	);
 
 	// Without a read model the summary has said so once; the regions it would feed are left out rather than each
 	// repeating it.
 	const health = data.health;
-	if (health && style !== "compact") {
-		lines.push(
-			sectionRule(theme, safe, "Saving what CLIO Coder records"),
-			...(style === "detailed"
-				? note(
-						"CLIO Coder writes every model call and event to a journal on disk: one for this process, one for each session and worker run.",
-					)
-				: []),
+	if (health) {
+		const names = ownerNames(health.journals, data.sessionId);
+		const shown = health.journals.flatMap((journal, index) =>
+			everyRow || journalUnhealthy(journal) ? [{ journal, name: names[index] }] : [],
 		);
-		const outside = [
-			unit("records a journal refused", health.producer.sinkFailures.display, lost(health.producer.sinkFailures)),
-		];
+		const refused = lost(health.producer.sinkFailures);
 		const unowned = health.producer.unownedRecords;
-		if (health.journals.length === 0)
+		if (everyRow || shown.length > 0 || refused || lost(unowned)) {
 			lines.push(
-				...missing("No journal is open in this process yet."),
-				...chipRows(theme, [unit("dropped with no journal open", unowned.display), ...outside], safe),
-			);
-		else
-			lines.push(
-				...journalRows(
-					health.journals,
-					ownerNames(health.journals, data.sessionId),
-					safe,
-					lossCell,
-					outside,
-					lost(unowned) ? unowned : null,
-				),
-			);
-
-		lines.push(sectionRule(theme, safe, "Responsiveness"));
-		const lag = health.loopLag;
-		if (lag.max.fact.kind === "unknown")
-			lines.push(
-				...missing(`Not measured yet: CLIO Coder checks every ${WINDOW_SECONDS} seconds while a session is open.`),
-			);
-		else
-			lines.push(
-				...chipRows(
-					theme,
-					[
-						unit("typical tick", lag.p50.display),
-						unit(
-							"slowest 1% of ticks",
-							lag.p99.display,
-							lag.p99.fact.kind === "measured" && lag.p99.fact.value > SLOW_TICK_MS,
-						),
-						unit("slowest tick", lag.max.display, lag.max.fact.kind === "measured" && lag.max.fact.value >= STALL_MS),
-					],
-					safe,
-				),
-				...(style === "detailed"
+				sectionRule(theme, safe, "Saving what CLIO Coder records"),
+				...(provenance
 					? note(
-							`How late CLIO Coder's 10 ms timer ran in the latest ${WINDOW_SECONDS}-second check. Under ${SLOW_TICK_MS}ms is not noticeable.`,
+							"CLIO Coder writes every model call and event to a journal on disk: one for this process, one for each session and worker run.",
 						)
 					: []),
 			);
+			const outside =
+				everyRow || refused ? [unit("records a journal refused", health.producer.sinkFailures.display, refused)] : [];
+			if (shown.length === 0)
+				lines.push(
+					...(health.journals.length === 0 ? missing("No journal is open in this process yet.") : []),
+					...chipRows(
+						theme,
+						[...(everyRow || lost(unowned) ? [unit("dropped with no journal open", unowned.display)] : []), ...outside],
+						safe,
+					),
+				);
+			else
+				lines.push(
+					...journalRows(
+						shown.map((entry) => entry.journal),
+						shown.map((entry) => entry.name ?? { label: entry.journal.owner, of: entry.journal.owner, id: "" }),
+						safe,
+						lossCell,
+						outside,
+						lost(unowned) ? unowned : null,
+						everyRow,
+					),
+				);
+		}
+
+		const lag = health.loopLag;
+		const slow = lag.p99.fact.kind === "measured" && lag.p99.fact.value > SLOW_TICK_MS;
+		const stalled = lag.max.fact.kind === "measured" && lag.max.fact.value >= STALL_MS;
+		if (everyRow || slow || stalled) {
+			lines.push(sectionRule(theme, safe, "Responsiveness"));
+			if (lag.max.fact.kind === "unknown")
+				lines.push(
+					...missing(`Not measured yet: CLIO Coder checks every ${WINDOW_SECONDS} seconds while a session is open.`),
+				);
+			else
+				lines.push(
+					...chipRows(
+						theme,
+						[
+							unit("typical tick", lag.p50.display),
+							unit("slowest 1% of ticks", lag.p99.display, slow),
+							unit("slowest tick", lag.max.display, stalled),
+						],
+						safe,
+					),
+					...(provenance
+						? note(
+								`How late CLIO Coder's 10 ms timer ran in the latest ${WINDOW_SECONDS}-second check. Under ${SLOW_TICK_MS}ms is not noticeable.`,
+							)
+						: []),
+				);
+		}
 	}
 
 	const connection = data.transport;
@@ -312,7 +344,7 @@ export function healthLines(data: HealthData, width: number, style: OutputStyle)
 			connection.recovery !== null ||
 			factKnownValue(connection.websocketFailures.fact) > 0 ||
 			factKnownValue(connection.sseFallbacks.fact) > 0);
-	const transport = style === "compact" && !connectionProblem ? undefined : connection;
+	const transport = !everyRow && !connectionProblem ? undefined : connection;
 	if (transport !== undefined) lines.push(sectionRule(theme, safe, "Connection to the model"));
 	if (transport === null) lines.push(...missing("No reply from the model has finished yet."));
 	else if (transport !== undefined) {
@@ -374,37 +406,38 @@ export function healthLines(data: HealthData, width: number, style: OutputStyle)
 		);
 	}
 
-	if (data.quota && (style === "detailed" || data.quota.providers.length > 0)) {
+	const accounts = data.quota?.providers.filter((account) => everyRow || accountUnhealthy(account)) ?? [];
+	if (data.quota && (provenance || accounts.length > 0)) {
 		lines.push(sectionRule(theme, safe, "Provider limits"));
-		const providers = data.quota.providers;
-		if (providers.length === 0) lines.push(...missing("No provider has reported a usage limit to this session."));
-		else lines.push(...quotaAccountRows(providers, safe));
+		if (accounts.length === 0) lines.push(...missing("No provider has reported a usage limit to this session."));
+		else lines.push(...quotaAccountRows(accounts, safe));
 	}
 
-	if (style === "detailed" || data.breakers.length > 0) lines.push(sectionRule(theme, safe, "Model routes"));
-	if (style === "detailed" && data.breakers.length === 0)
-		lines.push(...missing("No model route is paused or counting failures."));
-	for (const route of data.breakers)
+	const breakers = data.breakers.filter((route) => everyRow || route.state !== "closed");
+	if (provenance || breakers.length > 0) lines.push(sectionRule(theme, safe, "Model routes"));
+	if (provenance && breakers.length === 0) lines.push(...missing("No model route is paused or counting failures."));
+	for (const route of breakers)
 		lines.push(
 			`${statusChip(theme, route.state === "closed" ? "ok" : "warning")} ${theme.fg("footerIdentity", route.targetId)} ${theme.fg(route.state === "closed" ? "counter" : "warning", routeBreakerPhrase(route))}`,
 		);
 
-	const systemOneStatus = data.systemOneStatus ?? [];
-	if (style === "detailed" || (data.systemOne?.length ?? 0) > 0 || systemOneStatus.length > 0)
+	const systemOneStatus = everyRow ? (data.systemOneStatus ?? []) : [];
+	const systemOne = data.systemOne?.filter((breaker) => everyRow || breaker.state !== "closed") ?? [];
+	if (provenance || systemOne.length > 0 || systemOneStatus.length > 0)
 		lines.push(sectionRule(theme, safe, "System One engines"));
 	for (const line of systemOneStatus) lines.push(...wrapTextWithAnsi(theme.fg("body", line), safe));
-	if (style === "detailed" && data.systemOne === null)
-		lines.push(...missing("Not available: this process has no System One."));
-	else if (style === "detailed" && data.systemOne?.length === 0)
+	if (provenance && data.systemOne === null) lines.push(...missing("Not available: this process has no System One."));
+	else if (provenance && data.systemOne?.length === 0)
 		lines.push(...missing("No System One engine is paused or counting timeouts."));
-	for (const breaker of data.systemOne ?? [])
+	for (const breaker of systemOne)
 		lines.push(
 			`${statusChip(theme, breaker.state === "closed" ? "ok" : "warning")} ${theme.fg("footerIdentity", breaker.engine)} ${theme.fg(
 				breaker.state === "closed" ? "counter" : "warning",
 				systemOneBreakerPhrase(breaker),
 			)}`,
 		);
-	return lines;
+	// The sentence stands alone when nothing follows it.
+	return lines.length === 0 ? lead : [...lead, "", ...lines];
 }
 
 /**
@@ -424,6 +457,8 @@ function journalRows(
 	 * under `dropped`: a warning verdict above a table of zeros read as two different reports (H4).
 	 */
 	unowned: LiveCount | null = null,
+	/** Every row's explanation and the ids; the compact tier shows the unhealthy journals' counts alone. */
+	full = true,
 ): string[] {
 	const theme = clioTheme();
 	const counts = (journal: Journal) =>
@@ -466,16 +501,18 @@ function journalRows(
 		if (visibleWidth(inline) <= width) return [theme.fg("annotation", inline)];
 		return visibleWidth(name.id) <= width ? [theme.fg("annotation", name.id)] : [];
 	};
-	const explain = wrapTextWithAnsi(
-		theme.fg(
-			"annotation",
-			"rejected means malformed; skipped means the recording mode leaves that kind out, which is not a loss.",
-		),
-		width,
-	);
+	const explain = full
+		? wrapTextWithAnsi(
+				theme.fg(
+					"annotation",
+					"rejected means malformed; skipped means the recording mode leaves that kind out, which is not a loss.",
+				),
+				width,
+			)
+		: [];
 	const below = chipRows(theme, outside, width);
 	if (tableColumnsFit(spec, width))
-		return [...tableRows(theme, spec, width), ...below, ...explain, ...names.flatMap(idRow)];
+		return [...tableRows(theme, spec, width), ...below, ...explain, ...(full ? names.flatMap(idRow) : [])];
 	const lines: string[] = [];
 	for (const [index, journal] of journals.entries()) {
 		const name = names[index];
