@@ -39,24 +39,24 @@ async function open(items: ViewArtifact[], initialFilter = "") {
 test("initial text filters global evidence, appends at the end, and clears at any cursor position", async () => {
 	const items = [artifact("DEMO-REPORT.md"), artifact("distant evidence mentions old reports", "run")];
 	const { view } = await open(items, "DEMO-REPORT");
-	match(plain(view), /List · 1\/2/u);
+	match(plain(view), /1 of 1 artifact · filtered from 2/u);
 	doesNotMatch(plain(view), /Run records/u);
 	view.handleInput(".md");
 	match(plain(view), /> DEMO-REPORT.md/u);
 	view.handleInput("\x01");
 	view.handleInput("\x15");
-	match(plain(view), /List · 2\/2/u);
+	match(plain(view), /1–2 of 2 artifacts/u);
 	view.undoInput();
 	match(plain(view), /> DEMO-REPORT.md/u);
 	view.handleInput("\x15");
 	view.handleInput("unfindable");
-	match(plain(view), /List · 0\/2/u);
+	match(plain(view), /No matching artifacts among 2\./u);
 	match(plain(view), /Esc clears the filter/u);
 	view.handleInput("\r");
 	strictEqual(view.keyboardScope, "edit");
 	view.handleInput("\x15");
 	view.handleInput("run:");
-	match(plain(view), /List · 1\/2/u);
+	match(plain(view), /1 of 1 artifact · filtered from 2/u);
 	match(plain(view), /Run records/u);
 });
 
@@ -93,16 +93,16 @@ test("view gives narrow lists the full width and lets a focused preview move bet
 	view.handleInput("\r");
 	view.render(60);
 	await settle();
-	match(plain(view, 60), /Preview · 1\/2[\s\S]*Read the retry module/u);
-	match(plain(view, 40), /Preview · 1\/2 · i detail/u);
+	match(plain(view, 60), /Preview · 1 of 2[\s\S]*Read the retry module/u);
+	match(plain(view, 40), /Preview · 1 of 2 · i detail/u);
 	doesNotMatch(plain(view, 40), /i det…/u);
 	const wide = `${plain(view, 160)}\n${view.getHint(160)}`;
 	match(wide, /i detail/u);
 	doesNotMatch(wide, /\binfo\b/u, wide);
 	view.handleInput("n");
-	match(plain(view, 60), /Preview · 2\/2[\s\S]*Run the retry tests/u);
+	match(plain(view, 60), /Preview · 2 of 2[\s\S]*Run the retry tests/u);
 	view.handleInput("p");
-	match(plain(view, 60), /Preview · 1\/2[\s\S]*Read the retry module/u);
+	match(plain(view, 60), /Preview · 1 of 2[\s\S]*Read the retry module/u);
 	view.handleInput("\x1b");
 	match(plain(view, 200), /Read the retry module before changing its tests/u);
 });
@@ -127,8 +127,9 @@ test("an unusually long title leaves room for the preview body", async () => {
 	view.render(40);
 	await settle();
 	const rows = plain(view, 40).split("\n");
+	const preview = rows.findIndex((row) => row.startsWith("Preview ·"));
 	const metadata = rows.findIndex((row) => row.startsWith("transcript ·"));
-	ok(metadata > 0 && metadata <= 4, rows.join("\n"));
+	ok(preview >= 0 && metadata > preview && metadata - preview <= 4, rows.join("\n"));
 	match(rows[metadata + 1] ?? "", /Body of long/u);
 });
 
@@ -167,7 +168,7 @@ test("literal terms match full paths and provenance without matching scattered l
 	report.sessionId = "session-current";
 	report.runId = "run-current";
 	const { view } = await open([report, artifact("s_e_s_s_i_o_n-c_u_r_r_e_n_t")], "session-current");
-	match(plain(view), /List · 1\/2/u);
+	match(plain(view), /1 of 1 artifact · filtered from 2/u);
 	for (const width of [40, 92, 160]) {
 		view.handleInput("\r");
 		view.render(width);
@@ -325,11 +326,11 @@ test("Ctrl+U clears at any cursor with line-end remapped and undo restores the w
 			if (movement) view.handleInput(movement);
 			view.handleInput("\x15");
 			doesNotMatch(plain(view), /^> |filter:/mu);
-			match(plain(view), /List · 2\/2/u);
+			match(plain(view), /1–2 of 2 artifacts/u);
 			view.handleInput("\x15");
 			view.undoInput();
 			match(plain(view), /> DEMO-REPORT/u);
-			match(plain(view), /List · 1\/2/u);
+			match(plain(view), /1 of 1 artifact · filtered from 2/u);
 			view.handleInput("\x15");
 			view.handleInput("other");
 			match(plain(view), /> other/u);
