@@ -297,7 +297,7 @@ export const OUTPUT_STYLES = ["compact", "standard", "detailed"] as const;
 export type OutputStyle = (typeof OUTPUT_STYLES)[number];
 
 export function outputStyleLabel(style: OutputStyle): string {
-	return { compact: "Minimal", standard: "Default", detailed: "Detailed" }[style];
+	return style;
 }
 
 export function interfaceGuidanceEnabled(settings: Pick<InterfaceSettings, "demo" | "outputDetail">): boolean {
@@ -334,7 +334,7 @@ export interface InterfaceSettings {
 	/** Optional welcome and learning guidance; outputDetail sets their density. */
 	demo: boolean;
 	terminalProgress: boolean;
-	/** Minimal, Default, or Detailed presentation across terminal surfaces; never changes model reasoning. */
+	/** Compact, standard, or detailed presentation across terminal surfaces; never changes model reasoning. */
 	outputDetail: OutputStyle;
 	/** Regular scrollback-preserving renderer or alternate-screen sticky layout. */
 	mode: TuiMode;

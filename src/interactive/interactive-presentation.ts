@@ -4,6 +4,7 @@ import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS, outputStyleLabel } from "../core/defaults.js";
 import { readHarnessProfile } from "../core/harness-profile.js";
 import type { JobRecord } from "../core/job-types.js";
+import { setPresentationTier } from "../core/presentation-tier.js";
 import { probedSandboxAvailability } from "../core/sandbox/availability.js";
 import { mainShellContained } from "../core/sandbox/main-session.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
@@ -1073,10 +1074,14 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		autonomy: editorChrome.getAutonomy?.() ?? "default",
 	});
 	let lastSettingState = readSettingState();
+	// Boot sync of the process-wide tier; every later change reaches it through announceSettingChanges or Alt+O.
+	setPresentationTier(lastSettingState.output);
 	const announceSettingChanges = (): void => {
 		const next = readSettingState();
 		const previous = lastSettingState;
 		lastSettingState = next;
+		// The settings overlay, hot reload and the yolo card commit without changeOutputStyle; this observer sees them all.
+		setPresentationTier(next.output);
 		const changes: string[] = [];
 		if (next.thinking !== previous.thinking) {
 			// The rail's words, so the toast, the rail and the picker name one state alike (bt-11).
@@ -1480,7 +1485,14 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			requestRender();
 		},
 		changeOutputStyle: (mutation) =>
-			chatRenderer.mutate(() => preserveTranscriptScroll(transcriptView, deps.terminal.columns, mutation), "output-style"),
+			chatRenderer.mutate(
+				() =>
+					preserveTranscriptScroll(transcriptView, deps.terminal.columns, () => {
+						mutation();
+						setPresentationTier(readSettingState().output);
+					}),
+				"output-style",
+			),
 		announceSettingChanges,
 		getQuotaSnapshots: () => {
 			quotaSummary.peekSnapshots();

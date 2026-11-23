@@ -2274,7 +2274,7 @@ function renderTurnUsageLine(
 			: usage.ending?.kind === "call_not_run"
 				? writtenCallsFact(usage.ending.writtenTools)
 				: null;
-	// A turn with no answer states why in every style: Brief drops receipts, not this.
+	// A turn with no answer states why at every tier: compact drops the spend, not this.
 	const noAnswer =
 		usage.ending?.kind === "no_answer"
 			? hangProseLines(
@@ -2284,19 +2284,15 @@ function renderTurnUsageLine(
 					).map(releaseSpaces),
 				)
 			: [];
-	if (receipt === "none") {
-		// A written call that did not run is news in every style too, and Brief has no receipt row to carry it otherwise.
+	if (receipt === "outcome") {
+		// A written call that did not run is news at every tier too, and the outcome receipt has no other row to carry it.
 		if (usage.ending?.kind === "call_not_run")
 			return [
 				`${glyph}${dimLine(joinFacts([`${outcome}${receiptDuration(usage)}`, writtenCallsFact(usage.ending.writtenTools), ...endedFact]), room)}`,
 			];
-		if (noAnswer.length > 0)
-			return [`${glyph}${dimLine(joinFacts([`${outcome}${receiptDuration(usage)}`, ...endedFact]), room)}`, ...noAnswer];
-		// Brief keeps no receipt, but a turn still has to end visibly: its outcome glyph and how long it took.
-		// Done is the glyph alone; the warn glyph covers several outcomes, so any other one keeps its word.
-		const took = receiptDuration(usage).replace(/^ · /u, "");
-		const end = outcome === "Done" && took !== "" ? took : `${outcome}${receiptDuration(usage)}`;
-		return [`${glyph}${dimLine(joinFacts([end, ...endedFact]), room)}`];
+		// The outcome receipt states no spend, but a turn still ends visibly: its outcome word, how long it took, when,
+		// and why no answer came when none did.
+		return [`${glyph}${dimLine(joinFacts([`${outcome}${receiptDuration(usage)}`, ...endedFact]), room)}`, ...noAnswer];
 	}
 	const spend = usage.spend;
 	// A turn that left workers running states their spend apart and live, so its outcome drops their count frozen at its end.
@@ -2311,7 +2307,7 @@ function renderTurnUsageLine(
 			.filter(Boolean)
 			.join(", ") || null;
 	const moved = usage.movedTo ? `moved to ${modelNickname(usage.movedTo)}` : null;
-	if (receipt === "compact") {
+	if (receipt === "summary") {
 		// The outcome, then how long and how many calls; a call count of one says nothing unless retries explain it.
 		// Calls Clio never sent are part of the count, so they are said inside it: `2 calls · 1 call never sent` read as
 		// three calls.
