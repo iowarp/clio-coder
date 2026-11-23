@@ -122,8 +122,8 @@ socket as its `XDG_RUNTIME_DIR`, `XDG_STATE_HOME` and `TMPDIR`, and that
 directory is removed with the host. CLIO Coder writes the host's herdr
 config on every launch: its prefix is `ctrl+b`, herdr's own help, settings,
 workspace, picker and reload screens are unbound, sounds and update checks are
-off, and the pane chrome follows `interface.outputDetail`: Minimal (`compact`)
-drops pane gaps and scrollbars, and Detailed draws outer borders. Changing the output style in
+off, and the pane chrome follows `interface.outputDetail`: compact drops pane
+gaps, labels and scrollbars, and detailed draws outer borders. Changing the output detail in
 the session redraws the host's chrome live.
 
 Started from a pane of your own herdr (`HERDR_ENV=1` with a socket that is not

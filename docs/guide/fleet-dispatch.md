@@ -2196,12 +2196,12 @@ hard block.
   or `<id> (acp) · run <runId>` with no route for ACP delegation peers. The header
   ends with the execution outcome (`✓ execution ok`, `✗` with the outcome code,
   `○ ran no tools`, or canceled) and the duration. The block body renders the worker
-  prose down a rail, a rail line with tokens processed, context and tool calls (hidden
-  in Minimal output), and a `quality` line that keeps validation quality separate
+  prose down a rail, a rail line with tokens processed, context and tool calls (detailed
+  output only), and a `quality` line that keeps validation quality separate
   from execution status. A failure reason prints on the rail. A council synthesis
   that succeeded while some members gave no answer is headed `! partial` instead of a
   plain success.
-- Model-launched workers use `◆`; operator-launched workers use `◇`. Both follow the current output detail: Minimal identity/outcome, Default short summary, Detailed bounded activity and a larger summary, and a settled Detailed card keeps its answer and failure. A run waiting on an approval says so at every tier. `Alt+O` cycles the tiers for the session. `/view transcript` and `/view dispatch:<runId>` expose full available details. Execution success and validation quality remain separate facts.
+- Model-launched workers use `◆`; operator-launched workers use `◇`. Both follow the current output detail. Compact shows outcomes: a `/run` card is its one run row, with the changes and checks of a settled run in place of the task, and a worker row under a dispatch header appears only when it failed, carries a warning or waits on you. Standard adds the bounded evidence: a facts row and up to 3 answer rows. Detailed adds provenance and telemetry: the telemetry row, the tool trail (up to 3 rows), up to 8 answer rows and the run's `/view dispatch:<runId>` reference. A run that stopped to ask you something shows its question, up to 16 rows, at every tier. `Alt+O` cycles the tiers for the session. `/view transcript` and `/view dispatch:<runId>` expose full available details. Execution success and validation quality remain separate facts.
 - Sharing: nothing an operator-started run (`/run`) produced enters
   the main model's context unless `--share` was passed or the operator runs
   `/fleet share [runId]`; runs the model started return through the dispatch tool result as
@@ -2355,11 +2355,11 @@ The board's header counts running, done, cancelled and failed runs, with cancell
 
 A second CLIO Coder process on the same state directory also shows the live workers another process owns in this project, read from their run feeds, and draws their held approval asks as its own permission cards. An answer given there is written to the run's directory, bound to the ask's attempt and arguments, and the owning process applies it and records which process answered; the owner's open card closes. A run whose owning process is gone ends as dead and its asks are withdrawn. Cancelling a followed run records a durable cancel request, which its owner takes and seals as `canceled`. Nothing about another process's runs is journaled by the viewer ([cross-process-fleet.ts](../../src/domains/dispatch/cross-process-fleet.ts)).
 
-A card follows the session's output detail: three rows in Detailed, rows 1 and 3 in Default, and in Minimal one row that joins row 1's glyph, agent and clock to row 3. The rows are:
+A card follows the session's output detail: one row at compact, two at standard and three at detailed. The rows are:
 
-1. The state glyph (`●` running, `◌` queued, `!` stale, `✓` done, `⊘` canceled, `✗` failed, `◌` for a run that succeeded without calling a tool), the agent id, the elapsed clock and the task.
-2. The route (`target/model`), the tool-budget meter (`▰▰▱ tools 12/40`, or `tools 12` with no cap), tokens, and for a finished run its cost when something priced it.
-3. For a live run, the tool call in flight, `last: <call>` while it waits on the model, or its phase (`starting`, `thinking`, `writing`, `calling a tool`, `waiting for the model`, `sealing the run record`). A queued run reads `queued, waiting for a slot`. For a finished run, the run record's verdict: `✓ succeeded`, `◌ ran no tools`, `⊘ cancelled` or `✗ <outcome>`, then `contract met`, `contract failed`, `contract not reached` or `contract unmeasured` when the run settled a result-contract fact, then the trust verdict (`trust reviewed|grounded|unverified|unknown`, or the failed axis in words). A seal that is not intact (such as `seal broken` or `seal unchecked`) replaces the trust verdict. A run with no readable run record shows the ledger's own outcome detail or `run record unavailable`.
+1. The run row: the state glyph, the agent id, the elapsed clock and the task. At compact this one row carries every fact of the run, so a failure's reason starts on it; at standard and detailed it keeps the state word whole.
+2. A failure's reason, the approval words of a run waiting on you, or a live run's phase followed by the task.
+3. Telemetry: the route, the call count, tokens, `last: <call>`, `record: <verdict>` and a reference to the run.
 
 A narrow dock sheds the task first, then the model, then cost and route. The state glyph and the clock always stay. Every worker-adjacent string is redacted and stripped of control bytes where it is drawn.
 

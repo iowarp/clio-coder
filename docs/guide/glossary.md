@@ -125,7 +125,7 @@ The words you meet first, each in a sentence or two, with the guide that explain
 - **Owning Type**: `WorkerShareFacts` in [worker-share.ts](../../src/session-control/worker-share.ts).
 
 ### 21. Fold
-- **Definition**: Presenting an action as a short summary in the current output tier. `Alt+O` cycles Minimal, Default, and Detailed. Use `/view transcript` for full available details.
+- **Definition**: Presenting an action as a short summary in the current output detail tier. `Alt+O` cycles compact, standard and detailed. Use `/view transcript` for full available details.
 - **Owning Type**: `WorkerEntryRenderOptions` in [worker-entry.ts](../../src/interactive/renderers/worker-entry.ts).
 
 ### 22. Interop

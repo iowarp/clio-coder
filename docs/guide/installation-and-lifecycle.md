@@ -967,6 +967,10 @@ The retired-settings migration removes the keys retired without a replacement
 from the user `settings.yaml`, rewrites the older `interface.exitSummary` and
 `interface.outputDetail` spellings and a version-2 `fleet.nodes[].clioEntry`,
 reports every change and keeps the previous file as `settings.yaml.retired.bak`.
+The registry also runs `2026-11-23-exit-summary-on-off` second: it rewrites any
+older `interface.exitSummary` value still in the user file (`auto`, `brief`,
+`standard`, `report` or `full`) to `on`, reports the change and keeps the
+previous file as `settings.yaml.exit-summary.bak`.
 
 The approvals migration copies project approval records from
 `<stateDir>/workspace-trust/` to `<configDir>/workspace-trust/`, keeps a record

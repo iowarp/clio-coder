@@ -356,11 +356,11 @@ Inside a container, bubblewrap must be installed in the image, and the container
 | --- | --- | --- |
 | `interface.terminalProgress` | `false` | next turn |
 | `interface.demo` | `true` | tier-bounded welcome presentation, tips and optional footer learning immediately; prompt line next turn; pacing and motion independent |
-| `interface.outputDetail` | `standard` | immediately |
+| `interface.outputDetail` | `standard` | immediately; `compact` \| `standard` \| `detailed` |
 | `interface.mode` | `regular` | restart |
 | `interface.fullscreenScrollbar` | `auto` | restart |
 | `interface.smoothStreaming` | `auto` | immediately |
-| `interface.exitSummary` | `auto` | immediately, at the next exit |
+| `interface.exitSummary` | `on` | immediately, at the next exit; `on` \| `off`, and `interface.outputDetail` sizes the summary |
 | `interface.desktopNotifications` | `false` | next turn |
 | `interface.autoUpdate` | `true` | immediately; `false` keeps the update notice and leaves the native background install and the after-quit npm, pnpm, Bun or Volta update to `clio-coder upgrade` |
 | `interface.guiTurnCapacity` | `4` | next graphical app turn when changed in the app's settings; a change made elsewhere applies when the GUI server restarts. Range 1 to 16 |
