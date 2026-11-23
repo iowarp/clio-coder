@@ -1,4 +1,5 @@
-import type { OutputStyle } from "../core/defaults.js";
+import { normalizeOutputStyle, type OutputStyle } from "../core/defaults.js";
+import type { RunIntegrity, RunOrigin, RunValidation } from "../core/run-row.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import { loadRunTelemetrySource, runTelemetryJournalStamp } from "../domains/session/telemetry-source.js";
 import { sizeCallJournalCache } from "../domains/telemetry/call-journal.js";
@@ -50,8 +51,6 @@ const TEXT_ROW_MAX_CHARS = 8000;
 const FOLD_READ_MAX_BYTES = 512 * 1024;
 /** Finished workers the board lists after the running ones. */
 const FINISHED_CARD_LIMIT = 24;
-/** Lines of a sealed answer the takeover shows under the record summary. */
-export const ANSWER_PREVIEW_LINES = 12;
 
 // ---------------------------------------------------------------------------
 // Selection request
@@ -65,7 +64,7 @@ export const ANSWER_PREVIEW_LINES = 12;
  * A viewer from before this format reads only the first line and keeps working.
  */
 export interface WatchRequest {
-	outputDetail?: OutputStyle;
+	outputDetail: OutputStyle;
 	runId: string | null;
 	seq: string;
 	sessionId: string | null;
@@ -82,9 +81,8 @@ function parseWatchRequest(raw: string): WatchRequest {
 	}
 	const since = Date.parse(fields.get("since") ?? "");
 	const session = fields.get("session") ?? "";
-	const detail = fields.get("outputDetail");
 	return {
-		outputDetail: detail === "compact" || detail === "detailed" ? detail : "standard",
+		outputDetail: normalizeOutputStyle(fields.get("outputDetail")) ?? "standard",
 		runId: first.length > 0 && first.length <= 128 ? first : null,
 		// Without a counter the run id itself is the request, which is how the
 		// one-line format behaved.
@@ -146,6 +144,8 @@ export interface RunFold {
 	current: StreamRow | null;
 	/** The call that finished last. */
 	last: StreamRow | null;
+	/** The permission ask the worker escalated to the operator and nobody has answered yet. */
+	asking: StreamRow | null;
 	phase: WorkerPhase;
 	terminal: { outcome: string; detail?: string } | null;
 }
@@ -175,6 +175,7 @@ function emptyFold(): RunFold {
 		eventsUnread: false,
 		current: null,
 		last: null,
+		asking: null,
 		phase: "starting",
 		terminal: null,
 	};
@@ -322,9 +323,15 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunFeedLine, { kind: "even
 			if (fold.phase === "writing" || fold.phase === "thinking") fold.phase = "waiting";
 			return;
 		case "clio_coder_permission_escalated":
-			pushRow(cursor, { at: line.at, kind: "approval", text: detail, ...(line.tool ? { tool: line.tool } : {}) });
+			fold.asking = pushRow(cursor, {
+				at: line.at,
+				kind: "approval",
+				text: detail,
+				...(line.tool ? { tool: line.tool } : {}),
+			});
 			return;
 		case "clio_coder_permission_resolved":
+			fold.asking = null;
 			pushRow(cursor, {
 				at: line.at,
 				kind: "decision",
@@ -398,6 +405,7 @@ function applyLine(cursor: FoldCursor, line: RunFeedLine): void {
 			}
 			cursor.pendingById.clear();
 			fold.current = null;
+			fold.asking = null;
 			fold.phase = "settled";
 	}
 }
@@ -491,6 +499,10 @@ export interface RunRecordView {
 	/** The overall trust verdict in the shared vocabulary (`grounded`, `unverified`, …). */
 	verdict?: string;
 	validation?: string;
+	/** The run row's integrity input: verified only on an authenticated seal, compromised on a broken one. */
+	integrity: RunIntegrity;
+	/** The run row's validation input, from the record's validation grounding. */
+	validationState: RunValidation;
 	failure?: string;
 	answer?: string;
 	changedPaths?: ReadonlyArray<string>;
@@ -506,6 +518,28 @@ function sealChecked(view: RunRecordView | null): boolean {
 	);
 }
 
+function integrityInput(state: string | undefined): RunIntegrity {
+	if (state === "verified" || state === "not_applicable") return "verified";
+	return state === "failed" ? "compromised" : "unverified";
+}
+
+/** A validation claimed and never observed passed only on the worker's own report. */
+function validationInput(state: string | undefined): RunValidation {
+	switch (state) {
+		case "validated":
+			return "passed";
+		case "failed":
+			return "failed";
+		case "ungrounded":
+			return "self-reported";
+		case "absent":
+		case "not_applicable":
+			return "none";
+		default:
+			return "unknown";
+	}
+}
+
 function runRecordView(runId: string, stateDir: string): RunRecordView | null {
 	const facts = readRunResultFacts(runId, stateDir);
 	if (facts === null) return null;
@@ -514,6 +548,8 @@ function runRecordView(runId: string, stateDir: string): RunRecordView | null {
 		facts.changedPaths !== undefined && facts.changedPaths.length > 0 ? facts.changedPaths : undefined;
 	return {
 		outcome: facts.outcome,
+		integrity: integrityInput(integrity?.state),
+		validationState: validationInput(facts.trust?.validationGrounding.state),
 		...(facts.outcomeCode !== undefined ? { outcomeCode: facts.outcomeCode } : {}),
 		...(facts.contract !== undefined ? { contract: facts.contract } : {}),
 		...(integrity !== undefined ? { seal: trustStateWord("artifactIntegrity", integrity.state) } : {}),
@@ -548,8 +584,14 @@ export interface WorkerCard {
 	endedAtMs: number | null;
 	target: string;
 	model: string;
+	/** Who asked for the run, for the identity cell. */
+	origin: RunOrigin;
+	/** A helper CLIO Coder runs for the model (`↳`). */
+	helper: boolean;
 	toolCalls: number;
 	elapsed?: string;
+	/** The run's clock in milliseconds, live or stopped at its end. */
+	elapsedMs?: number;
 	toolCallsDisplay?: string;
 	toolCap?: number;
 	/** The run's tokens as the read model words a count: `~` estimated, `≥` with its unknown calls when partial. */
@@ -559,6 +601,10 @@ export interface WorkerCard {
 	phase: WorkerPhase;
 	current: StreamRow | null;
 	last: StreamRow | null;
+	/** A permission ask waiting on the operator while the run is live. */
+	asking: StreamRow | null;
+	/** The newest finished calls, oldest first, for the detail's tool trail. */
+	trail: StreamRow[];
 	/** Newest prose, for a running card that is writing rather than calling tools. */
 	lastText?: string;
 	record: RunRecordView | null;
@@ -666,6 +712,7 @@ function finishedRecord(source: BoardSource, run: RunEnvelope, nowMs: number): R
 interface CardTelemetry {
 	toolCalls: number;
 	elapsed: string;
+	elapsedMs: number;
 	toolCallsDisplay: string;
 	tokens: string | undefined;
 	cost: string | null;
@@ -686,12 +733,30 @@ function cardTelemetry(source: BoardSource, run: RunEnvelope, nowMs: number): Ca
 	const facts: CardTelemetry = {
 		toolCalls: factKnownValue(telemetry.activity.toolCalls.fact),
 		elapsed: telemetry.activity.elapsed.display,
+		elapsedMs: factKnownValue(telemetry.activity.elapsed.fact),
 		toolCallsDisplay: telemetry.activity.toolCalls.display,
 		tokens: telemetry.row.tokens.display,
 		cost: telemetry.row.usd.display,
 	};
 	if (stamp !== null) source.telemetry.set(run.id, { stamp, facts });
 	return facts;
+}
+
+/** Rows of the detail's tool trail at the most generous tier. */
+const TRAIL_ROWS = 3;
+
+function runOrigin(run: RunEnvelope): RunOrigin {
+	const origin = run.rootRequestOrigin ?? run.requestOrigin;
+	return origin === "user" ? "operator" : origin === "agent" || origin === undefined ? "model" : "harness";
+}
+
+function toolTrail(fold: RunFold): StreamRow[] {
+	const trail: StreamRow[] = [];
+	for (let index = fold.rows.length - 1; index >= 0 && trail.length < TRAIL_ROWS; index -= 1) {
+		const row = fold.rows[index];
+		if (row?.kind === "tool" && row.pending !== true) trail.unshift(row);
+	}
+	return trail;
 }
 
 function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): WorkerCard {
@@ -716,8 +781,11 @@ function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): Worker
 		endedAtMs: endedAtMs !== null && Number.isFinite(endedAtMs) ? endedAtMs : null,
 		target: run.targetId,
 		model: run.wireModelId,
+		origin: runOrigin(run),
+		helper: run.agentAudience === "shadow" || run.agentAudience === "internal",
 		toolCalls: telemetry.toolCalls,
 		elapsed: telemetry.elapsed,
+		elapsedMs: telemetry.elapsedMs,
 		toolCallsDisplay: telemetry.toolCallsDisplay,
 		...(toolCap !== undefined ? { toolCap } : {}),
 		...(tokens !== undefined ? { tokens } : {}),
@@ -725,6 +793,8 @@ function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): Worker
 		phase: isLive(state) ? fold.phase : "settled",
 		current: isLive(state) ? fold.current : null,
 		last: fold.last,
+		asking: isLive(state) ? fold.asking : null,
+		trail: toolTrail(fold),
 		...(lastText !== undefined ? { lastText } : {}),
 		record,
 		...(rootRunId?.startsWith("fleet-") ? { fleetRootId: rootRunId } : {}),

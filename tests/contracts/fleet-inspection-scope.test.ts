@@ -351,7 +351,7 @@ test("a finished card's row keeps its refusal and seal whole and drops the least
 	ok(narrow.startsWith("✓ succe") && narrow.includes("…"), narrow);
 });
 
-test("the selected dock card spells out a task its header cuts at the 0.34 share (bt-tui dock cut)", () => {
+test("a selected dock card keeps its neighbours' rows and cuts the task with an ellipsis (W2-3)", () => {
 	const paint = { fg: (_role: unknown, text: string) => text, dim: (text: string) => text };
 	const task = "Implement slugify in textutil/slug.py and add unit tests for unicode, punctuation and empty input";
 	const card = {
@@ -359,31 +359,31 @@ test("the selected dock card spells out a task its header cuts at the 0.34 share
 		agentId: "coder",
 		task,
 		state: "running",
-		elapsed: "12s",
+		elapsedMs: 12_000,
 		phase: "thinking",
 		current: null,
 		last: null,
+		asking: null,
+		trail: [],
 		record: null,
 		attempt: 0,
 		toolCalls: 0,
 		target: "local",
 		model: "model",
+		origin: "operator",
+		helper: false,
 		startedAtMs: 0,
 		endedAtMs: null,
 	} as unknown as WorkerCard;
-	const options = { nameWidth: 5, nowMs: 0, style: "standard" as const };
-	// 45 cells is the dock's share of a 132-column terminal.
-	const idle = renderCard(paint, card, 45, { ...options, selected: false });
-	strictEqual(idle.length, 2, "an unselected card keeps one header row");
-	ok(idle[0]?.includes("…"), idle[0]);
-	const selected = renderCard(paint, card, 45, { ...options, selected: true });
+	// 45 cells is the dock's share of a 132-column terminal; the test process runs at the standard tier.
+	const idle = renderCard(paint, card, 45, { selected: false, identityWidth: 7 });
+	const selected = renderCard(paint, card, 45, { selected: true, identityWidth: 7 });
+	strictEqual(idle.length, 2, "a standard card is two rows");
+	strictEqual(selected.length, idle.length, "the selected card has its neighbours' rows");
+	ok(selected[0]?.startsWith("❯ ● ◇ coder"), selected[0]);
+	ok(selected[0]?.endsWith("running"), selected[0]);
 	ok(selected.every((row) => row.length <= 45));
-	const words = selected
-		.slice(1, -1)
-		.map((row) => row.replace(/^▌\s*/u, "").trim())
-		.join(" ");
-	strictEqual(words, task);
-	ok(!selected[0]?.includes("Implement"), "the header carries no cut copy of the task");
+	ok(selected[1]?.startsWith("    thinking · Implement") && selected[1]?.endsWith("…"), selected[1]);
 });
 
 test("the workers takeover reads a sealed report in words, never as its JSON (bt-11 dock-detail)", async () => {
