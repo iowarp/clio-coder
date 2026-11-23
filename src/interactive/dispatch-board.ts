@@ -244,7 +244,15 @@ const UNAVAILABLE_USAGE: DispatchUsageText = {
 	cost: "not available",
 	measuredOutput: null,
 };
-const PENDING_USAGE: DispatchUsageText = { prompt: "—", output: "—", total: "—", cost: "—", measuredOutput: null };
+/** The fact separator, from the glyph table so ASCII mode replaces it. */
+const SEP = ` ${GLYPH.sep} `;
+const PENDING_USAGE: DispatchUsageText = {
+	prompt: GLYPH.none,
+	output: GLYPH.none,
+	total: GLYPH.none,
+	cost: GLYPH.none,
+	measuredOutput: null,
+};
 
 function measuredCount(fact: Quantity["fact"]): number | null {
 	if ("kind" in fact) return fact.kind === "measured" ? fact.value : null;
@@ -621,7 +629,7 @@ function progressAnswerLines(
 			...(hiddenLines > 0 ? [`${hiddenLines} more line${hiddenLines === 1 ? "" : "s"}`] : []),
 			...(progress.droppedBytes > 0 ? [`${progress.droppedBytes} bytes outran the view`] : []),
 		];
-		body.push(`${rail}${theme.fg("annotation", truncateToWidth(facts.join(" · "), railWidth, "…", false))}`);
+		body.push(`${rail}${theme.fg("annotation", truncateToWidth(facts.join(SEP), railWidth, GLYPH.ellipsis, false))}`);
 	}
 	// The key labels the block once and the rest hangs under it, which is the
 	// card's key-value grammar applied to a body rather than to one value.
@@ -649,7 +657,8 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 		axes !== undefined &&
 		axes.artifactIntegrity === "verified" &&
 		Object.values(axes).every((state) => !EXCEPTIONAL_TRUST_STATES.has(String(state)));
-	const host = row.hostVerification === undefined ? "" : ` · ${theme.fg("body", `host checks ${row.hostVerification}`)}`;
+	const host =
+		row.hostVerification === undefined ? "" : `${SEP}${theme.fg("body", `host checks ${row.hostVerification}`)}`;
 	if (row.trust === undefined) {
 		const unread = theme.fg(
 			"annotation",
@@ -690,7 +699,7 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 			: cardWrappedValueLines(
 					theme,
 					"why",
-					`${theme.fg("body", row.validationFailure)}${theme.fg("annotation", ` · /view dispatch:${row.runId}`)}`,
+					`${theme.fg("body", row.validationFailure)}${theme.fg("annotation", `${SEP}/view dispatch:${row.runId}`)}`,
 					contentWidth,
 				);
 	const valueWidth = Math.max(1, contentWidth - CARD_KV_KEY_WIDTH - 1);
@@ -720,18 +729,18 @@ function planProgressText(plan: FleetPlanRunView, statusShown = false, withFailu
 	const loops =
 		live || plan.loops === undefined
 			? ""
-			: ` · ${plan.loops.resolved}/${plan.loops.total} ${plan.loops.total === 1 ? "loop" : "loops"} resolved`;
+			: `${SEP}${plan.loops.resolved}/${plan.loops.total} ${plan.loops.total === 1 ? "loop" : "loops"} resolved`;
 	const count = `${live ? done : plan.succeededStepCount}/${plan.requiredStepCount} steps${loops}`;
 	if (plan.state === "cancelling") {
 		const stopping = plan.stoppedStepIds ?? [];
-		return `${count} · ${stopping.length > 0 ? `stopping ${stopping.join(", ")}` : "stopping before the next step"}`;
+		return `${count}${SEP}${stopping.length > 0 ? `stopping ${stopping.join(", ")}` : "stopping before the next step"}`;
 	}
 	// Where a status cell already reads cancelled, repeating it on the count only doubles the word.
-	if (plan.state === "cancelled") return statusShown ? count : `${count} · cancelled`;
-	if (plan.failure !== undefined) return withFailure ? `${count} · ${planFailureWords(plan)}` : count;
-	if (failed !== undefined) return `${count} · ${failed.stepId} failed`;
+	if (plan.state === "cancelled") return statusShown ? count : `${count}${SEP}cancelled`;
+	if (plan.failure !== undefined) return withFailure ? `${count}${SEP}${planFailureWords(plan)}` : count;
+	if (failed !== undefined) return `${count}${SEP}${failed.stepId} failed`;
 	const warned = planWarnedStepCount(plan);
-	return warned === 0 ? count : `${count} · ${warned} with warnings`;
+	return warned === 0 ? count : `${count}${SEP}${warned} with warnings`;
 }
 
 const PLAN_STEP_MARKS: Record<
@@ -789,7 +798,7 @@ function planStepLines(theme: ClioTheme, plan: FleetPlanRunView, width: number):
 		];
 		const lead = `${theme.fg(mark.token, mark.glyph)} ${theme.fg("body", step.stepId.padEnd(nameWidth))}  `;
 		return truncateToWidth(
-			`${lead}${theme.fg(mark.token, facts[0] ?? "")}${theme.fg("annotation", facts.length > 1 ? ` · ${facts.slice(1).join(" · ")}` : "")}`,
+			`${lead}${theme.fg(mark.token, facts[0] ?? "")}${theme.fg("annotation", facts.length > 1 ? `${SEP}${facts.slice(1).join(SEP)}` : "")}`,
 			width,
 			GLYPH.ellipsis,
 			false,
@@ -860,7 +869,7 @@ export function renderFleetPlanCard(plan: FleetPlanRunView, width: number, style
 		truncateToWidth(head, width, GLYPH.ellipsis, false),
 		...(why === null ? [] : cardRows(`${GLYPH.error} ${why}`, width, true, "error")),
 		...shown.map((line) => `${rail}${line}`),
-		`${rail}${theme.fg("annotation", truncateToWidth(`${hidden > 0 ? `${hidden} more steps · ` : ""}/fleet for detail${!policy.evidence ? "" : ` · ${plan.costText === null ? "no model calls" : `cost ${plan.costText}`}`}`, room, GLYPH.ellipsis, false))}`,
+		`${rail}${theme.fg("annotation", truncateToWidth(`${hidden > 0 ? `${hidden} more steps${SEP}` : ""}/fleet for detail${!policy.evidence ? "" : `${SEP}${plan.costText === null ? "no model calls" : `cost ${plan.costText}`}`}`, room, GLYPH.ellipsis, false))}`,
 	];
 }
 
@@ -899,7 +908,7 @@ function dispatchCardBody(
 	const failureMark = completedRunMark(failure);
 	const statusStr =
 		failure !== null
-			? theme.fg(failureMark.token, `${failureMark.glyph} ${presentation.label} · ${failure.words}`)
+			? theme.fg(failureMark.token, `${failureMark.glyph} ${presentation.label}${SEP}${failure.words}`)
 			: `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
 
 	// How long the model took to its first output, in words: a run that has not answered yet says so, and one that
@@ -971,7 +980,9 @@ function dispatchCardBody(
 			? [theme.fg("warning", `failed over x${row.failoverHops}`)]
 			: []),
 		...(firstOutput === null ? [] : [theme.fg("body", firstOutput)]),
-		...(cost === "—" ? [] : [theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)]),
+		...(cost === GLYPH.none
+			? []
+			: [theme.fg("body", cost === USAGE_NOT_MEASURED ? "cost not measured" : `cost ${cost}`)]),
 	];
 	// Context occupancy is a figure like the others: a lower bound keeps its mark, and one nothing measured is left out,
 	// since the line's own coverage unit already says calls went unreported.
@@ -984,9 +995,9 @@ function dispatchCardBody(
 		row.phase === undefined
 			? null
 			: truncateToWidth(
-					`${row.phase.stepId} · wave ${row.phase.wave + 1} of its plan`,
+					`${row.phase.stepId}${SEP}wave ${row.phase.wave + 1} of its plan`,
 					Math.max(1, contentWidth),
-					"…",
+					GLYPH.ellipsis,
 					false,
 				);
 	const fullTask = row.taskSummary
@@ -997,7 +1008,10 @@ function dispatchCardBody(
 		? fullTask.slice(0, 1).map((line) => (fullTask.length > 1 ? cutRowWithEllipsis(line, contentWidth) : line))
 		: options.expanded === true || fullTask.length <= 3
 			? fullTask
-			: [...fullTask.slice(0, 2), theme.fg("annotation", `… ${options.detailKey ?? "Enter"} detail for full task`)];
+			: [
+					...fullTask.slice(0, 2),
+					theme.fg("annotation", `${GLYPH.ellipsis} ${options.detailKey ?? "Enter"} detail for full task`),
+				];
 	const started = runOriginWords(row);
 	const bodyLines = [
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
@@ -1218,7 +1232,7 @@ function councilMemberView(
 		...(council.color !== undefined ? { color: council.color } : {}),
 		round: council.round,
 		route: formatRowRoute(row),
-		status: { ...presentation, ...(progress !== null ? { label: `${presentation.label} · ${progress}` } : {}) },
+		status: { ...presentation, ...(progress !== null ? { label: `${presentation.label}${SEP}${progress}` } : {}) },
 		// Each line of the answer stays its own line: one flattened paragraph ran a claim into its citation.
 		tailText: sanitizeMultilineDisplayText(councilMemberTail(row)).text,
 		droppedLines: row.progress?.droppedLines ?? 0,
@@ -1242,7 +1256,7 @@ function councilMemberProgress(row: DispatchBoardRow): string | null {
 		const streamed = row.progress?.streamedOutputTokens;
 		if (streamed !== undefined && streamed > 0) facts.push(`~${streamed} tok out`);
 	}
-	return facts.join(" · ");
+	return facts.join(SEP);
 }
 
 function memberWhy(row: DispatchBoardRow): { why?: string } {
@@ -1397,7 +1411,7 @@ function itemFromEarlierSession(item: DispatchBoardItem): boolean {
 function earlierSessionsRule(theme: ClioTheme, count: number, width: number): string {
 	const rule = GLYPH.innerDivider;
 	const text = truncateToWidth(
-		`${rule}${rule} earlier sessions · ${count} run${count === 1 ? "" : "s"} `,
+		`${rule}${rule} earlier sessions${SEP}${count} run${count === 1 ? "" : "s"} `,
 		width,
 		GLYPH.ellipsis,
 		false,
@@ -1432,7 +1446,7 @@ export interface RunTableOptions {
 }
 
 /** A table cell with no value yet, or one nothing measured (2.9); the selected run's facts say which, once. */
-const NO_VALUE = "—";
+const NO_VALUE = GLYPH.none;
 
 /**
  * A token figure for a right-aligned column in the count form (`39.4k`), its lower-bound or estimate mark kept. The
@@ -1564,7 +1578,7 @@ function withContextFill(theme: ClioTheme, row: DispatchBoardRow, cell: TableCel
 		fill >= CONTEXT_FILL_WARNING ? "warning" : "muted",
 		`ctx ${Math.min(100, Math.round(fill * 100))}%`,
 	);
-	return { ...cell, text: cell.text.length > 0 ? `${label} · ${cell.text}` : label };
+	return { ...cell, text: cell.text.length > 0 ? `${label}${SEP}${cell.text}` : label };
 }
 
 function liveActivityCell(
@@ -1608,7 +1622,7 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number, r
 		case "retrying":
 			return row.retry
 				? {
-						text: `attempt ${row.retry.attempt} · ${retryCountdown(row.retry, now)}${row.retry.reason ? ` · ${sanitizeCallTargetText(row.retry.reason)}` : ""}`,
+						text: `attempt ${row.retry.attempt}${SEP}${retryCountdown(row.retry, now)}${row.retry.reason ? `${SEP}${sanitizeCallTargetText(row.retry.reason)}` : ""}`,
 						tone: "warning",
 					}
 				: { text: task ?? "retrying", tone: "warning" };
@@ -1940,7 +1954,7 @@ export function runTableRows(
 function runRuleTitle(row: DispatchBoardRow): string {
 	// A plan is known by its name; its root id is for the shell command its detail gives.
 	if (row.plan !== undefined) return agentDisplayLabel(row);
-	return `${agentDisplayLabel(row)} · ${row.runId}`;
+	return `${agentDisplayLabel(row)}${SEP}${row.runId}`;
 }
 
 function rowSignature(row: DispatchBoardRow): string {
@@ -2414,7 +2428,7 @@ function droppedKeyRows(entries: ReadonlyArray<HintEntry>, width: number, esc: H
 	let current = "";
 	for (const entry of dropped) {
 		const unit = `[${keyName(entry.key)}] ${entry.short ?? entry.verb}`;
-		const joined = current.length === 0 ? unit : `${current} · ${unit}`;
+		const joined = current.length === 0 ? unit : `${current}${SEP}${unit}`;
 		if (current.length > 0 && visibleWidth(joined) > room) {
 			rows.push(current);
 			current = unit;

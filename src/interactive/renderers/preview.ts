@@ -21,7 +21,7 @@ export function previewRows(
 	const hidden = tail ? rows.slice(0, rows.length - count) : rows.slice(count);
 	const hint = `${prefix}${clioTheme().fg(
 		"toolMetadata",
-		truncateToWidth(`… ${hiddenWords(hidden)} · /view`, Math.max(1, width - prefixWidth)),
+		truncateToWidth(`${GLYPH.ellipsis} ${hiddenWords(hidden)} ${GLYPH.sep} /view`, Math.max(1, width - prefixWidth)),
 	)}`;
 	return tail ? [hint, ...rows.slice(rows.length - count)] : [...rows.slice(0, count), hint];
 }
@@ -65,7 +65,7 @@ export function previewLines(
 	const words = `${hidden} ${tail ? "earlier" : "more"} ${hidden === 1 ? "line" : "lines"}`;
 	const hint = `${prefix}${clioTheme().fg(
 		"toolMetadata",
-		truncateToWidth(`… ${words} · /view`, Math.max(1, width - prefixWidth)),
+		truncateToWidth(`${GLYPH.ellipsis} ${words} ${GLYPH.sep} /view`, Math.max(1, width - prefixWidth)),
 	)}`;
 	const shown = (tail ? kept.reverse() : kept).flat();
 	return tail ? [hint, ...partial, ...shown] : [...shown, ...partial, hint];

@@ -28,7 +28,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { OutputStyle } from "../core/defaults.js";
 import { onPresentationTierChange, presentationTier } from "../core/presentation-tier.js";
-import { colorDepth } from "../core/terminal-preferences.js";
+import { asciiOnly, colorDepth } from "../core/terminal-preferences.js";
 import { type ClioDirs, clioCacheDir, clioConfigDir, clioDataDir, clioStateDir } from "../core/xdg.js";
 import type { MuxContract, MuxPaneOpenFailure, MuxPaneRecord, MuxPaneRef } from "../domains/mux/index.js";
 import type { PanesWatchController, PanesWatchResult, PanesWorkersResult } from "../domains/mux/operations.js";
@@ -222,6 +222,9 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 			title: "clio-coder workers",
 			purpose: "watch",
 			dock: { slot: "workers", ...(deps.getWorkersRatio ? { share: deps.getWorkersRatio() } : {}) },
+			// The pane inherits the host's environment, and the glyph table is chosen when the dashboard loads, before it
+			// reads its argv; so ASCII mode rides in the pane's own environment, not on argv as the color depth does.
+			...(asciiOnly() ? { env: { CLIO_CODER_ASCII: "1" } } : {}),
 		});
 
 	const describeFailure = (failure: MuxPaneOpenFailure): string => {

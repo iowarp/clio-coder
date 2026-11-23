@@ -128,6 +128,49 @@ test("W0-3 glyph table: ASCII values are ASCII bytes, blocked differs from warni
 	}
 });
 
+test("FX-19 ASCII mode: tool cards and the Fleet Runs board draw only ASCII chrome at 80 columns", () => {
+	const probe = `
+		import { stripTerminalSequences } from "./src/engine/tui.ts";
+		import { createDispatchBoardView } from "./src/interactive/dispatch-board.ts";
+		import { renderToolPreview } from "./src/interactive/renderers/tool-execution.ts";
+		import { transcriptDetail } from "./src/interactive/transcript-detail.ts";
+		import { footerState } from "./tests/harness/footer-fixture.ts";
+		const output = Array.from({ length: 60 }, (_, i) => "line " + i).join("\\n");
+		const calls = [
+			{ toolName: "read", toolCallId: "r1", args: { path: "src/a.ts" }, result: output, isError: false, durationMs: 1200 },
+			{ toolName: "bash", toolCallId: "b1", args: { command: "pnpm test" }, result: output, isError: false, durationMs: 4200, exitCode: 0 },
+			{ toolName: "find", toolCallId: "f1", args: { pattern: "**/*.ts", limit: 20 }, result: output, isError: true },
+			{ toolName: "dispatch", toolCallId: "d1", args: { agent: "coder", task: "x", intent: { write_roots: ["src", "tests"] } }, result: "done", isError: false },
+		];
+		const lines = [];
+		for (const tier of ["standard", "detailed"]) {
+			for (const call of calls) lines.push(...renderToolPreview(call, 80, transcriptDetail(tier)));
+		}
+		const base = footerState().dispatchRows[0];
+		const board = createDispatchBoardView(
+			() => [{ ...base, runId: "r-1", status: "running" }, { ...base, runId: "r-2", status: "enqueued" }],
+			() => undefined,
+		);
+		lines.push(...board.render(80));
+		board.toggleDetail();
+		lines.push(...board.render(80));
+		console.log(JSON.stringify(lines.map(stripTerminalSequences)));
+	`;
+	const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", probe], {
+		env: { ...process.env, TERM: "xterm-256color", NO_COLOR: "1", CLIO_CODER_ASCII: "1" },
+		encoding: "utf8",
+		timeout: 20_000,
+	});
+	strictEqual(result.status, 0, result.stderr);
+	const lines = JSON.parse(result.stdout) as string[];
+	// The args row, the earlier-lines hint and the receipt are each drawn, so the check covers them.
+	ok(lines.some((line) => /limit > 20/u.test(line)));
+	ok(lines.some((line) => /~ \d+ earlier lines \| \/view/u.test(line)));
+	ok(lines.some((line) => /\| 1\.2s$/u.test(line.trimEnd())));
+	const unicode = lines.filter((line) => /[^\x20-\x7e]/u.test(line));
+	deepStrictEqual(unicode, []);
+});
+
 test("demo-off skips welcome-only readers and live toggles restore the full welcome", () => {
 	process.env.TERM = "xterm-256color";
 	delete process.env.CLIO_CODER_SCREEN_READER;
