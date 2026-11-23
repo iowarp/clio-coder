@@ -2,12 +2,13 @@ import { homedir } from "node:os";
 import { relative } from "node:path";
 import { uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import { relativePathEscapes } from "../core/path-containment.js";
+import { onPresentationTierChange, tierPolicy } from "../core/presentation-tier.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { renderUpperBound } from "../core/telemetry/render.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
 import { formatContextWindowSlots } from "../domains/providers/index.js";
-import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
+import type { ContextLedger, ContextLedgerCategory, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import type { RecallTelemetry } from "../domains/session/recall-telemetry.js";
 import type { TelemetryReadModel, TelemetryView } from "../domains/telemetry/contract.js";
 import { type OverlayHandle, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
@@ -23,9 +24,15 @@ import {
 	abbreviateModelId,
 	type ClioToken,
 	chipRow,
+	chipRows,
 	clioTheme,
+	dotSep,
+	fitSides,
 	formatContextPercent,
+	formatCount,
+	GLYPH,
 	padAnsi,
+	type SideUnit,
 	sectionRule,
 } from "./theme/index.js";
 
@@ -82,7 +89,10 @@ function handbookProvenanceLines(handbookFiles: ReadonlyArray<string> | null): s
 	if (!handbookFiles || handbookFiles.length === 0) return [];
 	const first = handbookFiles[0];
 	if (handbookFiles.length === 1 && first !== undefined) return [`handbook: ${displayHandbookPath(first)}`];
-	return ["handbooks (ancestor → nearest):", ...handbookFiles.map((filePath) => `  ${displayHandbookPath(filePath)}`)];
+	return [
+		`handbooks (ancestor ${GLYPH.next} nearest):`,
+		...handbookFiles.map((filePath) => `  ${displayHandbookPath(filePath)}`),
+	];
 }
 
 /**
@@ -97,27 +107,147 @@ const LEGEND_SPLIT_COLUMNS = 84;
 /** A legend column wider than this puts the numbers too far from their labels. */
 const LEGEND_COLUMN_MAX = 56;
 
-function legendRow(group: ContextLedgerGroup, contentWidth: number): string {
+/** How a count prints: lower-case SI on the shared rows of compact and standard, full digits at detailed (2.9). */
+type CountFormat = (n: number) => string;
+
+function legendRow(group: ContextLedgerGroup, contentWidth: number, count: CountFormat): string {
 	const theme = clioTheme();
 	const swatch = contextCategorySwatch(group.category, theme);
-	const tokens = formatTokens(group.tokens);
+	const tokens = count(group.tokens);
 	const percent = formatContextPercent(group.percent);
 	const right = `${tokens.padStart(9)}  ${percent.padStart(6)}`;
 	const labelToken: ClioToken = "legend";
 	const leftWidth = Math.max(0, contentWidth - visibleWidth(right) - visibleWidth(swatch) - 2);
 	const labelText = truncateToWidth(group.label, leftWidth, "", true);
-	return `${swatch} ${theme.fg(labelToken, labelText)} ${theme.fg("menuDescription", right)}`;
+	// The figures are values: a reading role, so `NO_COLOR` dims the label and not the number.
+	return `${swatch} ${theme.fg(labelToken, labelText)} ${theme.fg("counter", right)}`;
 }
 
 /** The legend as one column, or two side by side when the body is wide enough for both to read. */
-function legendRows(groups: ReadonlyArray<ContextLedgerGroup>, contentWidth: number): string[] {
+function legendRows(groups: ReadonlyArray<ContextLedgerGroup>, contentWidth: number, count: CountFormat): string[] {
 	if (contentWidth < LEGEND_SPLIT_COLUMNS)
-		return groups.map((group) => legendRow(group, Math.min(contentWidth, LEGEND_COLUMN_MAX)));
+		return groups.map((group) => legendRow(group, Math.min(contentWidth, LEGEND_COLUMN_MAX), count));
 	const column = Math.min(LEGEND_COLUMN_MAX, Math.floor((contentWidth - 4) / 2));
 	const half = Math.ceil(groups.length / 2);
-	const left = groups.slice(0, half).map((group) => legendRow(group, column));
-	const right = groups.slice(half).map((group) => legendRow(group, column));
+	const left = groups.slice(0, half).map((group) => legendRow(group, column, count));
+	const right = groups.slice(half).map((group) => legendRow(group, column, count));
 	return left.map((line, index) => `${padAnsi(line, column)}    ${right[index] ?? ""}`.trimEnd());
+}
+
+/** The one-word category names of the compact row, where the legend's labels do not fit beside each other. */
+const CATEGORY_SHORT_LABEL: Readonly<Record<ContextLedgerCategory, string>> = {
+	system: "system",
+	tools: "tools",
+	toolResults: "results",
+	agents: "fleet",
+	skills: "skills",
+	memory: "memory",
+	project: "project",
+	messages: "messages",
+	pending: "pending",
+	reserve: "reserve",
+	free: "free",
+	streaming: "output",
+};
+
+/**
+ * Compact's one category row: what holds the window, largest first, as many as fit, and `+N` for the rest. Free space
+ * and the autocompact reserve are what the total and its threshold already say, so they are not categories here.
+ */
+function categoryRow(groups: ReadonlyArray<ContextLedgerGroup>, width: number): string | null {
+	const theme = clioTheme();
+	const content = groups
+		.filter((group) => group.category !== "free" && group.category !== "reserve" && group.tokens > 0)
+		.sort((a, b) => b.tokens - a.tokens);
+	if (content.length === 0) return null;
+	const units = content.map(
+		(group) =>
+			`${theme.fg("legend", CATEGORY_SHORT_LABEL[group.category])} ${theme.fg("counter", formatCount(group.tokens))}`,
+	);
+	const separator = dotSep(theme);
+	for (let kept = units.length; kept >= 1; kept--) {
+		const rest = units.length - kept;
+		const row = [...units.slice(0, kept), ...(rest > 0 ? [theme.fg("annotation", `+${rest}`)] : [])].join(separator);
+		if (visibleWidth(row) <= width) return row;
+	}
+	return theme.fg("annotation", `${content.length} categories`);
+}
+
+/** The autocompact unit of the total line at compact: the threshold is the value, the words around it the label. */
+function autocompactUnit(ledger: ContextLedger): SideUnit {
+	const theme = clioTheme();
+	const manual = ledger.compactionAuto ? "" : " (manual)";
+	if (ledger.contextWindow <= 0 && ledger.compactionCeilingTokens)
+		return { text: `autocompact at ceiling${manual}`, paint: (text) => theme.fg("annotation", text) };
+	if (ledger.compactionThreshold === null)
+		return { text: "autocompact off", paint: (text) => theme.fg("annotation", text) };
+	const threshold = `${Math.round(ledger.compactionThreshold * 100)}%`;
+	return {
+		text: `autocompact at ${threshold}${manual}`,
+		paint: () =>
+			`${theme.fg("annotation", "autocompact at")} ${theme.fg("counter", threshold)}${manual ? theme.fg("annotation", manual) : ""}`,
+	};
+}
+
+/**
+ * The total: what the window holds against its size and the fill percent, then, by tier, the autocompact threshold
+ * (compact) or the window's provenance and the route (detailed). Units are kept whole or dropped whole, last first, so
+ * the line never ends in a cut unit or `· …`.
+ */
+function totalLine(ledger: ContextLedger, width: number, count: CountFormat): string {
+	const theme = clioTheme();
+	const sections = tierPolicy().usageSections;
+	const estimate = ledger.measured ? "" : GLYPH.estimate;
+	const units: SideUnit[] = [];
+	if (ledger.contextWindow > 0) {
+		// `196,608 (786,432 / 4 slots)`: a llama.cpp window that is one slot's share of the server's KV budget names the
+		// split, because the bare number reads as the whole server and the meter is measured against the share (#187).
+		const slots = ledger.contextWindowSlots;
+		const window =
+			slots === undefined || slots === null
+				? count(ledger.contextWindow)
+				: count === formatTokens
+					? formatContextWindowSlots(ledger.contextWindow, slots)
+					: `${count(ledger.contextWindow)} (${count(slots.totalContextSize)} / ${slots.slots} slots)`;
+		units.push({
+			text: `${estimate}${count(ledger.usedTokens)} / ${window} tokens`,
+			paint: (text) => theme.fg("counter", text),
+		});
+		units.push({
+			text: formatContextPercent(ledger.percent),
+			paint: (text) => theme.fg(contextPercentRole(ledger.percent), text),
+		});
+	} else {
+		units.push({ text: "context window unknown", paint: (text) => theme.fg("unknownValue", text) });
+		units.push({
+			text: `${GLYPH.estimate}${count(ledger.usedTokens)} tokens in context`,
+			paint: (text) => theme.fg("counter", text),
+		});
+	}
+	if (sections === "totals") units.push({ ...autocompactUnit(ledger), drop: 2 });
+	if (sections === "provenance") {
+		if (ledger.contextWindow > 0) {
+			const source = ledger.measured
+				? `provider-anchored total ${GLYPH.dot} estimated splits`
+				: "estimated total and splits";
+			const provenance = contextWindowProvenanceLabel(ledger.contextWindowSource);
+			units.push({
+				text: provenance ? `${provenance} window ${GLYPH.dot} ${source}` : source,
+				paint: (text) => theme.fg("menuDescription", text),
+				drop: 1,
+				...(provenance ? { shorter: [{ text: `${provenance} window`, rank: 0 }] } : {}),
+			});
+		}
+		const provider = ledger.provider ?? "no target";
+		const model = ledger.model ? abbreviateModelId(ledger.model) : "no model";
+		units.push({
+			text: `${provider} ${GLYPH.dot} ${model}`,
+			paint: () =>
+				`${theme.fg("modelIdentity", provider)} ${theme.fg("annotation", GLYPH.dot)} ${theme.fg("modelIdentity", model)}`,
+			drop: 2,
+		});
+	}
+	return fitSides(theme, units, [], width).trimEnd();
 }
 
 function evictedTokens(view: WorkingSetView): number {
@@ -182,17 +312,30 @@ function renderWorkingSetLines(
 		`churn ${formatChurn(view)}`,
 	].join(" · ");
 	return [
-		`${theme.fg("fieldName", "working set")} ${theme.fg("annotation", "·")} ${theme.fg("fieldValue", workingSetPolicyLabel(view, config))}`,
-		theme.fg("annotation", summary),
+		`${theme.fg("fieldName", "working set")} ${theme.fg("annotation", GLYPH.dot)} ${theme.fg("fieldValue", workingSetPolicyLabel(view, config))}`,
+		// Counts, so a value role: `NO_COLOR` must not dim them.
+		theme.fg("fieldValue", summary),
 	];
 }
 
-/** The live budget's next-request facts, when the chat loop can inspect them. */
+/**
+ * The live budget's next-request facts, when the chat loop can inspect them. A pending handoff is a next action, so it
+ * shows at every tier; the budget figures are evidence and start at standard.
+ */
 function nextRequestLines(inspection: BudgetInspection | undefined, width: number): string[] {
 	if (inspection?.status !== "available") return [];
 	const theme = clioTheme();
 	const view = inspection.view;
-	const count = (value: number | null) => (value === null ? "unknown" : formatTokens(value));
+	const sections = tierPolicy().usageSections;
+	if (sections === "totals") {
+		if (!view.pendingHandoff) return [];
+		return [
+			`${theme.fg("fieldName", "handoff")} ${theme.fg("warning", view.lastOutcome?.outcome ?? "pending")} ${theme.fg("annotation", view.pendingHandoff.id)}`,
+			theme.fg("annotation", `/context recover ${view.pendingHandoff.id} reduce|deliver`),
+		];
+	}
+	const figure = sections === "provenance" ? formatTokens : formatCount;
+	const count = (value: number | null) => (value === null ? "unknown" : figure(value));
 	const lines = [
 		sectionRule(theme, width, "Next request", { meta: view.phase }),
 		chipRow(
@@ -227,50 +370,22 @@ function renderContextLedgerLines(
 ): string[] {
 	const theme = clioTheme();
 	const lines: string[] = [];
+	// The tier bounds the evidence (3.2): compact is the bar, the total with its threshold and one category row;
+	// standard adds the category table and the autocompact line; detailed adds working set, cache, preload, prior session.
+	const sections = tierPolicy().usageSections;
+	const count: CountFormat = sections === "provenance" ? formatTokens : formatCount;
 
 	// The answer first: the meter across the body, then the figure it draws.
-	for (const gridLine of renderContextMeterGrid(ledger, contentWidth, GRID_ROWS, theme)) lines.push(gridLine);
-
-	const provider = ledger.provider ?? "no target";
-	const model = ledger.model ? abbreviateModelId(ledger.model) : "no model";
-	const route = `${theme.fg("modelIdentity", provider)} ${theme.fg("annotation", "·")} ${theme.fg("modelIdentity", model)}`;
-	if (ledger.contextWindow > 0) {
-		const source = ledger.measured ? "provider-anchored total · estimated splits" : "≈ estimated";
-		// `196,608 (786,432 / 4 slots)`: a llama.cpp window that is one slot's
-		// share of the server's KV budget names the split, because the bare
-		// number reads as the whole server and the meter is measured against
-		// the share (issue #187).
-		const window = ledger.contextWindowSlots
-			? formatContextWindowSlots(ledger.contextWindow, ledger.contextWindowSlots)
-			: formatTokens(ledger.contextWindow);
-		const summary = `${formatTokens(ledger.usedTokens)} / ${window} tokens (${theme.fg(contextPercentRole(ledger.percent), formatContextPercent(ledger.percent))})`;
-		const provenance = contextWindowProvenanceLabel(ledger.contextWindowSource);
-		const trailer = provenance ? `${provenance} window · ${source}` : source;
-		lines.push(
-			chipRow(theme, [theme.base("counter", summary), theme.fg("menuDescription", trailer), route], contentWidth),
-		);
-	} else {
-		lines.push(
-			chipRow(
-				theme,
-				[
-					theme.fg(
-						"unknownValue",
-						`context window unknown · ${formatTokens(ledger.usedTokens)} tokens estimated in context`,
-					),
-					route,
-				],
-				contentWidth,
-			),
-		);
+	const gridRows = sections === "totals" ? 1 : GRID_ROWS;
+	for (const gridLine of renderContextMeterGrid(ledger, contentWidth, gridRows, theme)) lines.push(gridLine);
+	lines.push(totalLine(ledger, contentWidth, count));
+	if (sections === "totals") {
+		const row = categoryRow(ledger.meter, contentWidth);
+		if (row !== null) lines.push(row);
+		return lines;
 	}
 
-	lines.push(...legendRows(ledger.meter, contentWidth));
-	if (workingSet && workingSet.evicted.size > 0) lines.push(renderEvictedTokensLine(evictedTokens(workingSet), theme));
-
-	if (workingSet) {
-		for (const line of renderWorkingSetLines(workingSet, workingSetConfig, recall)) lines.push(line);
-	}
+	lines.push(...legendRows(ledger.meter, contentWidth, count));
 	const compaction =
 		ledger.contextWindow <= 0 && ledger.compactionCeilingTokens
 			? `autocompact at ceiling (${ledger.compactionAuto ? "auto" : "manual"}; serving window unknown)`
@@ -283,10 +398,17 @@ function renderContextLedgerLines(
 	const ceilingTokens = ledger.compactionCeilingTokens ?? 0;
 	const ceiling =
 		ceilingTokens > 0 && (ledger.contextWindow <= 0 || ceilingTokens < ledger.contextWindow)
-			? ` · cleanup ceiling ${formatTokens(ceilingTokens)} tokens`
-			: "";
-	const footer = toolsLabel ? `${compaction}${ceiling} · ${toolsLabel}` : `${compaction}${ceiling}`;
-	lines.push(theme.fg("annotation", footer));
+			? `cleanup ceiling ${count(ceilingTokens)} tokens`
+			: null;
+	// Wrapped between its facts, never inside one, so a narrow body never leaves a row ending in a bare `·`.
+	const facts = [compaction, ceiling, toolsLabel].map((fact) => (fact === null ? null : theme.fg("annotation", fact)));
+	for (const row of chipRows(theme, facts, contentWidth)) lines.push(row);
+	if (sections !== "provenance") return lines;
+
+	if (workingSet && workingSet.evicted.size > 0) lines.push(renderEvictedTokensLine(evictedTokens(workingSet), theme));
+	if (workingSet) {
+		for (const line of renderWorkingSetLines(workingSet, workingSetConfig, recall)) lines.push(line);
+	}
 
 	// Cache facts are the newest main call's journal record (#434 §11.3), so an unreported cache read reads unknown,
 	// never 0. The session shell hash and the serving backend's timings are Clio's own and stay on the ledger. A server
@@ -295,8 +417,9 @@ function renderContextLedgerLines(
 	const call = telemetry?.calls({ roles: ["main"], limit: 1 }).calls[0] ?? null;
 	if (cache || call) {
 		const shell = cache ? (cache.shellReused ? "shell reused" : "shell recompiled") : "shell n/a";
-		if (!hasTelemetry) lines.push(theme.fg("annotation", `prompt cache: ${shell} · cache facts not available`));
-		else if (!call?.usage) lines.push(theme.fg("annotation", `prompt cache: ${shell} · no settled call yet`));
+		if (!hasTelemetry)
+			lines.push(theme.fg("annotation", `prompt cache: ${shell} ${GLYPH.dot} cache facts not available`));
+		else if (!call?.usage) lines.push(theme.fg("annotation", `prompt cache: ${shell} ${GLYPH.dot} no settled call yet`));
 		else {
 			const verdict = call.cache.verdict;
 			const readFact = call.usage.cacheRead.fact;
@@ -315,21 +438,21 @@ function renderContextLedgerLines(
 			// A partial or cold call charged again some of the prefix the previous request had; the journal counts it.
 			const rePrefilled =
 				verdict === "partial" || verdict === "cold"
-					? ["·", `re-prefilled ${renderUpperBound(call.cache.rePrefilled.fact, call.cache.rePrefilled.display)}`]
+					? [GLYPH.dot, `re-prefilled ${renderUpperBound(call.cache.rePrefilled.fact, call.cache.rePrefilled.display)}`]
 					: [];
 			const line = backendCacheReadsUnknown
-				? ["prompt cache:", shell, "·", backend].join(" ")
+				? ["prompt cache:", shell, GLYPH.dot, backend].join(" ")
 				: [
 						"prompt cache:",
 						shell,
-						"·",
+						GLYPH.dot,
 						backend,
 						...rePrefilled,
-						"·",
+						GLYPH.dot,
 						serverRead === undefined
 							? `cache read ${call.usage.cacheRead.display}`
 							: `server cache read ${formatTokens(serverRead)}`,
-						"·",
+						GLYPH.dot,
 						`uncached prefill ${call.cache.uncachedPrefill.display}`,
 					].join(" ");
 			// Reasons Clio recorded before the call describe either prefix-byte changes
@@ -348,8 +471,8 @@ function renderContextLedgerLines(
 				const evaluated = uncachedPrefillTokens(cache.backend);
 				const prefill =
 					evaluated !== null
-						? `server prefill: ${formatTokens(evaluated)} evaluated · ${formatTokens(cache.backend.promptTokens - evaluated)} cached · ${formatTokens(cache.backend.promptMs)} ms`
-						: `server prefill: ${formatTokens(cache.backend.promptTokens)} prompt · ${formatTokens(cache.backend.promptMs)} ms`;
+						? `server prefill: ${formatTokens(evaluated)} evaluated ${GLYPH.dot} ${formatTokens(cache.backend.promptTokens - evaluated)} cached ${GLYPH.dot} ${formatTokens(cache.backend.promptMs)} ms`
+						: `server prefill: ${formatTokens(cache.backend.promptTokens)} prompt ${GLYPH.dot} ${formatTokens(cache.backend.promptMs)} ms`;
 				lines.push(theme.fg("annotation", prefill));
 			}
 			if (coldReasons.length > 0) {
@@ -451,7 +574,7 @@ export function openContextOverlay(
 			buildResponsiveHint(
 				body.overflows()
 					? [
-							{ key: "↑↓", verb: "scroll", critical: true },
+							{ key: `${GLYPH.up}${GLYPH.down}`, verb: "scroll", critical: true },
 							{ key: "PgUp/PgDn", verb: "page" },
 						]
 					: [],
@@ -476,6 +599,8 @@ export function openContextOverlay(
 	};
 
 	const unsubscribes: Array<() => void> = [];
+	// The rows are cut by the tier, so a tier change rebuilds them and the open overlay redraws on the next frame.
+	unsubscribes.push(onPresentationTierChange(refresh));
 	if (options?.bus) {
 		unsubscribes.push(options.bus.subscribe("context.pruned", refresh));
 	}

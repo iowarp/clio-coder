@@ -1174,7 +1174,7 @@ describe("Pi TUI compatibility", () => {
 			}
 		};
 		doesNotMatch(footer(400_000), /ceiling/u);
-		match(footer(100_000), /autocompact at 80% \(auto\) · cleanup ceiling 100,000 tokens/u);
+		match(footer(100_000), /autocompact at 80% \(auto\) · cleanup ceiling 100k tokens/u);
 	});
 
 	it("words a partial cache reuse with the re-prefilled count the call's journal records", () => {
@@ -1200,6 +1200,8 @@ describe("Pi TUI compatibility", () => {
 			showOverlay: () => ({ hide() {} }),
 			requestRender() {},
 		} as unknown as TUI;
+		// Prompt cache rows are provenance: `/context` shows them at detailed only.
+		setPresentationTier("detailed");
 		const handle = openContextOverlay(tui, ledger, { telemetry: { live: () => view, subscribe: () => () => {} } });
 		try {
 			const plain = (dockTop(tui)?.frame.renderDockBody(120, 60) ?? []).map(stripTerminalSequences).join("\n");
@@ -1207,6 +1209,7 @@ describe("Pi TUI compatibility", () => {
 			doesNotMatch(plain, /backend reused/u);
 		} finally {
 			handle.hide();
+			setPresentationTier("standard");
 		}
 	});
 
@@ -1253,6 +1256,8 @@ describe("Pi TUI compatibility", () => {
 			showOverlay: () => ({ hide() {} }),
 			requestRender() {},
 		} as unknown as TUI;
+		// Prompt cache rows are provenance: `/context` shows them at detailed only.
+		setPresentationTier("detailed");
 		const handle = openContextOverlay(tui, ledger, { telemetry: { live: () => view, subscribe: () => () => {} } });
 		try {
 			const plain = (dockTop(tui)?.frame.renderDockBody(140, 60) ?? []).map(stripTerminalSequences).join("\n");
@@ -1261,6 +1266,7 @@ describe("Pi TUI compatibility", () => {
 			doesNotMatch(plain, /does not report cache reads/u);
 		} finally {
 			handle.hide();
+			setPresentationTier("standard");
 		}
 	});
 
