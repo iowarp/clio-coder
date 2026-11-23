@@ -1,72 +1,52 @@
-/** Presentation budgets for the same captured session. Detailed is still bounded. */
+/** The transcript slice of the presentation tier table. Detailed is still bounded. */
 import type { OutputStyle } from "../core/defaults.js";
+import { presentationTier, type TierPolicy, tierPolicy } from "../core/presentation-tier.js";
 
-export interface TranscriptDetailPolicy {
+export interface TranscriptDetailPolicy
+	extends Pick<
+		TierPolicy,
+		| "reasoningRows"
+		| "reasoningBeforeActionRows"
+		| "invocationRows"
+		| "resultRows"
+		| "liveResultRows"
+		| "bashRows"
+		| "operatorBashRows"
+		| "diffRows"
+		| "workerRows"
+		| "workerActivity"
+		| "errorRows"
+		| "receipt"
+	> {
 	style: OutputStyle;
-	/** Rows of reasoning shown before Clio's words and while reasoning streams; 0 folds it to a marker. */
-	reasoningRows: number;
-	/** Rows of reasoning shown before an action; 0 folds it to a marker, 1 keeps one line of its last paragraph. */
-	reasoningBeforeActionRows: number;
-	invocationRows: number;
-	resultRows: number;
-	liveResultRows: number;
-	bashRows: number;
-	operatorBashRows: number;
-	diffRows: number;
-	workerRows: number;
-	workerActivity: boolean;
-	errorRows: number;
-	receipt: "none" | "compact" | "full";
 }
 
-const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
-	compact: {
-		style: "compact",
-		invocationRows: 4,
-		reasoningRows: 0,
-		reasoningBeforeActionRows: 0,
-		resultRows: 0,
-		liveResultRows: 0,
-		bashRows: 0,
-		operatorBashRows: 3,
-		diffRows: 0,
-		workerRows: 0,
-		workerActivity: false,
-		errorRows: 4,
-		receipt: "none",
-	},
-	standard: {
-		style: "standard",
-		invocationRows: 8,
-		reasoningRows: 3,
-		reasoningBeforeActionRows: 1,
-		resultRows: 0,
-		liveResultRows: 6,
-		bashRows: 3,
-		operatorBashRows: 6,
-		diffRows: 8,
-		workerRows: 3,
-		workerActivity: false,
-		errorRows: 4,
-		receipt: "compact",
-	},
-	detailed: {
-		style: "detailed",
-		invocationRows: 18,
-		reasoningRows: 12,
-		reasoningBeforeActionRows: 12,
-		resultRows: 8,
-		liveResultRows: 16,
-		bashRows: 12,
-		operatorBashRows: 12,
-		diffRows: 20,
-		workerRows: 8,
-		workerActivity: true,
-		errorRows: 12,
-		receipt: "full",
-	},
+function slice(tier: OutputStyle): TranscriptDetailPolicy {
+	const policy = tierPolicy(tier);
+	return {
+		style: policy.tier,
+		reasoningRows: policy.reasoningRows,
+		reasoningBeforeActionRows: policy.reasoningBeforeActionRows,
+		invocationRows: policy.invocationRows,
+		resultRows: policy.resultRows,
+		liveResultRows: policy.liveResultRows,
+		bashRows: policy.bashRows,
+		operatorBashRows: policy.operatorBashRows,
+		diffRows: policy.diffRows,
+		workerRows: policy.workerRows,
+		workerActivity: policy.workerActivity,
+		errorRows: policy.errorRows,
+		receipt: policy.receipt,
+	};
+}
+
+const SLICES: Readonly<Record<OutputStyle, TranscriptDetailPolicy>> = {
+	compact: slice("compact"),
+	standard: slice("standard"),
+	detailed: slice("detailed"),
 };
 
-export function transcriptDetail(style: OutputStyle = "standard"): TranscriptDetailPolicy {
-	return POLICIES[style];
+/** The transcript budgets of `style`, or of the current presentation tier when none is named. */
+export function transcriptDetail(style: OutputStyle = presentationTier()): TranscriptDetailPolicy {
+	return SLICES[style];
 }

@@ -214,7 +214,8 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"chat.retry.streamStallMs": "How long CLIO Coder waits when a model stops sending text mid-answer.",
 	"chat.retry.firstTokenStallMs": "How long CLIO Coder waits for a model to start its answer.",
 	"interface.terminalProgress": "Show running-task progress in terminals that support tab or taskbar badges.",
-	"interface.outputDetail": "How much reasoning, tool input, and live tool output appears in the transcript.",
+	"interface.outputDetail":
+		"How much evidence every terminal surface shows inline: outcomes, bounded evidence, or provenance and telemetry.",
 	"interface.mode": "Use regular terminal scrollback or a fullscreen transcript with a sticky composer and footer.",
 	"interface.fullscreenScrollbar": "When the draggable transcript scrollbar is visible in fullscreen mode.",
 	"interface.smoothStreaming": "Presentation-only pacing for streamed assistant text and thinking.",
@@ -335,7 +336,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"safety.review.cadenceToolCalls":
 		"Set a tool count to check work during a long turn. Leave blank to review only when the turn ends.",
 	"interface.keybindings":
-		"Alt+O cycles output detail: Minimal, Default, Detailed across terminal surfaces. Use /view for full reasoning and action details. Shift+Tab changes model thinking effort.",
+		"Alt+O cycles output detail: compact, standard, detailed across terminal surfaces. Use /view for full reasoning and action details. Shift+Tab changes model thinking effort.",
 };
 
 /** Per-value meaning, surfaced for the current value of an enum knob. */
@@ -409,9 +410,9 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		false: "no terminal progress badges",
 	},
 	"interface.outputDetail": {
-		compact: "quiet action summaries, answers, and visible failures",
-		standard: "short reasoning and change previews, clear action outcomes",
-		detailed: "larger bounded previews; full content is available in /view",
+		compact: "outcomes: states, blockers and next actions",
+		standard: "adds bounded evidence and short previews",
+		detailed: "adds provenance, ids and telemetry",
 	},
 	"interface.mode": {
 		regular: "preserve terminal scrollback and render the composer below the transcript",
@@ -775,7 +776,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"interface.demo": [
 		"Demo presentation and guidance",
-		"Welcome presentation and optional learning tips, bounded by output detail. Minimal stays quiet; Default shows a compact launchpad; Detailed adds artwork and shortcut hints. Off starts with an identity header, skips welcome-only reads, and stops tips and the guidance profile. Immediate controls and warnings remain. Stream pacing, motion preferences and permissions are independent.",
+		"Welcome presentation and optional learning tips, bounded by output detail. Compact stays quiet; standard shows a short launchpad; detailed adds artwork and shortcut hints. Off starts with an identity header, skips welcome-only reads, and stops tips and the guidance profile. Immediate controls and warnings remain. Stream pacing, motion preferences and permissions are independent.",
 	],
 	"interface.guiTurnCapacity": [
 		"Graphical app turns at once",

@@ -2,6 +2,12 @@ import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:asse
 import { test } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, nextOutputStyle, type OutputStyle } from "../../src/core/defaults.js";
+import {
+	onPresentationTierChange,
+	presentationTier,
+	setPresentationTier,
+	tierRevision,
+} from "../../src/core/presentation-tier.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
 import { ScrollView, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
@@ -629,4 +635,17 @@ test("a shell row names the model that asked for it only when the turn had more 
 	reply("model-b");
 	const failover = panel.render(120).map(stripTerminalSequences).join("\n");
 	match(failover, /\$ CLIO Coder ran `npm test` \(requested by [^)]*model-a[^)]*\)/iu, failover);
+});
+
+test("W0-1: a subscribed listener sees two tier changes as two notifications and the revision rises by two", () => {
+	const start = presentationTier();
+	const before = tierRevision();
+	const seen: OutputStyle[] = [];
+	const off = onPresentationTierChange((tier) => seen.push(tier));
+	const first: OutputStyle = start === "detailed" ? "compact" : "detailed";
+	setPresentationTier(first);
+	setPresentationTier(start);
+	off();
+	deepStrictEqual(seen, [first, start]);
+	strictEqual(tierRevision() - before, 2);
 });

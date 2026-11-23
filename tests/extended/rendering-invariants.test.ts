@@ -2827,7 +2827,7 @@ describe("transcript block grammar", () => {
 		}
 	});
 
-	it("ends a Minimal turn with one row: its outcome glyph and elapsed time, and no spend", () => {
+	it("ends a compact turn with one row: its outcome word and elapsed time, and no spend", () => {
 		const view = telemetryViewOf(
 			"brief",
 			telemetryCall("brief", { turnId: "brief", usage: { input: 10, output: 5 }, usd: null }),
@@ -2840,7 +2840,7 @@ describe("transcript block grammar", () => {
 		const rows = plainRender(panel, 100).split("\n");
 		const ends = rows.filter((row) => row.startsWith(`${GLYPH.ok} `));
 		strictEqual(ends.length, 1, rows.join("\n"));
-		ok(/^\S+ \d[\d.]*(ms|s|m)\b/u.test(ends[0] ?? "") && !/Done|in 10|out 5/u.test(ends[0] ?? ""), ends[0]);
+		ok(/^\S+\sDone\s·\s\d[\d.]*(ms|s|m)\b/u.test(ends[0] ?? "") && !/in 10|out 5/u.test(ends[0] ?? ""), ends[0]);
 		ok(rows.indexOf(ends[0] ?? "") > rows.findIndex((row) => row.includes("Hi.")), rows.join("\n"));
 	});
 

@@ -237,7 +237,7 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 				context,
 				"clio-coder.output.cycle",
 				(key) =>
-					`${key} cycles output detail: Minimal folds tool trails; Detailed shows bounded previews. /view opens full details.`,
+					`${key} cycles output detail: compact folds tool trails; detailed shows bounded previews. /view opens full details.`,
 			),
 	},
 	{

@@ -97,7 +97,7 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio-coder.output.cycle": {
 		defaultKeys: "alt+o",
 		label: "Output detail",
-		description: "Cycle output detail: Minimal, Default, Detailed",
+		description: "Cycle output detail: compact, standard, detailed",
 		scope: "composer",
 		kind: "cycle",
 		repeat: false,
