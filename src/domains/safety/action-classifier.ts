@@ -536,9 +536,35 @@ function hasStableTempDirReferences(command: string): boolean {
 }
 
 function expandTempDirReferences(command: string): string {
-	if (!command.includes("TMPDIR") || !hasStableTempDirReferences(command)) return command;
+	if (!command.includes("TMPDIR")) return command;
+	if (!hasStableTempDirReferences(command)) return expandLeadingSourceOperand(command);
 	const value = stableTempDir();
 	if (value === null) return command;
+	return spellTempDir(command, value);
+}
+
+/**
+ * FX-8: a command that opens with `source FILE` or `. FILE` expands that step's own words before anything in it runs,
+ * so their `$TMPDIR` is this process's temp directory even when the file itself may rebind TMPDIR for what follows.
+ * Only that step's operands are spelled out, so the floor reads the sourced file instead of handing a scratch home's
+ * env file to the judge as a name built at run time; every later reference stays as written.
+ */
+function expandLeadingSourceOperand(command: string): string {
+	const script = parseShellScript(command);
+	const step = script?.items[0]?.andOr.pipelines[0]?.commands[0];
+	const [head, first] = step?.words ?? [];
+	if (step === undefined || head === undefined || first === undefined || step.assignments.length > 0) return command;
+	const name = staticWordValue(head);
+	if (name !== "source" && name !== ".") return command;
+	const operands = command.slice(first.start, step.end);
+	if (!operands.includes("TMPDIR") || !hasStableTempDirReferences(operands)) return command;
+	const value = stableTempDir();
+	if (value === null) return command;
+	return `${command.slice(0, first.start)}${spellTempDir(operands, value)}${command.slice(step.end)}`;
+}
+
+/** Each `$TMPDIR` and `${TMPDIR}` the shell expands in `command`, spelled as `value`. */
+function spellTempDir(command: string, value: string): string {
 	let out = "";
 	let single = false;
 	let double = false;

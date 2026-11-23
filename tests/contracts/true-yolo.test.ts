@@ -1311,6 +1311,8 @@ test("a script child the floor cannot place or read is judged at contained yolo 
 		"bash run.sh",
 		"bash version.sh",
 		'source "$HOME/.venv/bin/activate" && true',
+		// FX-8: a leading `source` expands its own `$TMPDIR` before the file can rebind it, so a scratch env file is read.
+		`source "$TMPDIR/${relative(process.env.TMPDIR as string, cwd)}/plain.sh" && node dist/cli/index.js --version`,
 	]) {
 		strictEqual(engine.evaluate(bash(command), level, contained).kind, "allow", command);
 	}
