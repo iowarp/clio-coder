@@ -66,8 +66,10 @@ export const SAFETY_JUDGE_MAX_OUTPUT_TOKENS = 400;
 export const SAFETY_JUDGE_OPERATOR_BYTES = 6 * 1024;
 /** Ceiling on the newest operator message, so one pasted log cannot fill the judge's window. */
 const NEWEST_MESSAGE_MAX_BYTES = 24 * 1024;
-/** Older operator messages the judge reads at most. */
+/** Older operator messages the judge reads at most, besides the session's opening message. */
 const OPERATOR_MESSAGE_LIMIT = 12;
+/** Ceiling on the session's opening message once newer messages have spent the budget. */
+const OPENING_MESSAGE_MAX_BYTES = 6 * 1024;
 /** A bash command is shown whole up to this many characters. */
 const COMMAND_MAX_CHARS = 16_000;
 /** Head of written or replacement content shown to the judge. */
@@ -819,7 +821,10 @@ function safetyJudgeRefusal(
 /**
  * The operator text the judge reads, oldest first: the newest message whole
  * (up to a hard ceiling), then older messages while they fit the budget, the
- * first one that does not fit cut to what is left. `words` holds only the
+ * first one that does not fit cut to what is left. The session's opening message
+ * is always read beside them, cut to its own ceiling when the budget is spent: it
+ * holds the request the whole session serves, so an action it names stays named
+ * however many messages follow (FX-4). `words` holds only the
  * operator's own words among them. `approved` holds, for each kept ask_user round
  * the operator answered affirmatively with its question and answer whole, the
  * question and what the chosen options say: the text the operator approved, which
@@ -865,7 +870,7 @@ function boundOperatorMessages(
 	if (newest === undefined) return { shown: [], words: [], approved: [], escapes: [] };
 	const kept = [cut(newest, NEWEST_MESSAGE_MAX_BYTES)];
 	let used = Buffer.byteLength(kept[0]?.shown ?? "", "utf8");
-	for (let index = texts.length - 2; index >= 0 && kept.length < OPERATOR_MESSAGE_LIMIT; index -= 1) {
+	for (let index = texts.length - 2; index >= 1 && kept.length < OPERATOR_MESSAGE_LIMIT; index -= 1) {
 		const text = texts[index] as Bounded;
 		const size = Buffer.byteLength(text.shown, "utf8");
 		if (used + size <= budgetBytes) {
@@ -877,6 +882,8 @@ function boundOperatorMessages(
 		if (left >= 200) kept.unshift(cut(text, left));
 		break;
 	}
+	const opening = texts.length > 1 ? texts[0] : undefined;
+	if (opening !== undefined) kept.unshift(cut(opening, Math.max(budgetBytes - used, OPENING_MESSAGE_MAX_BYTES)));
 	return {
 		shown: kept.map((text) => text.shown),
 		words: kept.flatMap((text) => (text.words.length > 0 ? [text.words] : [])),

@@ -637,6 +637,18 @@ test("the judge reads the operator's messages and the call, never assistant text
 	match(prompts[0]?.system ?? "", /rewrite-history: force-push or rewrite shared history/u);
 });
 
+test("the judge always reads the session's opening message, however many operator messages follow it (FX-4)", async () => {
+	const opening = "Operator authorization: you may run tmux on $TMPDIR/tmux.sock outside the sandbox.";
+	const between = Array.from({ length: 14 }, (_, index) => `steer ${index + 1}: ${"x".repeat(300)}`);
+	const operator = [opening, ...between, "carry on with the frame check"];
+	const { registry, prompts } = judgedRegistry(() => answer("allow", "operator-named", "Asked for."), operator);
+	await registry.invoke({ tool: ToolNames.Bash, args: { command: UNRECOGNIZED } });
+	const user = prompts[0]?.user ?? "";
+	match(user, /<operator-messages>\nMessage 1 of \d+:\nOperator authorization: you may run tmux/u);
+	match(user, /\(newest\):\ncarry on with the frame check/u);
+	doesNotMatch(user, /steer 1:/u);
+});
+
 test("the judge reads a gateway MCP tool's trusted class and description beside its arguments", async () => {
 	const { registry, prompts, records } = judgedRegistry(
 		() => answer("block", "operator-deny", "It writes a file the operator forbade."),
