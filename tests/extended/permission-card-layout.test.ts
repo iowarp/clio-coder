@@ -27,8 +27,16 @@ import {
 } from "../../src/interactive/permission-overlay.js";
 import { createPermissionSettleWindow, PERMISSION_SETTLE_MS } from "../../src/interactive/permission-settle.js";
 import { renderToolAwaitingApproval } from "../../src/interactive/renderers/tool-execution.js";
-import { clioTheme } from "../../src/interactive/theme/index.js";
-import { keyCap } from "../../src/interactive/theme/primitives.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
+import {
+	fitSides,
+	heightClass,
+	keyCap,
+	openIsland,
+	type SideUnit,
+	statusChip,
+	widthClass,
+} from "../../src/interactive/theme/primitives.js";
 import type { UnattendedTimers } from "../../src/interactive/unattended-countdown.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
@@ -563,4 +571,98 @@ test("an open worker card leaves when another Clio process answered its ask, and
 	} finally {
 		lifecycle.dispose();
 	}
+});
+
+test("shared primitives fit the status line, open an island and mark a pending chip", () => {
+	const theme = clioTheme();
+	const mark: SideUnit = { text: ">C_", lead: true };
+	const autonomy = (word: string): SideUnit => (word === "default" ? { text: word, drop: 5 } : { text: word });
+	const cwd = (full: string, tail2: string, base: string): SideUnit => ({
+		text: full,
+		shorter: [
+			{ text: `~/…/${tail2}`, rank: 0 },
+			{ text: tail2, rank: 2 },
+			{ text: base, rank: 2 },
+		],
+		drop: 7,
+	});
+	const branch = (name: string): SideUnit => ({ text: name, drop: 6 });
+	const route = (model: string): SideUnit[] => [{ text: "copilot", drop: 3 }, { text: model }];
+	const standard = cwd("~/clio-gym/tmp/v090night/tui-capture/proj/standard", "proj/standard", "standard");
+	const panes = cwd("~/clio-gym/tmp/v090night/lead-panes/proj", "lead-panes/proj", "proj");
+	const cases: Array<[SideUnit[], SideUnit[], number, string]> = [
+		[
+			[mark, autonomy("default"), { text: "proj/compact" }, branch("main*")],
+			[{ text: "gpt-6-luna" }],
+			80,
+			">C_ default · proj/compact · main*                                    gpt-6-luna",
+		],
+		[
+			[mark, autonomy("default"), standard, branch("main*")],
+			[{ text: "0.30 credits", drop: 1 }, ...route("gpt-6-luna")],
+			80,
+			">C_ default · ~/…/proj/standard · main*      0.30 credits · copilot · gpt-6-luna",
+		],
+		[
+			[mark, autonomy("default"), standard, branch("main*")],
+			[
+				{ text: "2 workers", drop: 8 },
+				{ text: "1 queued", drop: 4 },
+				{ text: "0.30 credits", drop: 1 },
+				...route("gpt-6-luna"),
+			],
+			80,
+			">C_ default · proj/standard · main*  2 workers · 1 queued · copilot · gpt-6-luna",
+		],
+		[
+			[mark, autonomy("YOLO"), { text: "proj/compact" }, branch("main*")],
+			[{ text: "gpt-6-luna" }],
+			80,
+			">C_ YOLO · proj/compact · main*                                       gpt-6-luna",
+		],
+		[
+			[mark, autonomy("default"), panes, branch("main")],
+			route("gpt-6-luna"),
+			65,
+			">C_ default · ~/…/lead-panes/proj · main     copilot · gpt-6-luna",
+		],
+		[[mark, autonomy("default"), panes, branch("main")], route("gpt-6-luna"), 33, ">C_ proj · main        gpt-6-luna"],
+		[
+			[mark, autonomy("YOLO"), panes, branch("main")],
+			[
+				{ text: "copilot", drop: 3 },
+				{
+					text: "anthropic/claude-sonnet-5.5-20261101",
+					shorter: [{ text: "claude-sonnet-5.5-20261101", rank: 9 }],
+					elide: { rank: 10, min: 12 },
+				},
+			],
+			33,
+			">C_ YOLO   claude-sonnet…20261101",
+		],
+	];
+	for (const [left, right, width, expected] of cases) {
+		const row = fitSides(theme, left, right, width);
+		strictEqual(visibleWidth(row), width);
+		strictEqual(stripTerminalSequences(row), expected);
+	}
+	const island = openIsland(theme, "Summary", ["a fact row that is long enough to wrap at forty cells wide"], 40);
+	match(stripTerminalSequences(island[0] ?? ""), /^Summary ─+$/u);
+	for (const row of island.slice(1)) match(stripTerminalSequences(row), /^ {2}\S/u);
+	ok(island.every((row) => visibleWidth(row) <= 40));
+	strictEqual(
+		stripTerminalSequences(statusChip(theme, "pending", "waiting for you")),
+		`${GLYPH.phaseBlocked} waiting for you`,
+	);
+	deepStrictEqual([43, 44, 71, 72, 111, 112, 151, 152].map(widthClass), [
+		"W1",
+		"W2",
+		"W2",
+		"W3",
+		"W3",
+		"W4",
+		"W4",
+		"W5",
+	]);
+	deepStrictEqual([19, 20, 29, 30, 43, 44].map(heightClass), ["H1", "H2", "H2", "H3", "H3", "H4"]);
 });

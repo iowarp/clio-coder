@@ -39,8 +39,8 @@ import {
 	clioTheme,
 	emptyState,
 	factRows,
-	formatCompactMs,
 	formatContextPercent,
+	formatElapsed,
 	GLYPH,
 	meter,
 	metricText,
@@ -222,7 +222,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 			...(state.background ?? []).map((call) =>
 				theme.fg(
 					"activity",
-					`${call.purpose} on ${modelNickname(call.model)} · ${formatCompactMs(state.now - call.startedAt)}`,
+					`${call.purpose} on ${modelNickname(call.model)} · ${formatElapsed(state.now - call.startedAt)}`,
 				),
 			),
 			streaming ? formattedThroughput(theme, state.throughput, undefined) : null,

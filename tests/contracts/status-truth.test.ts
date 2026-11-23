@@ -1484,7 +1484,7 @@ test("a key on a worker card holds that ask, restarts the ones queued behind it,
 		fallback: "deny",
 		at: 0,
 	} as never);
-	match(notices.at(-1) ?? "", /nobody answered in the 15m(?:0s)? it was held/u);
+	match(notices.at(-1) ?? "", /nobody answered in the 15m00s it was held/u);
 	lifecycle.dispose();
 });
 
@@ -2032,7 +2032,7 @@ test("a tool's run is not model silence: the next call's wait never counts from 
 	row.observe(status, clock);
 	match(
 		stripTerminalSequences(rows.flatMap((render) => render(200)).join("\n")),
-		/No output from Claude-haiku-5-5 for 1m0s/u,
+		/No output from Claude-haiku-5-5 for 1m00s/u,
 	);
 	const quiet = { ...status, lastMeaningfulAt: t0 + 303_000 };
 	const note = silenceNoteForms(quiet, t0 + 398_000, DEFAULT_RETRY_SETTINGS, null)?.[0] ?? "";
@@ -2052,7 +2052,7 @@ test("a quiet tool past the stuck threshold reads as that tool running, never as
 	const quiet = machine.advance(STUCK_AFTER_MS + 1_000);
 	strictEqual(quiet.phase, "stuck");
 	strictEqual(quiet.resumePhase, "tool_running");
-	strictEqual(resolveFooterVerb(quiet, machine.now(), 120)?.text, "Running bash · 3m1s");
+	strictEqual(resolveFooterVerb(quiet, machine.now(), 120)?.text, "Running bash · 3m01s");
 	const pill = stripTerminalSequences(
 		buildHarnessStatePill(clioTheme(), quiet, { active: 1 } as never, 0, machine.now(), 120),
 	);

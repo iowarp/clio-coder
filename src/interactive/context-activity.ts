@@ -17,7 +17,7 @@ import {
 	showsContextResult,
 	unchangedTokenLead,
 } from "./context-operation-view.js";
-import { animationStep, clioTheme, formatCompactMs, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
+import { animationStep, clioTheme, formatElapsed, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
 
 export interface ContextActivitySnapshot {
 	operation?: ContextActivityPayload["operation"];
@@ -91,7 +91,7 @@ export function formatContextActivityRailLines(
 	const failed = activity.status === "failed" && !cancelled;
 	const stages = phasesFor(activity);
 	const index = done ? stages.length : Math.max(0, stages.indexOf(activity.phase));
-	const elapsed = formatCompactMs(Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs));
+	const elapsed = formatElapsed(Math.max(0, (activity.completedAtMs ?? now) - activity.startedAtMs));
 	const tone = outcome ? outcomeTone(outcome) : failed ? "error" : done ? "success" : "contextAction";
 	const glyph = cancelled
 		? GLYPH.cancelled

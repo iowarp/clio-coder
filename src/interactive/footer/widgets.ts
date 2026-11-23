@@ -31,8 +31,8 @@ import {
 import type { ClioTheme, ClioToken } from "../theme/index.js";
 import {
 	FUNCTION_ROLES,
-	formatCompactMs,
 	formatContextPercent,
+	formatElapsed,
 	GLYPH,
 	joinChips,
 	padAnsi,
@@ -296,7 +296,7 @@ function reasoningChip(theme: ClioTheme, reasoning: ReasoningUsageView): string 
 export function lastTurnOutcome(theme: ClioTheme, lastTurn: TurnSummary): string {
 	const stop = stopReasonStyle(lastTurn.stopReason);
 	const work = Math.max(0, lastTurn.elapsedMs - (lastTurn.humanWaitMs ?? 0));
-	return `${theme.fg(stop.token, stop.glyph)} ${theme.fg("counter", formatCompactMs(work))}`;
+	return `${theme.fg(stop.token, stop.glyph)} ${theme.fg("counter", formatElapsed(work))}`;
 }
 
 /** Tokens are the journal's for the whole turn, workers included; timing and tools are the turn's own status. */
@@ -663,7 +663,7 @@ export function compactionRailLabel(
 		[
 			{ text: room >= 40 ? head : tight, keep: 9 },
 			// Past ten seconds the clock reads as the transcript instrument's does, so the two never disagree by a second.
-			{ text: elapsed < 1 ? null : elapsed < 10 ? `${elapsed}s` : formatCompactMs(elapsedMs), keep: 8 },
+			{ text: elapsed < 1 ? null : elapsed < 10 ? `${elapsed}s` : formatElapsed(elapsedMs), keep: 8 },
 			{ ...ESC_CANCELS, text: facts?.phase === "state" ? null : ESC_CANCELS.text, keep: RAIL_ACTION_KEEP },
 		],
 		room,
@@ -811,7 +811,7 @@ function slotHolders(slots: ModelRequestSlots): { used: number; words: string } 
 
 function wholeSeconds(ms: number): string {
 	const seconds = Math.floor(ms / 1000);
-	return seconds < 10 ? `${seconds}s` : formatCompactMs(seconds * 1000);
+	return seconds < 10 ? `${seconds}s` : formatElapsed(seconds * 1000);
 }
 
 /**
@@ -985,7 +985,7 @@ function modelWaitFacts(status: AgentStatus, now: number, from: number, server: 
 function silentStreamFacts(status: AgentStatus, now: number): ReadonlyArray<RailFact> {
 	const silentMs = Math.max(0, now - status.lastMeaningfulAt);
 	const tier = computeWatchdogTier(silentMs);
-	const age = formatCompactMs(Math.floor(silentMs / 1000) * 1000);
+	const age = formatElapsed(Math.floor(silentMs / 1000) * 1000);
 	return [
 		{ text: tier >= 1 ? `no new output for ${age}` : null, short: `silent ${age}`, keep: 8 },
 		{ text: tier >= 3 ? "may be stuck" : null, keep: 4 },
@@ -1088,7 +1088,7 @@ function toolActivity(
 			{
 				text:
 					verb === null && tier >= 3 && !mine && !judging
-						? `no output for ${formatCompactMs(Math.floor(silentMs / 1000) * 1000)}`
+						? `no output for ${formatElapsed(Math.floor(silentMs / 1000) * 1000)}`
 						: null,
 				keep: 5,
 			},
@@ -1134,7 +1134,7 @@ export function composerPhasePresentation(
 	const elapsedFrom = (from: number): string | null => {
 		const elapsed = Math.floor((now - from) / 1000);
 		if (elapsed < 1) return null;
-		return elapsed < 10 ? `${elapsed}s` : formatCompactMs(elapsed * 1000);
+		return elapsed < 10 ? `${elapsed}s` : formatElapsed(elapsed * 1000);
 	};
 	const quiet = computeWatchdogTier(Math.max(0, now - status.lastMeaningfulAt)) >= 3;
 	/** A wait that stood behind admission is a new wait once admission ends: the request only just went out. */
@@ -1262,7 +1262,7 @@ export function composerPhasePresentation(
 				const silentMs = Math.max(0, now - status.lastMeaningfulAt);
 				label = fit([
 					{ text: room >= 40 ? "has no new output" : "no new output", keep: 9 },
-					{ text: formatCompactMs(Math.floor(silentMs / 1000) * 1000), keep: 8 },
+					{ text: formatElapsed(Math.floor(silentMs / 1000) * 1000), keep: 8 },
 					{ text: "may be stuck", keep: 4 },
 					{ ...ESC_CANCELS, keep: RAIL_ACTION_KEEP },
 					{ ...MODEL_AFTER_ESC, keep: 6 },

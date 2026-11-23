@@ -22,7 +22,7 @@ import {
 	chipRows,
 	clioTheme,
 	emptyState,
-	formatCompactMs,
+	formatElapsed,
 	GLYPH,
 	meter,
 	NARROW_WIDTH,
@@ -377,7 +377,7 @@ export function quotaWaitWords(binding: BindingQuotaWindow | null, now = Date.no
 	if (binding === null) return "waiting for quota · window unknown (no reading linked to this route) · reset unknown";
 	const read = binding.observedAt === null ? null : Date.parse(binding.observedAt);
 	const age =
-		read === null || !Number.isFinite(read) ? "never read" : `read ${formatCompactMs(Math.max(0, now - read))} ago`;
+		read === null || !Number.isFinite(read) ? "never read" : `read ${formatElapsed(Math.max(0, now - read))} ago`;
 	return `waiting for quota on ${bindingWindowWords(binding, now)} · ${age}`;
 }
 

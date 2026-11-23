@@ -16,7 +16,7 @@ import type { BackgroundCall } from "../background-calls.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { AgentStatus } from "../status/index.js";
 import type { ClioTheme } from "../theme/index.js";
-import { formatCompactMs, formatWaitClock, GLYPH } from "../theme/index.js";
+import { formatElapsed, formatWaitClock, GLYPH } from "../theme/index.js";
 import { modelNickname } from "../theme/labels.js";
 import { type CompactionRailFacts, composerPhasePresentation } from "./widgets.js";
 
@@ -133,7 +133,7 @@ function workerSummary(facts: LiveWorkFacts, width: number, cap = width): string
 function backgroundSummary(facts: LiveWorkFacts, width: number): string | null {
 	const call = facts.background[0];
 	if (call === undefined) return null;
-	const elapsed = formatCompactMs(Math.max(0, facts.now - call.startedAt));
+	const elapsed = formatElapsed(Math.max(0, facts.now - call.startedAt));
 	const others = facts.background.length - 1;
 	return [
 		width >= 60 ? `${call.purpose} on ${modelNickname(call.model)}` : call.purpose,

@@ -1,3 +1,4 @@
+import { asciiOnly } from "../../core/terminal-preferences.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
 import { fitIdentityLabel, keyName } from "./labels.js";
@@ -52,6 +53,30 @@ export function toneRole(tone: Tone): SemanticRole {
 
 /** Below this width labels stack above their values and a choice's consequence takes its own row. */
 export const NARROW_WIDTH = 48;
+
+/**
+ * The width class of the cells a surface may paint, never of the terminal: W1 under 44, W2 44 to 71, W3 72 to 111,
+ * W4 112 to 151, W5 from 152. A surface passes the same measured width to this, its tables and its fact rows.
+ */
+export type WidthClass = "W1" | "W2" | "W3" | "W4" | "W5";
+
+export function widthClass(measured: number): WidthClass {
+	if (measured < 44) return "W1";
+	if (measured < 72) return "W2";
+	if (measured < 112) return "W3";
+	if (measured < 152) return "W4";
+	return "W5";
+}
+
+/** The height class of the terminal's rows: H1 under 20, H2 20 to 29, H3 30 to 43, H4 from 44. */
+export type HeightClass = "H1" | "H2" | "H3" | "H4";
+
+export function heightClass(rows: number): HeightClass {
+	if (rows < 20) return "H1";
+	if (rows < 30) return "H2";
+	if (rows < 44) return "H3";
+	return "H4";
+}
 
 /** Where an oversized token may fold: after a path, option or list separator. */
 const FOLD_AFTER = new Set(["/", "-", "_", ".", "=", ",", ";", ":", "&", "|"]);
@@ -136,7 +161,7 @@ const STATUS_GLYPH: Readonly<Record<StatusKind, string>> = {
 	running: GLYPH.running,
 	queued: GLYPH.queued,
 	cancelled: GLYPH.cancelled,
-	pending: GLYPH.phaseWaiting,
+	pending: GLYPH.phaseBlocked,
 };
 
 const STATUS_TONE: Readonly<Record<StatusKind, Tone>> = {
@@ -218,6 +243,141 @@ export function chipRows(theme: ClioTheme, chips: ReadonlyArray<string | null | 
 	return rows;
 }
 
+/** One unit of a {@link fitSides} row: a fact that is kept whole, shortened to a form it supplies, or dropped. */
+export interface SideUnit {
+	/** The full form, plain text. */
+	text: string;
+	/** Paints a form of the unit; plain when omitted. */
+	paint?: (text: string) => string;
+	/** Joined to the next unit by one space instead of ` · `: a mark that leads its group (`>C_ default`). */
+	lead?: boolean;
+	/** Rank at which the unit drops whole; lower goes first. Omitted, the unit never drops. */
+	drop?: number;
+	/** Shorter forms, each replacing the form before it at its rank. */
+	shorter?: ReadonlyArray<{ text: string; rank: number }>;
+	/** At this rank the unit is elided in the middle, at its separators, to the room left, and to no fewer than `min` cells. */
+	elide?: { rank: number; min: number };
+}
+
+/** Cells between the two groups of a {@link fitSides} row, at least. */
+const SIDES_GAP = 2;
+
+const ELIDE_SEPARATORS = new Set(["-", ".", "_", "/", "@", ":"]);
+
+/**
+ * An identifier in at most `room` cells with its middle replaced by `…`, cut only at separators so both ends stay
+ * whole tokens: `claude-sonnet-5.5-20261101` in 23 cells is `claude-sonnet…20261101`. An id with no separator to cut
+ * at goes through the identity fitter.
+ */
+function elideAtSeparators(value: string, room: number): string {
+	if (visibleWidth(value) <= room) return value;
+	const cuts: number[] = [];
+	for (let index = 0; index < value.length; index += 1) if (ELIDE_SEPARATORS.has(value[index] ?? "")) cuts.push(index);
+	let best: string | null = null;
+	let bestWidth = -1;
+	for (const headEnd of cuts) {
+		if (headEnd === 0) continue;
+		const head = value.slice(0, headEnd);
+		for (const tailCut of cuts) {
+			if (tailCut < headEnd || tailCut >= value.length - 1) continue;
+			const candidate = `${head}${GLYPH.ellipsis}${value.slice(tailCut + 1)}`;
+			const width = visibleWidth(candidate);
+			if (width <= room && width > bestWidth) {
+				best = candidate;
+				bestWidth = width;
+			}
+		}
+	}
+	return best ?? fitIdentityLabel(value, room);
+}
+
+interface SideState {
+	unit: SideUnit;
+	text: string;
+	dropped: boolean;
+	form: number;
+}
+
+/**
+ * One row of exactly `width` cells: `left` units at the left edge, `right` units at the right edge, at least two
+ * spaces between them. While the row is too wide, units are reduced in rank order: a unit moves to its next shorter
+ * form, is elided in its middle, or drops whole. A unit is never cut inside unless it supplied the form that does it,
+ * so the row says less rather than something cut mid-word. Only when every reduction is spent is the row clipped,
+ * and then it closes with `…`.
+ */
+export function fitSides(
+	theme: ClioTheme,
+	left: ReadonlyArray<SideUnit>,
+	right: ReadonlyArray<SideUnit>,
+	width: number,
+): string {
+	const safe = Math.max(0, Math.floor(width));
+	const separator = dotSep(theme);
+	const separatorWidth = visibleWidth(separator);
+	const sides = [left, right].map((units) =>
+		units.map((unit): SideState => ({ unit, text: unit.text, dropped: false, form: -1 })),
+	);
+	const groupWidth = (states: ReadonlyArray<SideState>): number => {
+		const kept = states.filter((state) => !state.dropped);
+		return kept.reduce(
+			(sum, state, index) =>
+				sum + visibleWidth(state.text) + (index === 0 ? 0 : kept[index - 1]?.unit.lead === true ? 1 : separatorWidth),
+			0,
+		);
+	};
+	const rowWidth = (): number => {
+		const [l = 0, r = 0] = sides.map(groupWidth);
+		return l + r + (l > 0 && r > 0 ? SIDES_GAP : 0);
+	};
+	type Step = { rank: number; state: SideState; kind: "form" | "elide" | "drop"; form: number };
+	const steps: Step[] = [];
+	for (const state of sides.flat()) {
+		state.unit.shorter?.forEach((form, index) => {
+			steps.push({ rank: form.rank, state, kind: "form", form: index });
+		});
+		if (state.unit.elide !== undefined) steps.push({ rank: state.unit.elide.rank, state, kind: "elide", form: -1 });
+		if (state.unit.drop !== undefined) steps.push({ rank: state.unit.drop, state, kind: "drop", form: -1 });
+	}
+	// A stable sort keeps the caller's order among equal ranks.
+	steps.sort((a, b) => a.rank - b.rank);
+	for (const step of steps) {
+		if (rowWidth() <= safe) break;
+		const { state } = step;
+		if (state.dropped) continue;
+		if (step.kind === "drop") {
+			state.dropped = true;
+		} else if (step.kind === "form") {
+			const form = state.unit.shorter?.[step.form];
+			if (form === undefined || step.form <= state.form) continue;
+			state.form = step.form;
+			state.text = form.text;
+		} else {
+			const room = safe - (rowWidth() - visibleWidth(state.text));
+			state.text = elideAtSeparators(state.text, Math.max(state.unit.elide?.min ?? 1, room));
+		}
+	}
+	const paintGroup = (states: ReadonlyArray<SideState>): string => {
+		const kept = states.filter((state) => !state.dropped);
+		return kept
+			.map((state, index) => {
+				const painted = state.unit.paint === undefined ? state.text : state.unit.paint(state.text);
+				if (index === 0) return painted;
+				return `${kept[index - 1]?.unit.lead === true ? " " : separator}${painted}`;
+			})
+			.join("");
+	};
+	const [leftStates = [], rightStates = []] = sides;
+	const leftRow = paintGroup(leftStates);
+	const rightRow = paintGroup(rightStates);
+	const used = visibleWidth(leftRow) + visibleWidth(rightRow);
+	const gap = leftRow.length > 0 && rightRow.length > 0 ? SIDES_GAP : 0;
+	if (used + gap > safe) {
+		const joined = gap > 0 ? `${leftRow}${" ".repeat(gap)}${rightRow}` : `${leftRow}${rightRow}`;
+		return truncateToWidth(joined, safe, GLYPH.ellipsis, true);
+	}
+	return `${leftRow}${" ".repeat(safe - used)}${rightRow}`;
+}
+
 export interface SectionRuleOptions {
 	/** Dim text at the right end of the rule: a count, a scope, a key. */
 	meta?: string;
@@ -240,6 +400,38 @@ export function sectionRule(theme: ClioTheme, width: number, label: string, opti
 		...(options.token === undefined ? {} : { leftToken: options.token }),
 		...(options.meta === undefined ? {} : { right: options.meta }),
 	});
+}
+
+/** Options for {@link openIsland}. */
+export interface OpenIslandOptions {
+	/** Dim text at the right end of the title rule: a count, an age, a scope. */
+	meta?: string;
+	/** Keys that follow the body; they close the island on a light rule. Without keys there is no bottom rule. */
+	keys?: string;
+}
+
+/**
+ * An out-of-flow summary without a box: a titled light rule, body rows indented 2 and wrapped to the room left, and
+ * no bottom rule unless keys follow. Every row is at most `width` cells.
+ */
+export function openIsland(
+	theme: ClioTheme,
+	title: string,
+	lines: ReadonlyArray<string>,
+	width: number,
+	options: OpenIslandOptions = {},
+): string[] {
+	const safe = Math.max(1, Math.floor(width));
+	const rows = [sectionRule(theme, safe, title, options.meta === undefined ? {} : { meta: options.meta })];
+	const room = Math.max(1, safe - 2);
+	for (const line of lines) {
+		for (const row of line.length === 0 ? [""] : wrap(line, room))
+			rows.push(row.length === 0 ? "" : `  ${clip(row, room)}`);
+	}
+	if (options.keys !== undefined && options.keys.length > 0) {
+		rows.push(rule(theme, safe, { right: clip(options.keys, Math.max(1, safe - 4)), rightRaw: true }));
+	}
+	return rows;
 }
 
 /** A bold section label with an optional dim count, for a region that needs no rule. */
@@ -546,6 +738,26 @@ export function meter(theme: ClioTheme, options: MeterOptions): string {
 		theme.fg(fillRole, GLYPH.meterFull.repeat(filled)) + theme.fg("meterFree", GLYPH.meterEmpty.repeat(bar - filled));
 	const right = amount ? ` ${theme.fg("metricValue", amount)}` : "";
 	return padAnsi(`${left()}${painted}${right}`, safe);
+}
+
+/** One-row history steps, lowest first; the ASCII ramp keeps eight distinct steps. */
+const SPARK_STEPS = asciiOnly() ? ".:-=+*#@" : "▁▂▃▄▅▆▇█";
+
+/**
+ * A one-row history (`▁▂▅█▃`), one cell per value, newest at the right; values beyond `width` drop from the
+ * oldest end. Steps scale from zero to the largest value shown, so an all-zero history is a flat floor.
+ */
+export function sparkline(theme: ClioTheme, values: ReadonlyArray<number>, width: number): string {
+	const safe = Math.max(0, Math.floor(width));
+	const shown = values.slice(Math.max(0, values.length - safe)).map((value) => (Number.isFinite(value) ? value : 0));
+	if (shown.length === 0) return "";
+	const steps = [...SPARK_STEPS];
+	const top = Math.max(0, ...shown);
+	const cells = shown.map((value) => {
+		const level = top > 0 ? Math.round((Math.max(0, value) / top) * (steps.length - 1)) : 0;
+		return steps[level] ?? steps[0] ?? "";
+	});
+	return theme.fg("meterFill", cells.join(""));
 }
 
 export interface SelectionRowOptions {

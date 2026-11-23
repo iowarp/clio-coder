@@ -27,7 +27,7 @@ import type {
 	PermissionCountdownReader,
 	WorkerWindowReader,
 } from "./permission-overlay.js";
-import { formatCompactMs } from "./theme/index.js";
+import { formatElapsed } from "./theme/index.js";
 import { startUnattendedCountdown, type UnattendedCountdown, type UnattendedTimers } from "./unattended-countdown.js";
 
 /**
@@ -585,8 +585,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		const after = fallback === "fail" ? "and the worker run fails" : "and the worker carries on without it";
 		const waited =
 			heldFor !== undefined
-				? `in the ${formatCompactMs(heldFor)} it was held`
-				: `in ${entry.timeoutMs === undefined ? "its window" : formatCompactMs(entry.timeoutMs)}`;
+				? `in the ${formatElapsed(heldFor)} it was held`
+				: `in ${entry.timeoutMs === undefined ? "its window" : formatElapsed(entry.timeoutMs)}`;
 		const what =
 			cause === "timeout"
 				? `${call} was denied: nobody answered ${waited}. It did not run, ${after}.`

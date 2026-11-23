@@ -18,7 +18,7 @@ import { redactSecretString } from "../../domains/safety/redaction.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { fitFooterText } from "../footer-panel.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
-import { clioTheme, formatCompactMs, GLYPH, sectionRule } from "../theme/index.js";
+import { clioTheme, formatElapsed, GLYPH, sectionRule } from "../theme/index.js";
 
 export type NotificationLevel = "info" | "success" | "warning" | "error";
 
@@ -592,11 +592,11 @@ export function formatNotificationPanel(
 	const lifetime = (entry: Notification): string => {
 		if (options.now === undefined) return "";
 		if (entry.expiresAt === null) return " · stays until resolved";
-		return ` · clears in ${formatCompactMs(Math.ceil(Math.max(0, entry.expiresAt - options.now) / 1000) * 1000)}`;
+		return ` · clears in ${formatElapsed(Math.ceil(Math.max(0, entry.expiresAt - options.now) / 1000) * 1000)}`;
 	};
 	for (const entry of entries.slice(0, maxRows)) row(entry, "notice", lifetime(entry));
 	for (const entry of ended) {
-		const age = options.now === undefined ? "" : ` · ${formatCompactMs(Math.max(0, options.now - entry.addedAt))} ago`;
+		const age = options.now === undefined ? "" : ` · ${formatElapsed(Math.max(0, options.now - entry.addedAt))} ago`;
 		row(entry, "annotation", age);
 	}
 	const overflow = entries.length - maxRows;

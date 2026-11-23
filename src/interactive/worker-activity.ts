@@ -1,3 +1,4 @@
+import { formatCountdown } from "../core/format-time.js";
 import type { CompletedRunCaveat } from "../domains/dispatch/failure-headline.js";
 import { DEFAULT_HEARTBEAT_SPEC } from "../domains/dispatch/heartbeat.js";
 import type {
@@ -9,7 +10,6 @@ import { type RouteFirstOutput, usualFirstOutput } from "./footer/silence-note.j
 import { TIER_THRESHOLDS_MS } from "./status/watchdog.js";
 import type { ClioToken } from "./theme/index.js";
 import { formatWaitClock, GLYPH } from "./theme/index.js";
-import { formatUnattendedRemaining } from "./unattended-countdown.js";
 
 /**
  * What a running worker is doing when no call is in flight, by the phase its
@@ -283,7 +283,7 @@ export function approvalWaitWords(
 ): string {
 	const window = progress.approvalWindow;
 	if (window === undefined) return WAITING_FOR_APPROVAL;
-	const left = formatUnattendedRemaining(window.expiresAt - (options.now ?? Date.now()));
+	const left = formatCountdown(window.expiresAt - (options.now ?? Date.now()));
 	const held = window.held ? ["held"] : [];
 	const denied = `denied in ${left}`;
 	const fails = window.fallback === "fail";

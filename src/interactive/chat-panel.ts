@@ -101,7 +101,7 @@ import {
 import {
 	clioTheme,
 	fgSequence,
-	formatCompactMs,
+	formatElapsed,
 	GLYPH,
 	joinFacts,
 	markdownTheme,
@@ -2405,8 +2405,8 @@ function renderTurnUsageLine(
 function receiptDuration(usage: ChatPanelTurnUsage): string {
 	if (usage.elapsedMs === undefined) return "";
 	const waited = usage.humanWaitMs ?? 0;
-	if (waited < 1000) return ` · ${formatCompactMs(usage.elapsedMs)}`;
-	return ` · ${formatCompactMs(Math.max(0, usage.elapsedMs - waited))} work · ${formatCompactMs(waited)} waiting on you`;
+	if (waited < 1000) return ` · ${formatElapsed(usage.elapsedMs)}`;
+	return ` · ${formatElapsed(Math.max(0, usage.elapsedMs - waited))} work · ${formatElapsed(waited)} waiting on you`;
 }
 
 const PROMPT_RECALL_FACT = `${GLYPH.up} recalls your prompt`;
