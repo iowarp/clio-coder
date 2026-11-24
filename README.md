@@ -2,7 +2,14 @@
   <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/banner.webp" alt="CLIO Coder, IOWarp's open-source coding agent for scientific computing and HPC" width="100%" />
 </p>
 
-# CLIO Coder
+# CLIO Coder (archived)
+
+CLIO Coder is archived as of November 2026 and receives no further releases. Its coding
+capabilities continue in [CLIO Agent](https://github.com/iowarp/clio-agent), part of the
+IOWarp CLIO ecosystem.
+
+Release 0.8.4 stays installable from npm as `@iowarp/clio-coder` under the Apache-2.0
+license. The source and history remain here, read-only.
 
 **An open-source coding agent for any model you have, from a GPU in your lab to a frontier API, that shows you the checks behind what it says.**
 
